@@ -59,6 +59,18 @@ class GeminiService:
             )
 
             response = self.model.generate_content(full_prompt, request_options=request_options)
+
+            # 빈 응답 체크
+            if not response.candidates or len(response.candidates) == 0:
+                logger.warning("Gemini generate: candidates가 없습니다")
+                return ""
+
+            candidate = response.candidates[0]
+            if not candidate.content or not candidate.content.parts or len(candidate.content.parts) == 0:
+                finish_reason = getattr(candidate, 'finish_reason', None)
+                logger.warning(f"Gemini generate: content.parts가 없습니다. finish_reason={finish_reason}")
+                return ""
+
             return response.text.strip()
         except Exception as e:
             logger.error(f"Gemini 생성 오류: {e}")
@@ -119,10 +131,50 @@ class GeminiService:
 
             response = chat.send_message(last_message, request_options=request_options)
 
-            # 응답 파싱
-            if response.candidates[0].content.parts[0].function_call:
+            # 전체 응답 디버깅
+            logger.info(f"Gemini 전체 응답: {response}")
+            if hasattr(response, 'prompt_feedback'):
+                logger.info(f"Gemini prompt_feedback: {response.prompt_feedback}")
+
+            # 응답 파싱 - 빈 응답 체크
+            if not response.candidates or len(response.candidates) == 0:
+                logger.warning("Gemini 응답에 candidates가 없습니다")
+                return {
+                    "type": "text",
+                    "content": "죄송합니다. AI가 응답을 생성하지 못했습니다. 다시 시도해주세요.",
+                    "raw_response": response
+                }
+
+            candidate = response.candidates[0]
+
+            # finish_reason 확인 (디버깅)
+            finish_reason = getattr(candidate, 'finish_reason', None)
+            logger.info(f"Gemini finish_reason: {finish_reason}")
+
+            if not candidate.content or not candidate.content.parts or len(candidate.content.parts) == 0:
+                # 왜 빈 응답인지 상세 로깅
+                safety_ratings = getattr(candidate, 'safety_ratings', [])
+                logger.warning(f"Gemini 응답에 content.parts가 없습니다. finish_reason={finish_reason}, safety_ratings={safety_ratings}")
+
+                # SAFETY로 차단된 경우
+                if finish_reason and 'SAFETY' in str(finish_reason):
+                    return {
+                        "type": "text",
+                        "content": "죄송합니다. 해당 질문에 대한 답변을 생성할 수 없습니다. 다른 방식으로 질문해주세요.",
+                        "raw_response": response
+                    }
+
+                # 빈 응답 - 기본 메시지 반환
+                return {
+                    "type": "text",
+                    "content": "죄송합니다. AI가 응답을 생성하지 못했습니다. 다시 시도해주세요.",
+                    "raw_response": response
+                }
+
+            first_part = candidate.content.parts[0]
+            if hasattr(first_part, 'function_call') and first_part.function_call and first_part.function_call.name:
                 # Function Call 발생
-                fc = response.candidates[0].content.parts[0].function_call
+                fc = first_part.function_call
                 return {
                     "type": "function_call",
                     "function_call": {

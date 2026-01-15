@@ -115,73 +115,97 @@ class AgentService:
             # 1단계: 해시태그 추출 (질문에서 키워드 분석)
             print(f"   📋 [1단계] 질문 분석 중...")
             print(f"   원본 질문: \"{query}\"")
-            
+
             query_lower = query.lower()
-            extracted_hashtags = []
-            
-            # 연도 추출
             import re
-            year_match = re.search(r'(2025|2026|2027)', query)
+
+            # ⚠️ 필수 조건: 연도와 대학명 (이 태그가 있는 문서만 검색)
+            required_year = None
+            required_univ = None
+
+            # 연도 추출 (필수 조건)
+            year_match = re.search(r'(2024|2025|2026|2027|2028)', query)
             if year_match:
-                extracted_hashtags.append(f'#{year_match.group()}')
-                print(f"   ✓ 연도 감지: #{year_match.group()}")
-            
-            # 대학명 추출
-            universities = ['서울대', '연세대', '고려대', '성균관대', '한양대', '중앙대', '경희대', '이화여대']
+                required_year = f'#{year_match.group()}'
+                print(f"   ✓ [필수] 연도 감지: {required_year}")
+
+            # 대학명 추출 (필수 조건)
+            universities = ['서울대', '연세대', '고려대', '성균관대', '한양대', '중앙대', '경희대', '이화여대', '건국대', '동국대', '홍익대', '숙명여대', '국민대', '숭실대', '세종대', '단국대', '인하대', '아주대', '카이스트', '포스텍']
             for univ in universities:
                 if univ in query:
-                    extracted_hashtags.append(f'#{univ}')
-                    print(f"   ✓ 대학명 감지: #{univ}")
-            
-            # 문서 성격 추출
-            if any(word in query for word in ['요강', '모집', '전형']):
-                extracted_hashtags.append('#모집요강')
-                print(f"   ✓ 문서 성격: #모집요강")
-            elif any(word in query for word in ['입결', '경쟁률', '커트', '합격선']):
-                extracted_hashtags.append('#입결통계')
-                print(f"   ✓ 문서 성격: #입결통계")
-            elif any(word in query for word in ['논술', '면접', '기출']):
-                extracted_hashtags.append('#고사자료')
-                print(f"   ✓ 문서 성격: #고사자료")
-            
-            # 전형 구분
-            if '수시' in query:
-                extracted_hashtags.append('#수시')
-                print(f"   ✓ 전형: #수시")
-            if '정시' in query:
-                extracted_hashtags.append('#정시')
-                print(f"   ✓ 전형: #정시")
-            
-            print(f"   🏷️ 최종 추출 해시태그: {extracted_hashtags}")
+                    required_univ = f'#{univ}'
+                    print(f"   ✓ [필수] 대학명 감지: {required_univ}")
+                    break  # 첫 번째 대학만
 
-            # 2단계: 해시태그 매칭 + 키워드 매칭으로 문서 찾기
+            # 선택 조건: 문서 성격, 전형 구분
+            optional_hashtags = []
+
+            # 문서 성격 추출 (선택)
+            if any(word in query for word in ['요강', '모집', '전형']):
+                optional_hashtags.append('#모집요강')
+                print(f"   ✓ [선택] 문서 성격: #모집요강")
+            elif any(word in query for word in ['입결', '경쟁률', '커트', '합격선']):
+                optional_hashtags.append('#입결통계')
+                print(f"   ✓ [선택] 문서 성격: #입결통계")
+            elif any(word in query for word in ['논술', '면접', '기출']):
+                optional_hashtags.append('#고사자료')
+                print(f"   ✓ [선택] 문서 성격: #고사자료")
+
+            # 전형 구분 (선택)
+            if '수시' in query:
+                optional_hashtags.append('#수시')
+                print(f"   ✓ [선택] 전형: #수시")
+            if '정시' in query:
+                optional_hashtags.append('#정시')
+                print(f"   ✓ [선택] 전형: #정시")
+
+            print(f"   🏷️ 필수 조건: 연도={required_year}, 대학={required_univ}")
+            print(f"   🏷️ 선택 조건: {optional_hashtags}")
+
+            # 2단계: 해시태그 매칭으로 문서 찾기 (필수 조건 적용)
             print(f"\n   📋 [2단계] 문서 검색 중...")
             print(f"   전체 문서 수: {len(metadata_response.data)}개")
-            
+
             relevant_docs = []
             query_keywords = query_lower.split()
 
             for doc in metadata_response.data:
                 title = doc.get('title', '').lower()
                 summary = doc.get('summary', '').lower()
-                doc_hashtags = doc.get('hashtags', [])
-                
+                doc_hashtags = doc.get('hashtags', []) or []
+
+                # ⚠️ 필수 조건 체크: 연도가 지정되었으면 해당 연도 태그가 있어야 함
+                if required_year and required_year not in doc_hashtags:
+                    continue  # 연도 불일치 → 제외
+
+                # ⚠️ 필수 조건 체크: 대학명이 지정되었으면 해당 대학 태그가 있어야 함
+                if required_univ and required_univ not in doc_hashtags:
+                    continue  # 대학 불일치 → 제외
+
                 score = 0
                 matched_info = []
-                
-                # 해시태그 매칭 (우선순위 높음)
-                if doc_hashtags and extracted_hashtags:
-                    matching_tags = set(doc_hashtags) & set(extracted_hashtags)
-                    if matching_tags:
-                        score += len(matching_tags) * 10  # 해시태그 매칭은 10점
-                        matched_info.append(f"태그 {len(matching_tags)}개 일치: {matching_tags}")
-                
-                # 키워드 매칭 (기존 방식, 우선순위 낮음)
+
+                # 필수 조건 충족 시 기본 점수
+                if required_year and required_year in doc_hashtags:
+                    score += 20
+                    matched_info.append(f"연도 일치: {required_year}")
+                if required_univ and required_univ in doc_hashtags:
+                    score += 20
+                    matched_info.append(f"대학 일치: {required_univ}")
+
+                # 선택 조건 매칭 (추가 점수)
+                if doc_hashtags and optional_hashtags:
+                    matching_optional = set(doc_hashtags) & set(optional_hashtags)
+                    if matching_optional:
+                        score += len(matching_optional) * 5
+                        matched_info.append(f"선택 태그 {len(matching_optional)}개: {matching_optional}")
+
+                # 키워드 매칭 (보조)
                 keyword_matches = sum(1 for kw in query_keywords if kw in title or kw in summary)
                 if keyword_matches > 0:
                     score += keyword_matches
-                    matched_info.append(f"키워드 {keyword_matches}개 일치")
-                
+                    matched_info.append(f"키워드 {keyword_matches}개")
+
                 if score > 0:
                     print(f"   • {doc.get('title')} (점수: {score}) - {', '.join(matched_info)}")
                     print(f"     해시태그: {doc_hashtags}")
@@ -196,16 +220,88 @@ class AgentService:
                 print(f"{'='*80}\n")
                 return {"found": False, "content": "", "sources": [], "source_urls": []}
 
-            print(f"\n   ✅ 최종 선택: 상위 {min(3, len(relevant_docs))}개 문서")
+            print(f"\n   ✅ 해시태그 매칭: {len(relevant_docs)}개 문서 후보")
 
-            # 2. 관련 문서의 전체 청크 가져오기
-            print(f"\n   📋 [3단계] 문서 내용 로드 중...")
-            
+            # ============================================================
+            # 3단계: 요약본(목차) 기반 2차 필터링
+            # ============================================================
+            print(f"\n   📋 [3단계] 요약본 기반 문서 선별 중...")
+
+            # 후보 문서들의 요약본 목록 생성
+            docs_summary_list = []
+            for idx, doc in enumerate(relevant_docs[:10], 1):  # 최대 10개까지만
+                title = doc.get('title', '제목 없음')
+                summary = doc.get('summary', '요약 없음')
+                hashtags = doc.get('hashtags', [])
+                docs_summary_list.append(
+                    f"{idx}. 제목: {title}\n   해시태그: {', '.join(hashtags) if hashtags else '없음'}\n   요약(목차): {summary[:500]}"
+                )
+
+            docs_summary_text = "\n\n".join(docs_summary_list)
+
+            print(f"   후보 문서 수: {len(docs_summary_list)}개")
+
+            # Gemini로 요약본 기반 문서 선별
+            filter_prompt = f"""다음 문서들의 요약본(목차)을 읽고, 사용자 질문에 답변하는데 필요한 정보가 있는 문서만 선택하세요.
+
+사용자 질문: "{query}"
+
+문서 목록:
+{docs_summary_text}
+
+**선택 기준:**
+1. 질문에 답변하는데 필요한 구체적인 정보(수치, 날짜, 정원, 전형 방법 등)가 포함된 문서만 선택
+2. 관련 없는 문서는 제외
+3. 최대 3개까지만 선택
+
+**답변 형식:**
+관련 문서가 있으면: 번호만 쉼표로 구분 (예: 1, 3)
+관련 문서가 없으면: 없음"""
+
+            try:
+                filter_result = await gemini_service.generate(
+                    filter_prompt,
+                    "당신은 문서 필터링 전문가입니다. 요약본을 보고 실제로 필요한 정보가 있는 문서만 정확하게 선별합니다."
+                )
+                print(f"   Gemini 선별 결과: {filter_result}")
+
+                # 빈 응답인 경우 (API 오류) → fallback 사용
+                if not filter_result.strip():
+                    print("   ⚠️ Gemini 빈 응답, 상위 3개 문서 사용")
+                    selected_docs = relevant_docs[:3]
+                elif "없음" in filter_result.lower():
+                    print("   ❌ 요약본 분석 결과: 관련 문서 없음")
+                    print(f"{'='*80}\n")
+                    return {"found": False, "content": "", "sources": [], "source_urls": []}
+                else:
+                    # 번호 추출
+                    import re
+                    selected_indices = [int(n.strip())-1 for n in re.findall(r'\d+', filter_result)]
+                    selected_docs = [relevant_docs[i] for i in selected_indices if i < len(relevant_docs)]
+
+                    if not selected_docs:
+                        print("   ⚠️ 번호 파싱 실패, 상위 3개 문서 사용")
+                        selected_docs = relevant_docs[:3]
+                    else:
+                        print(f"   ✅ 요약본 기반 선별: {len(selected_docs)}개 문서")
+                        for doc in selected_docs:
+                            print(f"      - {doc.get('title')}")
+
+            except Exception as e:
+                print(f"   ⚠️ Gemini 요약본 분석 실패: {e}")
+                print(f"   → 해시태그 기반 상위 3개 문서 사용")
+                selected_docs = relevant_docs[:3]
+
+            # ============================================================
+            # 4단계: 선별된 문서의 전체 청크 가져오기
+            # ============================================================
+            print(f"\n   📋 [4단계] 문서 내용 로드 중...")
+
             full_content = ""
             sources = []
             source_urls = []
 
-            for idx, doc in enumerate(relevant_docs[:3], 1):  # 최대 3개 문서
+            for idx, doc in enumerate(selected_docs, 1):  # 요약본 기반 선별된 문서
                 filename = doc['file_name']
                 title = doc['title']
                 file_url = doc.get('file_url') or ''  # None이면 빈 문자열
@@ -240,7 +336,8 @@ class AgentService:
                         full_content += chunk['content']
                         full_content += "\n\n"
 
-            print(f"\n   📊 전체 문서 내용:")
+            print(f"\n   📊 로드된 문서 내용:")
+            print(f"       선별된 문서 수: {len(selected_docs)}개")
             print(f"       총 길이: {len(full_content):,}자")
             print(f"       앞부분 미리보기 (300자):")
             print(f"       {'-'*60}")
