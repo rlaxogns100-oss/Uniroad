@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     BACKEND_PORT: int = 8000
     FRONTEND_URL: str = "http://localhost:5173"
     
+    # PDF Parser
+    PDF_PARSER: str = "gemini"  # 'gemini' or 'llamaparse'
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
