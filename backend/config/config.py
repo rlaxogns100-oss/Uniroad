@@ -10,10 +10,7 @@ class Settings(BaseSettings):
     SUPABASE_URL: str
     SUPABASE_KEY: str
     
-    # OpenAI (임베딩용)
-    OPENAI_API_KEY: str
-    
-    # Gemini (채팅/분류용)
+    # Gemini (채팅/분류/임베딩용)
     GEMINI_API_KEY: str
     
     # Server
