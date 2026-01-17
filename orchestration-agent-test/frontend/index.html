@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Orchestration Agent Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* 왼쪽: 채팅창 */
+        .chat-panel {
+            width: 40%;
+            display: flex;
+            flex-direction: column;
+            background: #1a1a2e;
+            border-right: 1px solid #333;
+        }
+
+        .chat-header {
+            padding: 20px;
+            background: #0f3460;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .chat-header h2 {
+            color: #4ecca3;
+            font-size: 18px;
+        }
+
+        .clear-btn {
+            background: transparent;
+            border: 1px solid #e94560;
+            color: #e94560;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+
+        .clear-btn:hover {
+            background: #e94560;
+            color: white;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .message {
+            max-width: 85%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            line-height: 1.5;
+        }
+
+        .message.user {
+            background: #4ecca3;
+            color: #1a1a2e;
+            align-self: flex-end;
+            border-bottom-right-radius: 4px;
+        }
+
+        .message.assistant {
+            background: #2a2a4a;
+            color: #eee;
+            align-self: flex-start;
+            border-bottom-left-radius: 4px;
+            white-space: pre-line;
+        }
+
+        .message.system {
+            background: #333;
+            color: #888;
+            align-self: center;
+            font-size: 12px;
+            padding: 8px 16px;
+        }
+
+        .chat-input-container {
+            padding: 20px;
+            border-top: 1px solid #333;
+            background: #16213e;
+        }
+
+        .chat-input-wrapper {
+            display: flex;
+            gap: 12px;
+        }
+
+        .chat-input {
+            flex: 1;
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 24px;
+            padding: 12px 20px;
+            color: #eee;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .chat-input:focus {
+            border-color: #4ecca3;
+        }
+
+        .send-btn {
+            background: #4ecca3;
+            border: none;
+            border-radius: 50%;
+            width: 48px;
+            height: 48px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.2s, background 0.2s;
+        }
+
+        .send-btn:hover {
+            transform: scale(1.05);
+            background: #3db892;
+        }
+
+        .send-btn:disabled {
+            background: #333;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .send-btn svg {
+            width: 20px;
+            height: 20px;
+            fill: #1a1a2e;
+        }
+
+        /* 오른쪽: Orchestration Agent 결과 */
+        .orchestration-panel {
+            width: 60%;
+            display: flex;
+            flex-direction: column;
+            background: #16213e;
+        }
+
+        .orchestration-header {
+            padding: 20px;
+            background: #0f3460;
+            border-bottom: 1px solid #333;
+        }
+
+        .orchestration-header h2 {
+            color: #e94560;
+            font-size: 18px;
+            margin-bottom: 8px;
+        }
+
+        .orchestration-header p {
+            color: #888;
+            font-size: 13px;
+        }
+
+        .orchestration-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .result-section {
+            margin-bottom: 24px;
+        }
+
+        .result-section h3 {
+            color: #e94560;
+            font-size: 14px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .result-section h3::before {
+            content: '';
+            width: 4px;
+            height: 16px;
+            background: #e94560;
+            border-radius: 2px;
+        }
+
+        .json-display {
+            background: #0f0f23;
+            border-radius: 8px;
+            padding: 16px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .execution-plan-visual {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .step-card {
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 16px;
+            position: relative;
+            margin-left: 36px;
+        }
+
+        .step-card::before {
+            content: '';
+            position: absolute;
+            left: -20px;
+            top: 50%;
+            width: 12px;
+            height: 2px;
+            background: #e94560;
+        }
+
+        .step-number {
+            position: absolute;
+            left: -36px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 24px;
+            height: 24px;
+            background: #e94560;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .step-agent {
+            color: #4ecca3;
+            font-weight: bold;
+            margin-bottom: 4px;
+        }
+
+        .step-query {
+            color: #aaa;
+            font-size: 13px;
+        }
+
+        .answer-structure-visual {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .section-card {
+            background: #1a1a2e;
+            border-left: 3px solid #4ecca3;
+            padding: 12px 16px;
+            border-radius: 0 8px 8px 0;
+        }
+
+        .section-type {
+            display: inline-block;
+            background: #4ecca3;
+            color: #1a1a2e;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+
+        .section-instruction {
+            color: #ccc;
+            font-size: 13px;
+        }
+
+        .section-source {
+            color: #e94560;
+            font-size: 11px;
+            margin-top: 4px;
+        }
+
+        /* 에이전트 관리 패널 */
+        .agents-panel {
+            padding: 20px;
+            border-top: 1px solid #333;
+        }
+
+        .agents-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .agents-header h4 {
+            color: #888;
+            font-size: 13px;
+        }
+
+        .add-agent-btn {
+            background: #4ecca3;
+            border: none;
+            color: #1a1a2e;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .agent-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .agent-tag {
+            background: #2a2a4a;
+            border: 1px solid #333;
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .agent-tag .delete {
+            cursor: pointer;
+            color: #e94560;
+            font-weight: bold;
+        }
+
+        /* 로딩 애니메이션 */
+        .loading {
+            display: flex;
+            gap: 4px;
+            padding: 12px 16px;
+            align-self: flex-start;
+        }
+
+        .loading span {
+            width: 8px;
+            height: 8px;
+            background: #4ecca3;
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+
+        .loading span:nth-child(1) { animation-delay: -0.32s; }
+        .loading span:nth-child(2) { animation-delay: -0.16s; }
+
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+
+        /* 모달 */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 12px;
+            padding: 24px;
+            width: 500px;
+            max-width: 90%;
+        }
+
+        .modal h3 {
+            color: #4ecca3;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            color: #888;
+            font-size: 12px;
+            margin-bottom: 6px;
+        }
+
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            background: #0f0f23;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 10px 12px;
+            color: #eee;
+            font-size: 14px;
+        }
+
+        .form-group textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+            margin-top: 20px;
+        }
+
+        .modal-btn {
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            border: none;
+        }
+
+        .modal-btn.cancel {
+            background: #333;
+            color: #888;
+        }
+
+        .modal-btn.submit {
+            background: #4ecca3;
+            color: #1a1a2e;
+        }
+
+        /* 빈 상태 */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: #555;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            opacity: 0.3;
+        }
+
+        .empty-state p {
+            font-size: 14px;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 왼쪽: 채팅창 -->
+        <div class="chat-panel">
+            <div class="chat-header">
+                <h2>Chat</h2>
+                <button class="clear-btn" onclick="clearChat()">대화 초기화</button>
+            </div>
+            <div class="chat-messages" id="chatMessages">
+                <div class="message system">
+                    질문을 입력하면 Orchestration Agent가 계획을 수립합니다
+                </div>
+            </div>
+            <div class="chat-input-container">
+                <div class="chat-input-wrapper">
+                    <input
+                        type="text"
+                        class="chat-input"
+                        id="chatInput"
+                        placeholder="질문을 입력하세요... (예: 2.5등급인데 서울대 가고싶어)"
+                        onkeypress="handleKeyPress(event)"
+                    >
+                    <button class="send-btn" id="sendBtn" onclick="sendMessage()">
+                        <svg viewBox="0 0 24 24">
+                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 오른쪽: Orchestration Agent 결과 -->
+        <div class="orchestration-panel">
+            <div class="orchestration-header">
+                <h2>Orchestration Agent</h2>
+                <p>질문을 분석하여 Execution Plan과 Answer Structure를 생성합니다</p>
+            </div>
+            <div class="orchestration-content" id="orchestrationContent">
+                <div class="empty-state">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                    </svg>
+                    <p>채팅창에서 질문을 입력하면<br>Orchestration Agent의 계획이 여기에 표시됩니다</p>
+                </div>
+            </div>
+
+            <!-- 에이전트 관리 -->
+            <div class="agents-panel">
+                <div class="agents-header">
+                    <h4>등록된 Sub Agents</h4>
+                    <button class="add-agent-btn" onclick="openAgentModal()">+ 추가</button>
+                </div>
+                <div class="agent-list" id="agentList"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 에이전트 추가 모달 -->
+    <div class="modal-overlay" id="agentModal">
+        <div class="modal">
+            <h3>새 Sub Agent 추가</h3>
+            <div class="form-group">
+                <label>Agent Name (에이전트 이름)</label>
+                <input type="text" id="agentName" placeholder="예: ScheduleAgent">
+            </div>
+            <div class="form-group">
+                <label>Description (설명)</label>
+                <textarea id="agentDesc" placeholder="이 에이전트가 하는 일을 설명하세요"></textarea>
+            </div>
+            <div class="modal-buttons">
+                <button class="modal-btn cancel" onclick="closeAgentModal()">취소</button>
+                <button class="modal-btn submit" onclick="addAgent()">추가</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8080';
+        const sessionId = 'session_' + Date.now();
+
+        // 초기화
+        document.addEventListener('DOMContentLoaded', () => {
+            loadAgents();
+            document.getElementById('chatInput').focus();
+        });
+
+        // 에이전트 목록 로드
+        async function loadAgents() {
+            try {
+                const res = await fetch(`${API_BASE}/api/agents`);
+                const data = await res.json();
+                renderAgentList(data.agents);
+            } catch (e) {
+                console.error('Failed to load agents:', e);
+            }
+        }
+
+        // 에이전트 목록 렌더링
+        function renderAgentList(agents) {
+            const container = document.getElementById('agentList');
+            container.innerHTML = agents.map(agent => `
+                <div class="agent-tag" title="${agent.description}">
+                    <span>${agent.name}</span>
+                    <span class="delete" onclick="deleteAgent('${agent.name}')">&times;</span>
+                </div>
+            `).join('');
+        }
+
+        // 메시지 전송
+        async function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const message = input.value.trim();
+            if (!message) return;
+
+            const sendBtn = document.getElementById('sendBtn');
+            sendBtn.disabled = true;
+            input.value = '';
+
+            // 사용자 메시지 추가
+            addMessage(message, 'user');
+
+            // 로딩 표시
+            const loadingId = addLoading();
+
+            try {
+                const res = await fetch(`${API_BASE}/api/chat`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message, session_id: sessionId })
+                });
+
+                const data = await res.json();
+
+                // 로딩 제거
+                removeLoading(loadingId);
+
+                // Orchestration 결과 표시
+                renderOrchestrationResult(data.orchestration_result);
+
+                // 채팅에 요약 메시지 추가
+                if (data.orchestration_result.error) {
+                    addMessage(`오류: ${data.orchestration_result.error}`, 'assistant');
+                } else {
+                    const summary = `계획 수립 완료!\n- 실행 단계: ${data.orchestration_result.execution_plan?.length || 0}개\n- 답변 구조: ${data.orchestration_result.answer_structure?.length || 0}개 섹션`;
+                    addMessage(summary, 'assistant');
+                }
+
+            } catch (e) {
+                removeLoading(loadingId);
+                addMessage(`오류 발생: ${e.message}`, 'assistant');
+            }
+
+            sendBtn.disabled = false;
+            input.focus();
+        }
+
+        // 메시지 추가
+        function addMessage(text, role) {
+            const container = document.getElementById('chatMessages');
+            const msg = document.createElement('div');
+            msg.className = `message ${role}`;
+            msg.textContent = text;
+            container.appendChild(msg);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        // 로딩 추가
+        function addLoading() {
+            const container = document.getElementById('chatMessages');
+            const id = 'loading_' + Date.now();
+            const loading = document.createElement('div');
+            loading.id = id;
+            loading.className = 'loading';
+            loading.innerHTML = '<span></span><span></span><span></span>';
+            container.appendChild(loading);
+            container.scrollTop = container.scrollHeight;
+            return id;
+        }
+
+        // 로딩 제거
+        function removeLoading(id) {
+            const el = document.getElementById(id);
+            if (el) el.remove();
+        }
+
+        // Orchestration 결과 렌더링
+        function renderOrchestrationResult(result) {
+            const container = document.getElementById('orchestrationContent');
+
+            if (result.error) {
+                container.innerHTML = `
+                    <div class="result-section">
+                        <h3>오류</h3>
+                        <div class="json-display" style="color: #e94560;">${escapeHtml(result.error)}</div>
+                        ${result.detail ? `<div class="json-display" style="margin-top: 12px; font-size: 10px;">${escapeHtml(result.detail)}</div>` : ''}
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+
+            // 사용자 의도
+            if (result.user_intent) {
+                html += `
+                    <div class="result-section">
+                        <h3>사용자 의도</h3>
+                        <div class="json-display">${escapeHtml(result.user_intent)}</div>
+                    </div>
+                `;
+            }
+
+            // Execution Plan
+            if (result.execution_plan && result.execution_plan.length > 0) {
+                html += `
+                    <div class="result-section">
+                        <h3>Execution Plan (실행 계획)</h3>
+                        <div class="execution-plan-visual">
+                            ${result.execution_plan.map(step => `
+                                <div class="step-card">
+                                    <div class="step-number">${step.step}</div>
+                                    <div class="step-agent">${step.agent}</div>
+                                    ${step.target ? `<div style="color: #888; font-size: 12px;">Target: ${step.target}</div>` : ''}
+                                    <div class="step-query">${escapeHtml(step.query)}</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Answer Structure
+            if (result.answer_structure && result.answer_structure.length > 0) {
+                html += `
+                    <div class="result-section">
+                        <h3>Answer Structure (답변 구조)</h3>
+                        <div class="answer-structure-visual">
+                            ${result.answer_structure.map(section => `
+                                <div class="section-card">
+                                    <span class="section-type">${section.type}</span>
+                                    <div class="section-instruction">${escapeHtml(section.instruction)}</div>
+                                    ${section.source_from ? `<div class="section-source">← ${section.source_from}</div>` : ''}
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            // Notes
+            if (result.notes) {
+                html += `
+                    <div class="result-section">
+                        <h3>추가 지시사항</h3>
+                        <div class="json-display">${escapeHtml(result.notes)}</div>
+                    </div>
+                `;
+            }
+
+            // Raw JSON
+            html += `
+                <div class="result-section">
+                    <h3>Raw JSON</h3>
+                    <div class="json-display">${escapeHtml(JSON.stringify(result, null, 2))}</div>
+                </div>
+            `;
+
+            container.innerHTML = html;
+        }
+
+        // HTML 이스케이프
+        function escapeHtml(text) {
+            if (typeof text !== 'string') text = String(text);
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Enter 키 처리
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        // 대화 초기화
+        async function clearChat() {
+            try {
+                await fetch(`${API_BASE}/api/history/${sessionId}`, { method: 'DELETE' });
+            } catch (e) {}
+
+            document.getElementById('chatMessages').innerHTML = `
+                <div class="message system">
+                    질문을 입력하면 Orchestration Agent가 계획을 수립합니다
+                </div>
+            `;
+            document.getElementById('orchestrationContent').innerHTML = `
+                <div class="empty-state">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                    </svg>
+                    <p>채팅창에서 질문을 입력하면<br>Orchestration Agent의 계획이 여기에 표시됩니다</p>
+                </div>
+            `;
+        }
+
+        // 에이전트 모달 열기
+        function openAgentModal() {
+            document.getElementById('agentModal').classList.add('active');
+        }
+
+        // 에이전트 모달 닫기
+        function closeAgentModal() {
+            document.getElementById('agentModal').classList.remove('active');
+            document.getElementById('agentName').value = '';
+            document.getElementById('agentDesc').value = '';
+        }
+
+        // 에이전트 추가
+        async function addAgent() {
+            const agent = {
+                name: document.getElementById('agentName').value.trim(),
+                description: document.getElementById('agentDesc').value.trim()
+            };
+
+            if (!agent.name || !agent.description) {
+                alert('Name과 Description은 필수입니다.');
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_BASE}/api/agents`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(agent)
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail);
+                }
+
+                closeAgentModal();
+                loadAgents();
+            } catch (e) {
+                alert('에이전트 추가 실패: ' + e.message);
+            }
+        }
+
+        // 에이전트 삭제
+        async function deleteAgent(agentName) {
+            if (!confirm(`'${agentName}' 에이전트를 삭제하시겠습니까?`)) return;
+
+            try {
+                await fetch(`${API_BASE}/api/agents/${encodeURIComponent(agentName)}`, { method: 'DELETE' });
+                loadAgents();
+            } catch (e) {
+                alert('삭제 실패: ' + e.message);
+            }
+        }
+    </script>
+</body>
+</html>
