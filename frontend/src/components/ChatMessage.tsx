@@ -37,10 +37,97 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
 }
 
 /**
+ * 마크다운 표 파싱 및 렌더링
+ * 텍스트에서 표를 찾아 위치와 함께 반환
+ */
+function findAndParseTable(text: string, keyPrefix: string): { 
+  found: boolean
+  beforeTable: string
+  table?: JSX.Element
+  afterTable: string 
+} {
+  const lines = text.split('\n')
+  
+  // 표 시작 위치 찾기
+  let tableStartIdx = -1
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim().match(/^\|.+\|$/)) {
+      // 다음 줄이 구분선인지 확인
+      if (i + 1 < lines.length && lines[i + 1].trim().match(/^\|[-:\s|]+\|$/)) {
+        tableStartIdx = i
+        break
+      }
+    }
+  }
+  
+  if (tableStartIdx === -1) {
+    return { found: false, beforeTable: text, afterTable: '' }
+  }
+  
+  // 표 줄들 수집
+  const tableLines: string[] = []
+  let tableEndIdx = tableStartIdx
+  
+  for (let i = tableStartIdx; i < lines.length; i++) {
+    if (lines[i].trim().match(/^\|.+\|$/) || lines[i].trim().match(/^\|[-:\s|]+\|$/)) {
+      tableLines.push(lines[i])
+      tableEndIdx = i
+    } else {
+      break
+    }
+  }
+  
+  if (tableLines.length < 3) {  // 헤더 + 구분선 + 최소 1개 데이터
+    return { found: false, beforeTable: text, afterTable: '' }
+  }
+  
+  // 헤더 파싱
+  const headerLine = tableLines[0]
+  const headers = headerLine.split('|').filter(h => h.trim()).map(h => h.trim())
+  
+  // 데이터 행 파싱 (구분선 제외)
+  const rows = tableLines.slice(2).map(line => 
+    line.split('|').filter(c => c.trim() !== '' || c.includes(' ')).map(cell => cell.trim())
+  ).filter(row => row.length > 0)
+  
+  // HTML 테이블 생성
+  const table = (
+    <table key={keyPrefix} className="w-full my-2 border-collapse border border-gray-300 text-sm">
+      <thead className="bg-gray-100">
+        <tr>
+          {headers.map((header, idx) => (
+            <th key={idx} className="border border-gray-300 px-2 py-1.5 text-left font-semibold text-gray-800 whitespace-nowrap">
+              {header}
+            </th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row, rowIdx) => (
+          <tr key={rowIdx} className={rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+            {row.map((cell, cellIdx) => (
+              <td key={cellIdx} className="border border-gray-300 px-2 py-1.5 text-gray-700">
+                {cell}
+              </td>
+            ))}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+  
+  const beforeTable = lines.slice(0, tableStartIdx).join('\n')
+  const afterTable = lines.slice(tableEndIdx + 1).join('\n')
+  
+  return { found: true, beforeTable, table, afterTable }
+}
+
+/**
  * 메시지 파싱 및 렌더링
  * - 【타이틀】 → 볼드 타이틀
  * - <cite data-source="..." data-url="...">...</cite> → 밑줄 (출처는 문단 끝에 모음)
  * - <cite>...</cite> (기존 형식) → 밑줄 (출처는 문단 끝에 모음)
+ * - | ... | 표 형식 → HTML 테이블
  */
 function parseAndRenderMessage(
   message: string,
@@ -60,6 +147,19 @@ function parseAndRenderMessage(
     let simpleCiteIndex = 0
 
     while (remaining.length > 0) {
+      // 표 패턴 먼저 체크
+      const tableResult = findAndParseTable(remaining, `table-${paragraphIndex}-${keyIndex}`)
+      if (tableResult.found && tableResult.table) {
+        // 표 이전 텍스트가 있으면 먼저 처리
+        if (tableResult.beforeTable.trim()) {
+          paragraphResult.push(<span key={`text-${keyIndex++}`}>{tableResult.beforeTable}</span>)
+        }
+        paragraphResult.push(tableResult.table)
+        keyIndex++
+        remaining = tableResult.afterTable
+        continue
+      }
+
       // 【타이틀】 패턴 찾기
       const titleMatch = remaining.match(/【([^】]+)】/)
       

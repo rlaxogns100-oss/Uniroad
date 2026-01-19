@@ -241,10 +241,73 @@ function FinalAnswerTab({ answer }: { answer: string | null }) {
     return <EmptyState message="최종 답변이 여기에 표시됩니다" />
   }
 
+  // 표 렌더링 함수
+  const renderWithTables = (text: string) => {
+    const lines = text.split('\n')
+    const result: React.ReactNode[] = []
+    let i = 0
+    let keyIdx = 0
+    
+    while (i < lines.length) {
+      const line = lines[i]
+      
+      // 표 시작 감지
+      if (line.trim().match(/^\|.+\|$/) && 
+          i + 1 < lines.length && 
+          lines[i + 1].trim().match(/^\|[-:\s|]+\|$/)) {
+        
+        // 표 줄들 수집
+        const tableLines: string[] = []
+        let j = i
+        while (j < lines.length && (lines[j].trim().match(/^\|.+\|$/) || lines[j].trim().match(/^\|[-:\s|]+\|$/))) {
+          tableLines.push(lines[j])
+          j++
+        }
+        
+        if (tableLines.length >= 3) {
+          // 헤더, 데이터 파싱
+          const headers = tableLines[0].split('|').filter(h => h.trim()).map(h => h.trim())
+          const rows = tableLines.slice(2).map(l => 
+            l.split('|').filter(c => c.trim() !== '' || c.includes(' ')).map(c => c.trim())
+          ).filter(r => r.length > 0)
+          
+          result.push(
+            <table key={`table-${keyIdx++}`} className="w-full my-2 border-collapse border border-slate-600 text-sm">
+              <thead className="bg-slate-700">
+                <tr>
+                  {headers.map((h, idx) => (
+                    <th key={idx} className="border border-slate-600 px-2 py-1 text-left text-slate-200">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, rIdx) => (
+                  <tr key={rIdx} className={rIdx % 2 === 0 ? 'bg-slate-800' : 'bg-slate-750'}>
+                    {row.map((cell, cIdx) => (
+                      <td key={cIdx} className="border border-slate-600 px-2 py-1 text-slate-300">{cell}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )
+          i = j
+          continue
+        }
+      }
+      
+      // 일반 텍스트 줄
+      result.push(<span key={`line-${keyIdx++}`}>{line}{'\n'}</span>)
+      i++
+    }
+    
+    return result
+  }
+
   return (
     <div className="bg-slate-800 rounded-lg p-4 border-2 border-emerald-500">
       <div className="text-slate-200 text-sm whitespace-pre-wrap leading-relaxed">
-        {answer}
+        {renderWithTables(answer)}
       </div>
     </div>
   )

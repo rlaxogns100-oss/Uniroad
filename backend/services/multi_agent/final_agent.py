@@ -8,6 +8,7 @@ Final Agent
 import google.generativeai as genai
 from typing import Dict, Any, List
 import os
+import re
 from dotenv import load_dotenv
 from .agent_prompts import get_final_agent_prompt
 
@@ -41,6 +42,73 @@ class FinalAgent:
         self.model = genai.GenerativeModel(
             model_name="gemini-2.0-flash",
         )
+
+    def _post_process_sections(self, text: str) -> str:
+        """
+        섹션 마커를 제거하고 각 섹션 끝에 cite 태그를 정리
+        
+        동작:
+        1. ===SECTION_START===...===SECTION_END=== 패턴을 찾음
+        2. 각 섹션 내의 모든 cite 태그에서 data-source, data-url 수집
+        3. 섹션 끝에 수집한 cite 태그들을 빈 태그로 추가 (중복 제거)
+        4. 섹션 마커 제거하고 섹션들을 한 줄 바꿈으로 연결
+        """
+        # 로그 추가
+        _log("   [후처리] 원본 텍스트 길이: " + str(len(text)))
+        _log("   [후처리] SECTION_START 개수: " + str(text.count("===SECTION_START===")))
+        
+        def process_section(match):
+            section_content = match.group(1).strip()
+            
+            # 섹션 내의 모든 cite 태그 찾기
+            cite_pattern = r'<cite\s+data-source="([^"]*?)"\s+data-url="([^"]*?)">[^<]*?</cite>'
+            citations = []
+            seen = set()
+            
+            for cite_match in re.finditer(cite_pattern, section_content):
+                source = cite_match.group(1)
+                url = cite_match.group(2)
+                key = (source, url)
+                
+                if key not in seen and source:  # 중복 제거 및 빈 source 제외
+                    seen.add(key)
+                    citations.append((source, url))
+            
+            # 섹션 끝에 빈 cite 태그 추가
+            if citations:
+                cite_tags = '\n'.join([
+                    f'<cite data-source="{source}" data-url="{url}"></cite>'
+                    for source, url in citations
+                ])
+                # 섹션 내용 끝에 cite 태그 추가 (빈 줄 없이)
+                return section_content + '\n' + cite_tags
+            else:
+                return section_content
+        
+        # 섹션 패턴 찾기 및 처리
+        section_pattern = r'===SECTION_START===\s*(.*?)\s*===SECTION_END==='
+        
+        # 섹션들을 처리
+        sections = []
+        for match in re.finditer(section_pattern, text, flags=re.DOTALL):
+            processed_section = process_section(match)
+            if processed_section:
+                sections.append(processed_section)
+        
+        # 섹션들을 한 줄 바꿈으로 연결 (빈 줄 없음)
+        result = '\n'.join(sections)
+        
+        # 연속된 빈 줄 모두 제거 (2개 이상의 연속 줄바꿈을 하나로)
+        while '\n\n' in result:
+            result = result.replace('\n\n', '\n')
+        
+        # 앞뒤 공백 제거
+        result = result.strip()
+        
+        _log("   [후처리] 처리된 섹션 수: " + str(len(sections)))
+        _log("   [후처리] 최종 텍스트 길이: " + str(len(result)))
+        
+        return result
 
     async def generate_final_answer(
         self,
@@ -81,9 +149,9 @@ class FinalAgent:
         _log(f"   섹션 수: {len(answer_structure)}")
         _log(f"   출처 수: {len(all_sources)}")
 
-        # 프롬프트 가져오기 (prompt1 사용)
+        # 프롬프트 가져오기 (prompt3 사용 - 참고문헌 방식)
         prompt = get_final_agent_prompt(
-            "prompt1",
+            "prompt3",
             user_question=user_question,
             structure_text=structure_text,
             results_text=results_text,
@@ -100,7 +168,9 @@ class FinalAgent:
                 }
             )
 
-            final_answer = response.text
+            # 후처리: 섹션 마커 제거 및 cite 태그 정리
+            raw_answer = response.text
+            final_answer = self._post_process_sections(raw_answer)
 
             _log(f"   최종 답변 길이: {len(final_answer)}자")
             _log("="*80)
