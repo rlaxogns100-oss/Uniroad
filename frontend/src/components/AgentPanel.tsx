@@ -37,6 +37,7 @@ interface AgentPanelProps {
   orchestrationResult: OrchestrationResult | null
   subAgentResults: Record<string, SubAgentResult> | null
   finalAnswer: string | null
+  rawAnswer?: string | null  // ✅ 원본 답변 추가
   logs: string[]
   isOpen: boolean
   onClose: () => void
@@ -48,6 +49,7 @@ export default function AgentPanel({
   orchestrationResult,
   subAgentResults,
   finalAnswer,
+  rawAnswer,  // ✅ 원본 답변
   logs,
   isOpen,
   onClose
@@ -109,7 +111,7 @@ export default function AgentPanel({
           <SubAgentsTab results={subAgentResults} />
         )}
         {activeTab === 'final' && (
-          <FinalAnswerTab answer={finalAnswer} />
+          <FinalAnswerTab answer={finalAnswer} rawAnswer={rawAnswer} />
         )}
         {activeTab === 'logs' && (
           <LogsTab logs={logs} />
@@ -236,7 +238,9 @@ function SubAgentsTab({ results }: { results: Record<string, SubAgentResult> | n
 }
 
 // Final Answer 탭
-function FinalAnswerTab({ answer }: { answer: string | null }) {
+function FinalAnswerTab({ answer, rawAnswer }: { answer: string | null, rawAnswer?: string | null }) {
+  const [showRaw, setShowRaw] = useState(false)
+  
   if (!answer) {
     return <EmptyState message="최종 답변이 여기에 표시됩니다" />
   }
@@ -305,10 +309,46 @@ function FinalAnswerTab({ answer }: { answer: string | null }) {
   }
 
   return (
-    <div className="bg-slate-800 rounded-lg p-4 border-2 border-emerald-500">
-      <div className="text-slate-200 text-sm whitespace-pre-wrap leading-relaxed">
-        {renderWithTables(answer)}
+    <div className="space-y-3">
+      {/* 토글 버튼 */}
+      {rawAnswer && (
+        <div className="flex gap-2">
+          <button
+            onClick={() => setShowRaw(false)}
+            className={`px-3 py-1.5 text-xs rounded ${
+              !showRaw
+                ? 'bg-emerald-500 text-white'
+                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            }`}
+          >
+            후처리 결과 (사용자용)
+          </button>
+          <button
+            onClick={() => setShowRaw(true)}
+            className={`px-3 py-1.5 text-xs rounded ${
+              showRaw
+                ? 'bg-rose-500 text-white'
+                : 'bg-slate-700 text-slate-300 hover:bg-slate-600'
+            }`}
+          >
+            원본 출력 (섹션 마커 포함)
+          </button>
+        </div>
+      )}
+      
+      {/* 내용 */}
+      <div className={`rounded-lg p-4 border-2 ${showRaw ? 'border-rose-500 bg-slate-950' : 'border-emerald-500 bg-slate-800'}`}>
+        <div className="text-slate-200 text-sm whitespace-pre-wrap leading-relaxed font-mono">
+          {showRaw ? rawAnswer : renderWithTables(answer)}
+        </div>
       </div>
+      
+      {/* 안내 메시지 */}
+      {showRaw && (
+        <div className="text-xs text-slate-500 bg-slate-800 rounded p-2">
+          💡 이것은 Final Agent가 출력한 원본입니다. <code className="text-rose-400">===SECTION_START===</code>와 <code className="text-rose-400">===SECTION_END===</code> 마커를 확인하세요.
+        </div>
+      )}
     </div>
   )
 }

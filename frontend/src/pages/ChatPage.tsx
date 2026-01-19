@@ -16,6 +16,7 @@ interface AgentData {
   orchestrationResult: any
   subAgentResults: any
   finalAnswer: string | null
+  rawAnswer?: string | null  // ✅ 원본 답변 추가
   logs: string[]
 }
 
@@ -30,9 +31,11 @@ export default function ChatPage() {
     orchestrationResult: null,
     subAgentResults: null,
     finalAnswer: null,
+    rawAnswer: null,
     logs: []
   })
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const sendingRef = useRef(false) // 중복 전송 방지
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -43,8 +46,19 @@ export default function ChatPage() {
   }, [messages])
 
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return
+    // 중복 전송 방지 (더블 클릭, 빠른 Enter 연타 방지)
+    if (!input.trim() || isLoading || sendingRef.current) {
+      console.log('🚫 전송 차단:', { 
+        hasInput: !!input.trim(), 
+        isLoading, 
+        alreadySending: sendingRef.current 
+      })
+      return
+    }
 
+    console.log('📤 메시지 전송 시작:', input)
+    sendingRef.current = true
+    
     const userMessage: Message = {
       id: Date.now().toString(),
       text: input,
@@ -61,6 +75,7 @@ export default function ChatPage() {
       orchestrationResult: null,
       subAgentResults: null,
       finalAnswer: null,
+      rawAnswer: null,
       logs: []
     })
 
@@ -92,7 +107,8 @@ export default function ChatPage() {
             ...prev,
             orchestrationResult: response.orchestration_result || null,
             subAgentResults: response.sub_agent_results || null,
-            finalAnswer: response.response
+            finalAnswer: response.response,
+            rawAnswer: response.raw_answer || null  // ✅ 원본 답변 추가
           }))
         },
         // 에러 콜백
@@ -115,12 +131,15 @@ export default function ChatPage() {
       setMessages((prev) => [...prev, errorMessage])
     } finally {
       setIsLoading(false)
+      sendingRef.current = false
+      console.log('✅ 메시지 전송 완료')
     }
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
+      console.log('⌨️ Enter 키 감지')
       handleSend()
     }
   }
@@ -136,6 +155,7 @@ export default function ChatPage() {
         orchestrationResult={agentData.orchestrationResult}
         subAgentResults={agentData.subAgentResults}
         finalAnswer={agentData.finalAnswer}
+        rawAnswer={agentData.rawAnswer}
         logs={agentData.logs}
         isOpen={isAgentPanelOpen}
         onClose={() => setIsAgentPanelOpen(false)}

@@ -151,11 +151,8 @@ function parseAndRenderMessage(
 ): React.ReactNode[] {
   const result: React.ReactNode[] = []
   
-  // 메시지 전처리: 연속 빈 줄 제거
-  let cleanMessage = message.replace(/\n\s*\n/g, '\n').trim()
-  
-  // 문단 단위로 분리 (【타이틀】 기준)
-  const paragraphs = cleanMessage.split(/(?=【)/g).filter(p => p.trim())
+  // 메시지를 섹션 단위로 분리 (빈 줄 2개 기준)
+  const paragraphs = message.split(/\n\n+/).filter(p => p.trim())
   
   paragraphs.forEach((paragraph, paragraphIndex) => {
     const paragraphResult: React.ReactNode[] = []
@@ -226,9 +223,9 @@ function parseAndRenderMessage(
       if (firstMatch.type === 'title' && titleMatch) {
         // 【타이틀】 → 볼드 타이틀
         paragraphResult.push(
-          <span key={`title-${keyIndex++}`} className="block font-bold text-gray-800 mt-2 text-[1.125rem]">
+          <div key={`title-${keyIndex++}`} className="font-bold text-gray-900 mt-3 mb-1 text-lg leading-tight">
             {titleMatch[1]}
-          </span>
+          </div>
         )
         // 타이틀 뒤 줄바꿈과 공백 모두 제거
         let afterTitle = remaining.substring(matchIndex + titleMatch[0].length)

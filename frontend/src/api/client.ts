@@ -51,6 +51,7 @@ export interface SubAgentResult {
 
 export interface ChatResponse {
   response: string
+  raw_answer?: string  // ✅ Final Agent 원본 출력
   sources: string[]
   source_urls: string[]
   // 멀티에이전트 디버그 데이터

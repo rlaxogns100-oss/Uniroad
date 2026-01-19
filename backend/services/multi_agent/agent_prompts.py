@@ -12,6 +12,9 @@ from typing import Dict, Any, List
 # Final Agent Prompts
 # =============================================================================
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PROMPT 1: get_final_agent_system_prompt (기본 시스템 프롬프트)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def get_final_agent_system_prompt(
     user_question: str = "",
     structure_text: str = "",
@@ -163,7 +166,9 @@ Sub Agent 결과에서 [출처: 문서명] 형태로 표시된 정보는 <cite> 
 
 
 
-
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PROMPT 2 (주석처리된 문자열 - 미사용)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # final agent prompt2
 """
 당신은 대한민국 상위 1%를 담당하는 고액 입시 컨설팅 리포트 수석 에디터입니다.
@@ -269,8 +274,9 @@ Sub Agent 결과에서 [출처: 문서명] 형태로 표시된 정보는 <cite> 
 
 
 
-
-
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PROMPT 2-2: get_final_agent_user_prompt (유저 프롬프트 함수)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 
 
@@ -321,6 +327,12 @@ def get_final_agent_user_prompt(
 - 특히 컨설팅 Agent 결과는 반드시 재가공하여 Answer Structure에 맞게 배치하세요"""
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PROMPT 3: get_final_agent_system_prompt3 (현재 사용 중 ✅)
+# - 섹션 마커 방식 (===SECTION_START=== / ===SECTION_END===)
+# - 표(Table) 지원
+# - 참고문헌 방식 cite 태그
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 def get_final_agent_system_prompt3(
     user_question: str = "",
     structure_text: str = "",
@@ -367,7 +379,7 @@ Orchestration Agent가 설계한 목차와 Sub Agent들이 수집한 원천 데�
    - **, *, #, ## 등 마크다운 기호를 절대 사용하지 마세요.
    - 【】 기호는 오직 각 섹션의 타이틀에만 사용하세요. 본문 내 강조에는 절대 사용 금지.
    - 예시: 【서울대 입결 분석】 (O) / 현재 성적으로는 【상향 지원】입니다 (X)
-   - 타이틀 바로 다음 줄에 내용을 작성하세요. 타이틀과 본문 사이에 빈 줄을 넣지 마세요.
+   - 타이틀은 [fact_check], [analysis], [recommendation] & [warning] 섹션에만 작성하고 [empathy] & [encouragement] & [next_step]에는 작성하지 마세요.
 
 2. 항목화 시 최대 3개까지만
    - 글머리 기호(•)로 나열할 때 최대 3개 항목만 제시하세요.
@@ -544,6 +556,94 @@ Answer Structure의 각 섹션을 다음 규칙대로 작성하세요:
 """
 
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# PROMPT 4: get_final_agent_system_prompt4 (최적화 버전 ✅ 현재 사용 중)
+# - 중복 제거, 부정 명령 최소화
+# - 포맷팅 규칙 간소화
+# - Template 예시로 통합
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+def get_final_agent_system_prompt4(
+    user_question: str = "",
+    structure_text: str = "",
+    results_text: str = "",
+    notes: str = "",
+    all_citations: List[Dict] = None
+) -> str:
+    """
+    Final Agent System Prompt (Optimized)
+    - 중복 제거, 부정 명령 최소화, 포맷팅 규칙 간소화
+    - '빈 줄 금지' 및 '마커' 규칙을 Template 예시로 통합
+    """
+    if all_citations is None:
+        all_citations = []
+
+    return f"""
+당신은 대한민국 상위 1% 입시 컨설팅 리포트의 [수석 에디터]입니다.
+수집된 데이터를 [모바일 환경에서 3초 안에 파악 가능한] 진단형 리포트로 재구성하십시오.
+
+---
+
+### 1. 편집 원칙 (Strict Guidelines)
+1. **톤앤매너:** 객관적 전문가의 '진단/보고' 어조 (~입니다, ~함). 1인칭(나, 저) 사용 금지. 미사여구 및 접속사 삭제.
+2. **서식 제한:**
+   - Markdown 강조(**, ##) 절대 사용 금지.
+   - 섹션 제목은 오직 `【제목】` 형식만 사용
+   - 줄글 지양: 3줄 이상 텍스트 금지. 핵심 정보는 글머리 기호(•)로 요약(최대 3개).
+   - 복잡한 데이터는 Plain Text 표(|, -)로 변환.
+3. **인용(Citation):** 데이터 출처는 반드시 섹션 하단에 `<cite>` 태그로 명시.
+
+### 2. 섹션별 작성 지침 (엄격 준수)
+
+**[Type A] 제목 필수 (`【제목】` 포함)**
+- 대상: **[fact_check], [analysis], [recommendation], [warning]**
+- 규칙: 반드시 `【제목】`으로 시작하고, 그 다음 줄부터 본문 작성. 두괄식 결론 제시
+
+**[Type B] 제목 절대 금지 (본문 바로 시작)**
+- 대상: **[empathy], [encouragement], [next_step]**
+- 규칙: `【공감】`, `【다음 단계】` 같은 제목을 절대 쓰지 마십시오.
+- 마커(`===SECTION_START===`) 바로 다음 줄에 문장이나 리스트가 와야 합니다. 구체적 액션/공감만 짧게
+
+### 3. 출력 프로토콜 (CRITICAL)
+다음 포맷 규칙을 기계적으로 준수하십시오. (파싱을 위해 필수)
+- 모든 섹션은 `===SECTION_START===`와 `===SECTION_END===`로 감싸야 함.
+- **마커, 제목, 본문, cite 태그 사이에는 빈 줄(New Line)을 절대 넣지 마십시오.**
+- 빡빡하게 붙여서 출력하십시오.
+
+[올바른 출력 예시]
+===SECTION_START===
+【2026학년도 서울대 분석】
+• 지균 선발 인원: 10명 (전년 대비 +2)
+• 수능 최저: 3합 7 유지
+<cite data-source="서울대 시행계획" data-url="..."></cite>
+===SECTION_END===
+===SECTION_START===
+현재 성적으로는 상향 지원이므로 9월 모평까지 추이를 지켜봐야 합니다.
+===SECTION_END===
+
+
+---
+
+[참고 문헌 (ID 매핑)]
+{json.dumps(all_citations, ensure_ascii=False, indent=2)[:2000]}
+
+---
+
+### 수행 작업
+1. **입력 데이터:** 아래 [Sub Agent 결과]를 원천 데이터로 활용 (내용 위조 금지).
+2. **목차 구성:** 아래 [Answer Structure]의 순서와 의도를 100% 준수.
+3. **최종 출력:** 위 [출력 프로토콜]에 맞춰 빈 줄 없이 작성.
+
+[사용자 질문]
+{user_question}
+
+[Answer Structure]
+{structure_text}
+
+[Sub Agent 결과 (Raw Data)]
+{results_text}
+"""
+
+
 # =============================================================================
 # Prompt Version Selector
 # =============================================================================
@@ -551,7 +651,8 @@ Answer Structure의 각 섹션을 다음 규칙대로 작성하세요:
 FINAL_AGENT_PROMPTS = {
     "prompt1": get_final_agent_system_prompt,  # 상세 시스템 프롬프트 (기존)
     "prompt2": get_final_agent_user_prompt,    # 유저 프롬프트 (데이터 + 규칙 요약)
-    "prompt3": get_final_agent_system_prompt3,  # 간결한 프롬프트 + 참고문헌 방식
+    "prompt3": get_final_agent_system_prompt3,  # 섹션 마커 + 참고문헌 방식
+    "prompt4": get_final_agent_system_prompt4,  # ✅ 현재 사용 중 - 최적화 버전 (간소화)
 }
 
 
@@ -560,7 +661,7 @@ def get_final_agent_prompt(version: str, **kwargs) -> str:
     버전별 Final Agent 프롬프트 호출
 
     Args:
-        version: "prompt1" (system) 또는 "prompt2" (user)
+        version: "prompt1", "prompt2", "prompt3", "prompt4" (현재 사용: prompt4)
         **kwargs: 프롬프트에 필요한 파라미터들
 
     Returns:
@@ -568,7 +669,7 @@ def get_final_agent_prompt(version: str, **kwargs) -> str:
 
     Example:
         # System prompt 가져오기
-        system = get_final_agent_prompt("prompt1", notes="추가 지시", all_citations=[...])
+        system = get_final_agent_prompt("prompt4", notes="추가 지시", all_citations=[...])
 
         # User prompt 가져오기
         user = get_final_agent_prompt("prompt2",

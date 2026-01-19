@@ -33,6 +33,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
+    raw_answer: Optional[str] = None  # ✅ Final Agent 원본 출력
     sources: List[str] = []
     source_urls: List[str] = []
     # 멀티에이전트 디버그 데이터
@@ -57,6 +58,11 @@ async def chat(request: ChatRequest):
     try:
         session_id = request.session_id
         message = request.message
+        
+        # 중복 호출 방지 체크
+        import time
+        request_id = f"{session_id}:{message}:{int(time.time())}"
+        print(f"\n🔵 [REQUEST_START] {request_id}")
 
         # 로그 수집
         def log_and_emit(msg: str):
@@ -67,6 +73,7 @@ async def chat(request: ChatRequest):
         log_and_emit(f"# 🚀 멀티에이전트 파이프라인 시작")
         log_and_emit(f"# 세션: {session_id}")
         log_and_emit(f"# 질문: {message}")
+        log_and_emit(f"# Request ID: {request_id}")
         log_and_emit(f"{'#'*80}")
 
         # 세션 히스토리 초기화
@@ -156,10 +163,12 @@ async def chat(request: ChatRequest):
         )
 
         final_answer = final_result.get("final_answer", "답변 생성 실패")
+        raw_answer = final_result.get("raw_answer", "")  # ✅ 원본 답변
         sources = final_result.get("sources", [])
         source_urls = final_result.get("source_urls", [])
         
         log_and_emit(f"   최종 답변 길이: {len(final_answer)}자")
+        log_and_emit(f"   원본 답변 길이: {len(raw_answer)}자")
         log_and_emit("="*80)
 
         # 대화 이력에 추가
@@ -181,11 +190,15 @@ async def chat(request: ChatRequest):
         log_and_emit(f"{'#'*80}")
         log_and_emit(f"# ✅ 파이프라인 완료")
         log_and_emit(f"# 최종 답변 길이: {len(final_answer)}자")
+        log_and_emit(f"# 원본 답변 길이: {len(raw_answer)}자")
         log_and_emit(f"# 출처 수: {len(sources)}개")
         log_and_emit(f"{'#'*80}")
+        
+        print(f"🟢 [REQUEST_END] {request_id}\n")
 
         return ChatResponse(
             response=final_answer,
+            raw_answer=raw_answer,  # ✅ 원본 답변 추가
             sources=sources,
             source_urls=source_urls,
             orchestration_result=orchestration_result,
@@ -219,6 +232,11 @@ async def chat_stream(request: ChatRequest):
         try:
             session_id = request.session_id
             message = request.message
+            
+            # 중복 호출 방지 체크
+            import time
+            request_id = f"{session_id}:{message}:{int(time.time())}"
+            print(f"\n🔵 [STREAM_REQUEST_START] {request_id}")
 
             # 로그를 큐에 추가하는 콜백
             def log_callback(msg: str):
@@ -387,10 +405,12 @@ async def chat_stream(request: ChatRequest):
             final_result = final_task.result()
 
             final_answer = final_result.get("final_answer", "답변 생성 실패")
+            raw_answer = final_result.get("raw_answer", "")  # ✅ 원본 답변
             sources = final_result.get("sources", [])
             source_urls = final_result.get("source_urls", [])
             
             yield send_log(f"   최종 답변 길이: {len(final_answer)}자")
+            yield send_log(f"   원본 답변 길이: {len(raw_answer)}자")
             yield send_log("="*80)
 
             # 대화 이력에 추가
@@ -412,12 +432,16 @@ async def chat_stream(request: ChatRequest):
             yield send_log(f"{'#'*80}")
             yield send_log(f"# ✅ 파이프라인 완료")
             yield send_log(f"# 최종 답변 길이: {len(final_answer)}자")
+            yield send_log(f"# 원본 답변 길이: {len(raw_answer)}자")
             yield send_log(f"# 출처 수: {len(sources)}개")
             yield send_log(f"{'#'*80}")
+            
+            print(f"🟢 [STREAM_REQUEST_END] {request_id}\n")
 
             # 최종 응답 전송
             result = ChatResponse(
                 response=final_answer,
+                raw_answer=raw_answer,  # ✅ 원본 답변 추가
                 sources=sources,
                 source_urls=source_urls,
                 orchestration_result=orchestration_result,

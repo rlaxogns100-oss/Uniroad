@@ -51,21 +51,31 @@ class FinalAgent:
         1. ===SECTION_START===...===SECTION_END=== 패턴을 찾음
         2. 각 섹션 내의 모든 cite 태그에서 data-source, data-url 수집
         3. 섹션 끝에 수집한 cite 태그들을 빈 태그로 추가 (중복 제거)
-        4. 섹션 마커 제거하고 섹션들을 한 줄 바꿈으로 연결
+        4. 섹션 마커 제거하고 섹션들을 두 줄 바꿈으로 연결
         """
         # 로그 추가
         _log("   [후처리] 원본 텍스트 길이: " + str(len(text)))
         _log("   [후처리] SECTION_START 개수: " + str(text.count("===SECTION_START===")))
         
-        def process_section(match):
+        # 섹션 패턴 찾기
+        section_pattern = r'===SECTION_START===(.*?)===SECTION_END==='
+        
+        sections = []
+        for match in re.finditer(section_pattern, text, flags=re.DOTALL):
             section_content = match.group(1).strip()
             
-            # 섹션 내의 모든 cite 태그 찾기
-            cite_pattern = r'<cite\s+data-source="([^"]*?)"\s+data-url="([^"]*?)">[^<]*?</cite>'
+            # 빈 섹션 스킵
+            if not section_content:
+                _log(f"   [후처리] 빈 섹션 발견, 스킵")
+                continue
+            
+            # cite 태그 찾기 (더 정확한 패턴)
+            cite_pattern = r'<cite\s+data-source="([^"]*)"\s+data-url="([^"]*)"\s*>.*?</cite>'
+            
             citations = []
             seen = set()
             
-            for cite_match in re.finditer(cite_pattern, section_content):
+            for cite_match in re.finditer(cite_pattern, section_content, flags=re.DOTALL):
                 source = cite_match.group(1)
                 url = cite_match.group(2)
                 key = (source, url)
@@ -74,45 +84,37 @@ class FinalAgent:
                     seen.add(key)
                     citations.append((source, url))
             
-            # 섹션 끝에 빈 cite 태그 추가
+            # 본문에서 cite 태그 모두 제거
+            section_content_clean = re.sub(cite_pattern, '', section_content, flags=re.DOTALL)
+            section_content_clean = section_content_clean.strip()
+            
+            # 섹션 끝에 cite 태그 추가
             if citations:
                 cite_tags = '\n'.join([
                     f'<cite data-source="{source}" data-url="{url}"></cite>'
                     for source, url in citations
                 ])
-                # 섹션 내용 끝에 cite 태그 추가 (빈 줄 없이)
-                return section_content + '\n' + cite_tags
+                final_section = section_content_clean + '\n' + cite_tags
             else:
-                return section_content
+                final_section = section_content_clean
+            
+            # 최종 확인: 빈 섹션이 아닌 경우에만 추가
+            if final_section.strip():
+                sections.append(final_section)
+                _log(f"   [후처리] 섹션 #{len(sections)} 추가 (길이: {len(final_section)}자)")
         
-        # 섹션 패턴 찾기 및 처리
-        section_pattern = r'===SECTION_START===\s*(.*?)\s*===SECTION_END==='
+        # 섹션이 없으면 원본 반환
+        if not sections:
+            _log("   [후처리] ⚠️ 섹션을 찾지 못함, 원본 반환")
+            return text.strip()
         
-        # 섹션들을 처리
-        sections = []
-        for match in re.finditer(section_pattern, text, flags=re.DOTALL):
-            processed_section = process_section(match)
-            if processed_section:
-                sections.append(processed_section)
-        
-        # 섹션이 있으면 섹션들을 연결, 없으면 원본 텍스트 사용
-        if sections:
-            result = '\n'.join(sections)
-        else:
-            # 섹션 마커가 없는 경우 원본 텍스트 사용
-            result = text
-        
-        # 연속된 빈 줄 모두 제거 (2개 이상의 연속 줄바꿈을 하나로)
-        while '\n\n' in result:
-            result = result.replace('\n\n', '\n')
-        
-        # 앞뒤 공백 제거
-        result = result.strip()
+        # 섹션 간 두 줄 간격으로 연결
+        result = '\n\n'.join(sections)
         
         _log("   [후처리] 처리된 섹션 수: " + str(len(sections)))
-        _log("   [후처리] 최종 텍스트 길이: " + str(len(result)))
+        _log("   [후처리] 최종 텍스트 길이: " + str(len(result)) + "자")
         
-        return result
+        return result.strip()
 
     async def generate_final_answer(
         self,
@@ -153,9 +155,9 @@ class FinalAgent:
         _log(f"   섹션 수: {len(answer_structure)}")
         _log(f"   출처 수: {len(all_sources)}")
 
-        # 프롬프트 가져오기 (prompt3 사용 - 참고문헌 방식)
+        # 프롬프트 가져오기 (prompt4 사용 - 최적화 버전)
         prompt = get_final_agent_prompt(
-            "prompt3",
+            "prompt4",
             user_question=user_question,
             structure_text=structure_text,
             results_text=results_text,
@@ -169,19 +171,25 @@ class FinalAgent:
                 generation_config={
                     "temperature": 0.7,
                     "max_output_tokens": 4096
-                }
+                },
+                request_options=genai.types.RequestOptions(
+                    retry=None,
+                    timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
+                )
             )
 
             # 후처리: 섹션 마커 제거 및 cite 태그 정리
             raw_answer = response.text
             final_answer = self._post_process_sections(raw_answer)
 
-            _log(f"   최종 답변 길이: {len(final_answer)}자")
+            _log(f"   원본 답변 길이: {len(raw_answer)}자")
+            _log(f"   후처리 답변 길이: {len(final_answer)}자")
             _log("="*80)
 
             return {
                 "status": "success",
                 "final_answer": final_answer,
+                "raw_answer": raw_answer,  # ✅ 원본 추가
                 "sources": all_sources,
                 "source_urls": all_source_urls,
                 "metadata": {

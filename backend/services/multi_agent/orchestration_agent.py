@@ -209,7 +209,14 @@ async def run_orchestration_agent(
             })
 
     chat_session = model.start_chat(history=gemini_history)
-    response = chat_session.send_message(message)
+    
+    response = chat_session.send_message(
+        message, 
+        request_options=genai.types.RequestOptions(
+            retry=None,
+            timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
+        )
+    )
     
     result = parse_orchestration_response(response.text)
     

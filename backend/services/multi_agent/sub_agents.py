@@ -387,7 +387,11 @@ class ConsultingAgent(SubAgentBase):
         try:
             response = self.model.generate_content(
                 f"질문: {query}\n\n위 데이터에서 질문에 답변하는데 필요한 정보만 추출하세요.",
-                generation_config={"temperature": 0.1, "max_output_tokens": 1024}
+                generation_config={"temperature": 0.1, "max_output_tokens": 1024},
+                request_options=genai.types.RequestOptions(
+                    retry=None,
+                    timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
+                )
             )
 
             result_text = response.text
@@ -479,7 +483,11 @@ class TeacherAgent(SubAgentBase):
         try:
             response = self.model.generate_content(
                 f"학생 질문: {query}\n\n선생님으로서 조언해주세요.",
-                generation_config={"temperature": 0.7}
+                generation_config={"temperature": 0.7},
+                request_options=genai.types.RequestOptions(
+                    retry=None,
+                    timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
+                )
             )
 
             _log(f"   조언 완료")

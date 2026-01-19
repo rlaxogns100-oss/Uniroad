@@ -59,7 +59,7 @@ class GeminiService:
                 # request_options로 retry 비활성화 (직접 제어)
                 request_options = genai.types.RequestOptions(
                     retry=None,
-                    timeout=30.0
+                    timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
                 )
 
                 response = self.model.generate_content(full_prompt, request_options=request_options)
@@ -151,7 +151,7 @@ class GeminiService:
                 # request_options로 retry 비활성화
                 request_options = genai.types.RequestOptions(
                     retry=None,  # retry 비활성화
-                    timeout=30.0  # 30초 타임아웃
+                    timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
                 )
 
                 # 빈 응답 재시도 로직 (최대 3회)
@@ -300,7 +300,7 @@ class GeminiService:
 
                 request_options = genai.types.RequestOptions(
                     retry=None,
-                    timeout=30.0
+                    timeout=120.0  # 대용량 문서 처리를 위해 120초로 증가
                 )
 
                 # Lite 모델로 빠르게 처리
