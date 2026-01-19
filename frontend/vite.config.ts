@@ -9,7 +9,8 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
-        rewrite: (path) => path
+        rewrite: (path) => path,
+        timeout: 0,  // SSE를 위해 타임아웃 제거
       }
     }
   }
