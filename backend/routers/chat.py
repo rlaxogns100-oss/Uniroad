@@ -370,8 +370,15 @@ async def chat_stream(request: ChatRequest):
             
             subs_task = asyncio.create_task(run_subs())
             
-            # 큐에서 로그를 읽어서 스트리밍
+            # 큐에서 로그를 읽어서 스트리밍 (최대 대기 시간 추가)
+            max_wait_time = 180.0  # 최대 3분 대기
+            wait_start = time.time()
             while not subs_task.done():
+                # 최대 대기 시간 초과 체크
+                if time.time() - wait_start > max_wait_time:
+                    yield send_log("⚠️ Sub Agents 처리 시간이 초과되었습니다. 계속 진행합니다...")
+                    break
+                    
                 try:
                     log_msg = await asyncio.wait_for(log_queue.get(), timeout=0.1)
                     yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"
@@ -418,8 +425,15 @@ async def chat_stream(request: ChatRequest):
             
             final_task = asyncio.create_task(run_final())
             
-            # 큐에서 로그를 읽어서 스트리밍
+            # 큐에서 로그를 읽어서 스트리밍 (최대 대기 시간 추가)
+            max_wait_time = 180.0  # 최대 3분 대기
+            wait_start = time.time()
             while not final_task.done():
+                # 최대 대기 시간 초과 체크
+                if time.time() - wait_start > max_wait_time:
+                    yield send_log("⚠️ Final Agent 처리 시간이 초과되었습니다. 계속 진행합니다...")
+                    break
+                    
                 try:
                     log_msg = await asyncio.wait_for(log_queue.get(), timeout=0.1)
                     yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"

@@ -47,7 +47,7 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
         const match = log.match(/사용자 의도:\s*(.+)/)
         if (match) {
           const intent = match[1].trim()
-          setUserIntent(intent)
+          setUserIntent(prev => prev !== intent ? intent : prev)
           // 생각하는 과정에 추가
           setThinkingSteps(prev => {
             if (!prev.find(s => s.title === '목표 이해하기')) {
@@ -115,16 +115,6 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
         }
       }
       
-      // Query 완료 처리
-      if (log.includes('✅') && queries.length > 0) {
-        setQueries(prev => prev.map((q, idx) => {
-          if (idx === prev.length - 1 && q.status === 'active') {
-            return { ...q, status: 'completed' }
-          }
-          return q
-        }))
-      }
-      
       // Final Agent 실행
       if (log.includes('Final Agent 실행') || log.includes('📝')) {
         setThinkingSteps(prev => {
@@ -139,38 +129,75 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
       }
     })
 
-    // 단계별 상태 업데이트
+    // 단계별 상태 업데이트 - 함수형 업데이트로 변경하여 최신 상태 참조
     setSteps(prev => {
       const newSteps = [...prev]
+      
+      // userIntent, queries, foundSources를 함수형 업데이트로 가져오기
+      let currentUserIntent = ''
+      let currentQueries: Array<{ text: string; status: 'pending' | 'active' | 'completed' }> = []
+      let currentFoundSources = 0
+      
+      // 로그에서 직접 추출
+      logs.forEach(log => {
+        if (log.includes('사용자 의도:')) {
+          const match = log.match(/사용자 의도:\s*(.+)/)
+          if (match) currentUserIntent = match[1].trim()
+        }
+        if (log.includes('Query:')) {
+          const match = log.match(/Query:\s*(.+)/)
+          if (match) {
+            const queryText = match[1].trim()
+            if (!currentQueries.find(q => q.text === queryText)) {
+              currentQueries.push({ text: queryText, status: 'active' })
+            }
+          }
+        }
+        if (log.includes('출처') && log.match(/\d+개/)) {
+          const match = log.match(/출처\s*(\d+)개/)
+          if (match) {
+            const count = parseInt(match[1])
+            currentFoundSources = Math.max(currentFoundSources, count)
+          }
+        }
+        if (log.includes('✅') && currentQueries.length > 0) {
+          currentQueries = currentQueries.map((q, idx) => {
+            if (idx === currentQueries.length - 1 && q.status === 'active') {
+              return { ...q, status: 'completed' as const }
+            }
+            return q
+          })
+        }
+      })
       
       // 1단계: 질문 분석
       if (latestLogLower.includes('orchestration') || latestLogLower.includes('🎯') || logs.length > 0) {
         newSteps[0].status = 'active'
-        newSteps[0].details = userIntent || '질문을 분석하고 있어요'
+        newSteps[0].details = currentUserIntent || '질문을 분석하고 있어요'
       }
       
-      if (latestLogLower.includes('실행 계획') || userIntent) {
+      if (latestLogLower.includes('실행 계획') || currentUserIntent) {
         newSteps[0].status = 'completed'
-        newSteps[0].details = userIntent || '의도를 파악했어요'
+        newSteps[0].details = currentUserIntent || '의도를 파악했어요'
       }
 
       // 2단계: 정보 수집
-      if (latestLogLower.includes('query:') || queries.length > 0 || latestLogLower.includes('sub')) {
-        newSteps[1].status = queries.length > 0 ? 'active' : 'pending'
-        const activeQueries = queries.filter(q => q.status === 'active').length
-        const completedQueries = queries.filter(q => q.status === 'completed').length
+      if (latestLogLower.includes('query:') || currentQueries.length > 0 || latestLogLower.includes('sub')) {
+        newSteps[1].status = currentQueries.length > 0 ? 'active' : 'pending'
+        const activeQueries = currentQueries.filter(q => q.status === 'active').length
+        const completedQueries = currentQueries.filter(q => q.status === 'completed').length
         if (activeQueries > 0) {
-          newSteps[1].details = `관련 정보를 찾고 있어요 (${completedQueries}/${queries.length})`
-        } else if (queries.length > 0) {
+          newSteps[1].details = `관련 정보를 찾고 있어요 (${completedQueries}/${currentQueries.length})`
+        } else if (currentQueries.length > 0) {
           newSteps[1].details = '정보 수집 완료'
         } else {
           newSteps[1].details = '관련 자료를 찾고 있어요'
         }
       }
       
-      if (foundSources > 0 && latestLogLower.includes('✅')) {
+      if (currentFoundSources > 0 && latestLogLower.includes('✅')) {
         newSteps[1].status = 'completed'
-        newSteps[1].details = `${foundSources}개의 참고 자료를 찾았어요`
+        newSteps[1].details = `${currentFoundSources}개의 참고 자료를 찾았어요`
       }
 
       // 3단계: 답변 작성
@@ -198,7 +225,7 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
     if (thought) {
       setCurrentThought(thought)
     }
-  }, [logs, userIntent, queries, foundSources])
+  }, [logs]) // 의존성 배열을 logs만 남김
 
   const formatThought = (log: string): string => {
     const logLower = log.toLowerCase()
