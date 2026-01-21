@@ -24,6 +24,7 @@ app.add_middleware(
         "http://localhost:5174",
         "http://localhost:3000",  # Next.js 호환
         "http://3.107.178.26",  # 프로덕션 서버
+        "http://172.30.1.20:5173",  # 로컬 네트워크 접근
     ],
     allow_credentials=True,
     allow_methods=["*"],

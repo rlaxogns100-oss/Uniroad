@@ -56,6 +56,8 @@ export function useChat() {
 
     try {
       setLoading(true)
+      // 이전 메시지 초기화 (잘못된 메시지가 표시되는 것을 방지)
+      setMessages([])
       
       const token = localStorage.getItem('access_token')
       const client = getSupabaseClient(token || undefined)

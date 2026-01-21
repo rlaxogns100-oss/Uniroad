@@ -545,9 +545,11 @@ export default function AdminPage() {
                     // 보기 모드
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
-                        <h3 className="font-semibold text-gray-900">{doc.title}</h3>
+                        <h3 className="font-semibold text-gray-900">
+                          {doc.title} <span className="text-sm font-normal text-gray-500">출처: {doc.source}</span>
+                        </h3>
                         <p className="text-sm text-gray-600">
-                          출처: {doc.source} | {doc.category}
+                          {doc.category}
                         </p>
                         {/* 해시태그 표시 */}
                         {doc.hashtags && doc.hashtags.length > 0 && (

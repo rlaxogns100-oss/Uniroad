@@ -420,19 +420,49 @@ function parseAndRenderMessage(
         {/* 문단 끝에 출처 표시 - 깔끔하게 */}
         {paragraphSources.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5 items-center">
-            {paragraphSources.map((source, idx) => (
-              source.url ? (
-                <a
+            {paragraphSources.map((source, idx) => {
+              const handleSourceDownload = async (e: React.MouseEvent) => {
+                e.preventDefault()
+                if (!source.url) return
+                
+                try {
+                  // URL에서 파일명 추출
+                  const urlParts = source.url.split('/')
+                  const fileName = urlParts[urlParts.length - 1] || `${source.text}.pdf`
+                  
+                  // fetch로 파일 가져오기
+                  const response = await fetch(source.url)
+                  if (!response.ok) {
+                    // fetch 실패 시 새 탭에서 열기
+                    window.open(source.url, '_blank')
+                    return
+                  }
+                  
+                  const blob = await response.blob()
+                  const url = URL.createObjectURL(blob)
+                  const link = document.createElement('a')
+                  link.href = url
+                  link.download = fileName
+                  document.body.appendChild(link)
+                  link.click()
+                  document.body.removeChild(link)
+                  URL.revokeObjectURL(url)
+                } catch (error) {
+                  console.error('다운로드 실패:', error)
+                  // 에러 발생 시 새 탭에서 열기
+                  window.open(source.url, '_blank')
+                }
+              }
+              
+              return source.url ? (
+                <button
                   key={idx}
-                  href={source.url}
-                  download
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center px-2 py-1 text-xs font-bold text-gray-900 hover:text-gray-700 transition-colors"
+                  onClick={handleSourceDownload}
+                  className="inline-flex items-center px-2 py-1 text-xs font-bold text-gray-900 hover:text-gray-700 transition-colors cursor-pointer"
                   title={`출처: ${source.text} (클릭하면 원본 파일 다운로드)`}
                 >
                   {source.text}
-                </a>
+                </button>
               ) : (
                 <span
                   key={idx}
@@ -441,7 +471,7 @@ function parseAndRenderMessage(
                   {source.text}
                 </span>
               )
-            ))}
+            })}
           </div>
         )}
       </div>

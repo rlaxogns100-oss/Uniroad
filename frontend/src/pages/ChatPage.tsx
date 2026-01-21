@@ -142,29 +142,37 @@ export default function ChatPage() {
     startNewChat()
   }
 
-  // 세션 선택 시 메시지 불러오기 (세션 변경 시에만)
+  // 세션 선택 시 메시지 불러오기
   const prevSessionIdRef = useRef<string | null>(null)
   useEffect(() => {
-    // 세션이 변경되었을 때만 메시지 로드
+    // 세션이 변경되었을 때
     if (currentSessionId !== prevSessionIdRef.current) {
       prevSessionIdRef.current = currentSessionId
       
       if (currentSessionId && isAuthenticated) {
-        // Supabase에서 불러온 메시지를 Message 형식으로 변환
-        const convertedMessages: Message[] = savedMessages.map((msg) => ({
-          id: msg.id,
-          text: msg.content,
-          isUser: msg.role === 'user',
-        }))
-        setMessages(convertedMessages)
-        setSessionId(currentSessionId) // API 호출용 sessionId도 업데이트
+        // API 호출용 sessionId 업데이트
+        setSessionId(currentSessionId)
+        // 메시지는 loadMessages가 완료되면 savedMessages에 반영되고, 아래 useEffect에서 처리됨
       } else if (!currentSessionId) {
         // 새 채팅인 경우
         setMessages([])
         setSessionId(`session-${Date.now()}`)
       }
     }
-  }, [currentSessionId, isAuthenticated]) // savedMessages 의존성 제거
+  }, [currentSessionId, isAuthenticated])
+  
+  // savedMessages가 업데이트되면 현재 세션의 메시지로 변환
+  useEffect(() => {
+    if (currentSessionId && savedMessages.length >= 0) {
+      // savedMessages가 현재 세션의 메시지인지 확인 (loadMessages가 올바른 세션 ID로 호출되었으므로)
+      const convertedMessages: Message[] = savedMessages.map((msg) => ({
+        id: msg.id,
+        text: msg.content,
+        isUser: msg.role === 'user',
+      }))
+      setMessages(convertedMessages)
+    }
+  }, [savedMessages, currentSessionId])
 
   useEffect(() => {
     scrollToBottom()
