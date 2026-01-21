@@ -4,6 +4,7 @@ import { sendMessageStream, ChatResponse } from '../api/client'
 import ChatMessage from '../components/ChatMessage'
 import ThinkingProcess from '../components/ThinkingProcess'
 import { useAuth } from '../contexts/AuthContext'
+import { useChat } from '../hooks/useChat'
 
 interface Message {
   id: string
@@ -72,6 +73,17 @@ const formatLogMessage = (log: string): string => {
 export default function ChatPage() {
   const navigate = useNavigate()
   const { user, signOut, isAuthenticated } = useAuth()
+  const {
+    sessions,
+    currentSessionId,
+    messages: savedMessages,
+    createSession,
+    saveMessage,
+    selectSession,
+    startNewChat,
+    updateSessionTitle,
+  } = useChat()
+  
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -85,12 +97,58 @@ export default function ChatPage() {
     logs: []
   })
   const [currentLog, setCurrentLog] = useState<string>('') // 현재 진행 상태 로그
+  const [searchQuery, setSearchQuery] = useState<string>('') // 채팅 검색어
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const sendingRef = useRef(false) // 중복 전송 방지
+  const abortControllerRef = useRef<AbortController | null>(null) // 스트리밍 취소용
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
+
+  // 새 채팅 시작 핸들러
+  const handleNewChat = () => {
+    // 진행 중인 요청 취소
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+      abortControllerRef.current = null
+    }
+    
+    // 모든 상태 초기화
+    setMessages([])
+    setInput('')
+    setIsLoading(false)
+    setCurrentLog('')
+    setAgentData({
+      orchestrationResult: null,
+      subAgentResults: null,
+      finalAnswer: null,
+      rawAnswer: null,
+      logs: []
+    })
+    sendingRef.current = false
+    
+    // 새 채팅 시작
+    startNewChat()
+  }
+
+  // 세션 선택 시 메시지 불러오기
+  useEffect(() => {
+    if (currentSessionId && isAuthenticated) {
+      // Supabase에서 불러온 메시지를 Message 형식으로 변환
+      const convertedMessages: Message[] = savedMessages.map((msg) => ({
+        id: msg.id,
+        text: msg.content,
+        isUser: msg.role === 'user',
+      }))
+      setMessages(convertedMessages)
+      setSessionId(currentSessionId) // API 호출용 sessionId도 업데이트
+    } else if (!currentSessionId) {
+      // 새 채팅인 경우
+      setMessages([])
+      setSessionId(`session-${Date.now()}`)
+    }
+  }, [currentSessionId, savedMessages, isAuthenticated])
 
   useEffect(() => {
     scrollToBottom()
@@ -111,16 +169,35 @@ export default function ChatPage() {
     console.log('📤 메시지 전송 시작:', input)
     sendingRef.current = true
     
+    const userInput = input
+    setInput('')
+    setIsLoading(true)
+
+    // 세션 처리: 새 채팅인 경우 세션 생성
+    let currentSessionIdToUse = currentSessionId
+    if (!currentSessionIdToUse && isAuthenticated) {
+      // 새 세션 생성 (제목은 사용자 메시지 앞부분)
+      const title = userInput.substring(0, 50)
+      const newSessionId = await createSession(title)
+      if (newSessionId) {
+        currentSessionIdToUse = newSessionId
+        setSessionId(newSessionId)
+        await selectSession(newSessionId)
+      }
+    }
+
+    // 사용자 메시지 저장 (로그인한 경우)
+    if (isAuthenticated && currentSessionIdToUse) {
+      await saveMessage(currentSessionIdToUse, 'user', userInput)
+    }
+
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: input,
+      text: userInput,
       isUser: true,
     }
 
     setMessages((prev) => [...prev, userMessage])
-    const userInput = input
-    setInput('')
-    setIsLoading(true)
 
     // 로그 초기화
     setAgentData({
@@ -132,12 +209,19 @@ export default function ChatPage() {
     })
     setCurrentLog('🔍 질문을 분석하는 중...')
 
+    // AbortController 생성
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
+
     try {
       await sendMessageStream(
         userInput,
-        sessionId,
+        currentSessionIdToUse || sessionId,
         // 로그 콜백
         (log: string) => {
+          // 취소된 경우 콜백 실행 안 함
+          if (abortController.signal.aborted) return
+          
           setAgentData((prev) => ({
             ...prev,
             logs: [...prev.logs, log]
@@ -147,7 +231,10 @@ export default function ChatPage() {
           setCurrentLog(formattedLog)
         },
         // 결과 콜백
-        (response: ChatResponse) => {
+        async (response: ChatResponse) => {
+          // 취소된 경우 콜백 실행 안 함
+          if (abortController.signal.aborted) return
+          
           const botMessage: Message = {
             id: (Date.now() + 1).toString(),
             text: response.response,
@@ -157,6 +244,17 @@ export default function ChatPage() {
           }
 
           setMessages((prev) => [...prev, botMessage])
+
+          // 어시스턴트 메시지 저장 (로그인한 경우)
+          if (isAuthenticated && currentSessionIdToUse) {
+            await saveMessage(currentSessionIdToUse, 'assistant', response.response)
+            
+            // 첫 메시지인 경우 세션 제목 업데이트
+            if (messages.length === 0 && userInput) {
+              const title = userInput.substring(0, 50)
+              await updateSessionTitle(currentSessionIdToUse, title)
+            }
+          }
 
           // Agent 디버그 데이터 업데이트
           setAgentData((prev) => ({
@@ -169,15 +267,25 @@ export default function ChatPage() {
         },
         // 에러 콜백
         (error: string) => {
+          // 취소된 경우 에러 메시지 표시 안 함
+          if (abortController.signal.aborted) return
+          
           const errorMessage: Message = {
             id: (Date.now() + 1).toString(),
             text: error,
             isUser: false,
           }
           setMessages((prev) => [...prev, errorMessage])
-        }
+        },
+        abortController.signal
       )
-    } catch (error) {
+    } catch (error: any) {
+      // AbortError는 무시 (사용자가 새 채팅을 시작한 경우)
+      if (error?.name === 'AbortError') {
+        console.log('요청이 취소되었습니다.')
+        return
+      }
+      
       console.error('채팅 오류:', error)
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -186,9 +294,13 @@ export default function ChatPage() {
       }
       setMessages((prev) => [...prev, errorMessage])
     } finally {
-      setIsLoading(false)
-      setCurrentLog('')
+      // 취소되지 않은 경우에만 상태 초기화
+      if (!abortControllerRef.current?.signal.aborted) {
+        setIsLoading(false)
+        setCurrentLog('')
+      }
       sendingRef.current = false
+      abortControllerRef.current = null
       console.log('✅ 메시지 전송 완료')
     }
   }
@@ -212,82 +324,125 @@ export default function ChatPage() {
         } sm:translate-x-0 sm:static sm:w-80`}
       >
         <div className="h-full flex flex-col overflow-y-auto">
+          {/* 검색 바 (로그인한 경우에만 상단에 표시) */}
+          {isAuthenticated && (
+            <div className="p-4 sm:p-6 pb-3 sm:pb-4">
+              <div className="relative">
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="채팅 검색"
+                  className="w-full px-2.5 sm:px-3 py-2 sm:py-2.5 pl-8 sm:pl-10 text-xs sm:text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                <svg
+                  className="absolute left-2 sm:left-3 top-1/2 transform -translate-y-1/2 w-3.5 h-3.5 sm:w-4 sm:h-4 text-gray-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+                {searchQuery && (
+                  <button
+                    onClick={() => setSearchQuery('')}
+                    className="absolute right-2 sm:right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                  >
+                    <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M6 18L18 6M6 6l12 12"
+                      />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* 사이드 네비 헤더 */}
-          <div className="p-6">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-xl font-bold text-gray-900">내 입시 기록 관리</h2>
+          <div className="px-4 sm:px-6 pb-3 sm:pb-4">
+            <div className="flex items-center justify-between mb-1.5 sm:mb-2">
+              <h2 className="text-base sm:text-xl font-bold text-gray-900">내 입시 기록 관리</h2>
               <button
                 onClick={() => setIsSideNavOpen(false)}
                 className="sm:hidden p-2 hover:bg-gray-100 rounded-lg transition-colors"
               >
-                <svg className="w-6 h-6 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
             </div>
-            <p className="text-sm text-gray-500">
+            <p className="text-xs sm:text-sm text-gray-500">
               입시 기록을 입력하면 더 정확한 답변을 받을 수 있어요
             </p>
           </div>
 
           {/* 메뉴 항목들 */}
-          <div className="flex-1 px-6 pb-6">
+          <div className="flex-1 px-4 sm:px-6 pb-3 sm:pb-4">
             <div className="space-y-0">
               {/* 내 생활기록부 관리 */}
-              <button className="w-full flex items-center gap-3 px-4 py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
-                <div className="w-6 h-6 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
+              <button className="w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 sm:py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
+                <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900">내 생활기록부 관리</p>
-                  <p className="text-xs text-gray-500 mt-0.5">10초만에 연동하기</p>
+                  <p className="text-xs sm:text-sm font-medium text-gray-900">내 생활기록부 관리</p>
+                  <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5">10초만에 연동하기</p>
                 </div>
-                <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </button>
 
               {/* 3월 6월 9월 모의고사 성적 입력 */}
-              <button className="w-full flex items-center gap-3 px-4 py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
-                <div className="w-6 h-6 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
+              <button className="w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 sm:py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
+                <div className="w-5 h-5 sm:w-6 sm:h-6 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900">3월 6월 9월 모의고사 성적 입력</p>
-                  <p className="text-xs text-gray-500 mt-0.5">모의고사 성적을 입력해주세요</p>
+                  <p className="text-xs sm:text-sm font-medium text-gray-900">3월 6월 9월 모의고사 성적 입력</p>
+                  <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5">모의고사 성적을 입력해주세요</p>
                 </div>
-                <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </button>
 
               {/* 내신 성적 입력 */}
-              <button className="w-full flex items-center gap-3 px-4 py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
-                <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <button className="w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 sm:py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
+                <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900">내신 성적 입력</p>
-                  <p className="text-xs text-gray-500 mt-0.5">내신 성적을 입력해주세요</p>
+                  <p className="text-xs sm:text-sm font-medium text-gray-900">내신 성적 입력</p>
+                  <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5">내신 성적을 입력해주세요</p>
                 </div>
-                <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </button>
 
               {/* 채팅 기억 (로그인한 경우에만 표시) */}
               {isAuthenticated && (
-                <button className="w-full flex items-center gap-3 px-4 py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
-                  <div className="w-8 h-8 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
-                    <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <button className="w-full flex items-center gap-2 sm:gap-3 px-3 sm:px-4 py-3 sm:py-4 hover:bg-gray-50 active:bg-gray-100 transition-colors text-left group">
+                  <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-green-100 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-4 h-4 sm:w-5 sm:h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                     </svg>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900">채팅 기억</p>
-                    <p className="text-xs text-gray-500 mt-0.5">자동 기억 사용중</p>
+                    <p className="text-xs sm:text-sm font-medium text-gray-900">채팅 기억</p>
+                    <p className="text-[10px] sm:text-xs text-gray-500 mt-0.5">자동 기억 사용중</p>
                   </div>
-                  <svg className="w-5 h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-4 h-4 sm:w-5 sm:h-5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
                 </button>
@@ -295,11 +450,68 @@ export default function ChatPage() {
             </div>
           </div>
 
+          {/* 채팅 기록 섹션 (로그인한 경우에만 표시) */}
+          {isAuthenticated && (
+            <div className="px-4 sm:px-6 pb-4 sm:pb-6 pt-3 sm:pt-4">
+              <div className="flex items-center justify-between mb-3 sm:mb-4">
+                <h2 className="text-base sm:text-xl font-bold text-gray-900">채팅</h2>
+                <button
+                  onClick={handleNewChat}
+                  className="text-[10px] sm:text-xs text-blue-600 hover:text-blue-700 font-medium"
+                >
+                  새 채팅
+                </button>
+              </div>
+              
+              <div className="space-y-1 max-h-64 overflow-y-auto">
+                {(() => {
+                  // 검색어로 필터링
+                  const filteredSessions = searchQuery
+                    ? sessions.filter((session) =>
+                        session.title.toLowerCase().includes(searchQuery.toLowerCase())
+                      )
+                    : sessions
+
+                  if (filteredSessions.length === 0) {
+                    return (
+                      <p className="text-[10px] sm:text-xs text-gray-500 text-center py-3 sm:py-4">
+                        {searchQuery ? '검색 결과가 없습니다' : '채팅 기록이 없습니다'}
+                      </p>
+                    )
+                  }
+
+                  return filteredSessions.map((session) => (
+                    <button
+                      key={session.id}
+                      onClick={() => {
+                        selectSession(session.id)
+                        setIsSideNavOpen(false)
+                      }}
+                      className={`w-full text-left px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-lg transition-colors ${
+                        currentSessionId === session.id
+                          ? 'bg-blue-50 text-blue-900'
+                          : 'hover:bg-gray-50 text-gray-900'
+                      }`}
+                    >
+                      <p className="text-[10px] sm:text-xs font-medium truncate">{session.title}</p>
+                      <p className="text-[9px] sm:text-[10px] text-gray-500 mt-0.5">
+                        {new Date(session.updated_at).toLocaleDateString('ko-KR', {
+                          month: 'short',
+                          day: 'numeric',
+                        })}
+                      </p>
+                    </button>
+                  ))
+                })()}
+              </div>
+            </div>
+          )}
+
           {/* 하단 섹션 */}
-          <div className="p-6 border-t border-gray-100">
+          <div className="p-4 sm:p-6 pt-3 sm:pt-4">
             {isAuthenticated ? (
               <div>
-                <p className="text-xs text-gray-500 text-center mb-4 leading-relaxed">
+                <p className="text-[10px] sm:text-xs text-gray-500 text-center mb-3 sm:mb-4 leading-relaxed">
                   채팅 기록 저장, 공유 및 맞춤 경험을 이용하세요
                 </p>
                 <button
@@ -308,19 +520,19 @@ export default function ChatPage() {
                       signOut()
                     }
                   }}
-                  className="w-full px-4 py-2 text-sm text-gray-600 hover:text-gray-900 transition-colors"
+                  className="w-full px-3 sm:px-4 py-2 text-xs sm:text-sm text-gray-600 hover:text-gray-900 transition-colors"
                 >
                   로그아웃
                 </button>
               </div>
             ) : (
               <div>
-                <p className="text-xs text-gray-500 text-center mb-4 leading-relaxed">
+                <p className="text-[10px] sm:text-xs text-gray-500 text-center mb-3 sm:mb-4 leading-relaxed">
                   채팅 기록 저장, 공유 및 맞춤 경험을 이용하세요
                 </p>
                 <button
                   onClick={() => navigate('/auth')}
-                  className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:bg-blue-800 transition-colors font-medium text-sm"
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:bg-blue-800 transition-colors font-medium text-xs sm:text-sm"
                 >
                   회원가입 또는 로그인
                 </button>
@@ -346,7 +558,6 @@ export default function ChatPage() {
               </svg>
             </button>
               <img src="/로고.png" alt="UniZ Logo" className="h-8" />
-              <span className="text-sm font-semibold text-gray-900">유니로드</span>
             </div>
             
             {isAuthenticated ? (
@@ -374,11 +585,6 @@ export default function ChatPage() {
           <div className="hidden sm:flex px-6 py-4 justify-between items-center">
             <div className="flex items-center gap-4">
               <img src="/로고.png" alt="UniZ Logo" className="h-10" />
-              {isAuthenticated && (
-                <div className="text-sm font-medium text-gray-900">
-                  {user?.name || user?.email}
-                </div>
-              )}
             </div>
             
             <div className="flex items-center gap-3">
@@ -420,7 +626,11 @@ export default function ChatPage() {
             {messages.length === 0 && (
               <div className="text-center py-12 sm:py-16">
                 <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3 sm:mb-4">
-                  안녕하세요! 👋
+                  {isAuthenticated && user?.name ? (
+                    <>안녕하세요 {user.name}님! 👋</>
+                  ) : (
+                    <>안녕하세요! 👋</>
+                  )}
                 </h1>
                 <p className="text-base sm:text-lg text-gray-600 mb-8 sm:mb-12">
                   무엇을 도와드릴까요?

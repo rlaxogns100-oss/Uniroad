@@ -98,7 +98,8 @@ export const sendMessageStream = async (
   sessionId: string,
   onLog: (log: string) => void,
   onResult: (result: ChatResponse) => void,
-  onError?: (error: string) => void
+  onError?: (error: string) => void,
+  abortSignal?: AbortSignal
 ): Promise<void> => {
   const response = await fetch('/api/chat/stream', {
     method: 'POST',
@@ -109,6 +110,7 @@ export const sendMessageStream = async (
       message,
       session_id: sessionId,
     }),
+    signal: abortSignal,
   })
 
   if (!response.ok) {
