@@ -7,7 +7,7 @@ export const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
-  timeout: 120000, // 120초 (업로드는 30-40초 소요)
+  timeout: 180000, // 180초 (멀티에이전트 파이프라인은 시간이 더 걸릴 수 있음)
 })
 
 export interface ChatRequest {
@@ -15,23 +15,54 @@ export interface ChatRequest {
   session_id?: string
 }
 
+// 멀티에이전트 응답 타입
+export interface OrchestrationResult {
+  plan_id?: string
+  user_intent?: string
+  execution_plan?: Array<{
+    step: number
+    agent: string
+    query: string
+  }>
+  answer_structure?: Array<{
+    section: number
+    type: string
+    title?: string
+    source_from?: string
+    instruction: string
+  }>
+  notes?: string
+  error?: string
+}
+
+export interface SubAgentResult {
+  agent: string
+  status: string
+  result: string
+  query?: string
+  sources?: string[]
+  source_urls?: string[]
+  citations?: Array<{
+    text: string
+    source: string
+    url: string
+  }>
+}
+
 export interface ChatResponse {
   response: string
+  raw_answer?: string  // ✅ Final Agent 원본 출력
   sources: string[]
-  source_urls: string[]  // 다운로드 URL
+  source_urls: string[]
+  // 멀티에이전트 디버그 데이터
+  orchestration_result?: OrchestrationResult
+  sub_agent_results?: Record<string, SubAgentResult>
+  metadata?: Record<string, any>
 }
 
 export interface UploadResponse {
   success: boolean
   message: string
-  classification: {
-    category: string
-    categoryName: string
-    emoji: string
-    confidence: number
-    reason: string
-    keywords: string[]
-  }
   stats: {
     totalPages: number
     chunksTotal: number
@@ -50,25 +81,77 @@ export interface Document {
   title: string
   source: string
   fileName: string
-  fileUrl?: string  // 다운로드 URL
+  fileUrl?: string
   category: string
   uploadedAt: string
-  hashtags?: string[]  // 해시태그
+  hashtags?: string[]
 }
 
-// 채팅 API
-export const sendMessage = async (
+export interface Agent {
+  name: string
+  description: string
+}
+
+// 채팅 API (스트리밍)
+export const sendMessageStream = async (
   message: string,
-  sessionId?: string
-): Promise<ChatResponse> => {
-  const response = await api.post<ChatResponse>('/chat', {
-    message,
-    session_id: sessionId,
+  sessionId: string,
+  onLog: (log: string) => void,
+  onResult: (result: ChatResponse) => void,
+  onError?: (error: string) => void
+): Promise<void> => {
+  const response = await fetch('/api/chat/stream', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      message,
+      session_id: sessionId,
+    }),
   })
-  return response.data
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`)
+  }
+
+  const reader = response.body?.getReader()
+  const decoder = new TextDecoder()
+
+  if (!reader) {
+    throw new Error('No reader available')
+  }
+
+  let buffer = ''
+  
+  while (true) {
+    const { done, value } = await reader.read()
+    
+    if (done) break
+    
+    buffer += decoder.decode(value, { stream: true })
+    
+    // SSE 메시지 파싱
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+    
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const data = JSON.parse(line.slice(6))
+        
+        if (data.type === 'log') {
+          onLog(data.message)
+        } else if (data.type === 'result') {
+          onResult(data.data)
+        } else if (data.type === 'error') {
+          onError?.(data.data.response || '오류가 발생했습니다')
+        }
+      }
+    }
+  }
 }
 
-// 업로드 API (제목/출처 자동 추출)
+// 업로드 API
 export const uploadDocument = async (
   file: File
 ): Promise<UploadResponse> => {
@@ -79,7 +162,7 @@ export const uploadDocument = async (
     headers: {
       'Content-Type': 'multipart/form-data',
     },
-    timeout: 120000, // 업로드는 오래 걸림
+    timeout: 180000,
   })
   return response.data
 }
@@ -88,11 +171,13 @@ export const uploadDocument = async (
 export const updateDocument = async (
   id: string,
   title: string,
-  source: string
+  source: string,
+  hashtags?: string[]
 ): Promise<void> => {
   await api.patch(`/documents/${id}`, {
     title,
     source,
+    hashtags,
   })
 }
 
@@ -107,3 +192,23 @@ export const deleteDocument = async (id: string): Promise<void> => {
   await api.delete(`/documents/${id}`)
 }
 
+// 에이전트 목록 API
+export const getAgents = async (): Promise<Agent[]> => {
+  const response = await api.get<{ agents: Agent[] }>('/chat/agents')
+  return response.data.agents
+}
+
+// 에이전트 추가 API
+export const addAgent = async (agent: Agent): Promise<void> => {
+  await api.post('/chat/agents', agent)
+}
+
+// 에이전트 삭제 API
+export const deleteAgent = async (agentName: string): Promise<void> => {
+  await api.delete(`/chat/agents/${encodeURIComponent(agentName)}`)
+}
+
+// 세션 초기화 API
+export const resetSession = async (sessionId: string): Promise<void> => {
+  await api.post(`/chat/reset?session_id=${sessionId}`)
+}

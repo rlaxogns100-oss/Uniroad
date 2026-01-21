@@ -4,8 +4,9 @@ FastAPI 메인 애플리케이션
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from config import settings
-from routers import chat, upload, documents
+from routers import chat, upload, documents, agent_admin, auth, sessions
 
 # FastAPI 앱 생성
 app = FastAPI(
@@ -22,6 +23,7 @@ app.add_middleware(
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:3000",  # Next.js 호환
+        "http://3.107.178.26",  # 프로덕션 서버
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -30,9 +32,12 @@ app.add_middleware(
 
 
 # 라우터 등록
+app.include_router(auth.router, prefix="/api/auth", tags=["인증"])
+app.include_router(sessions.router, prefix="/api/sessions", tags=["세션관리"])
 app.include_router(chat.router, prefix="/api/chat", tags=["채팅"])
 app.include_router(upload.router, prefix="/api/upload", tags=["업로드"])
 app.include_router(documents.router, prefix="/api/documents", tags=["문서관리"])
+app.include_router(agent_admin.router, prefix="/api/agent", tags=["에이전트관리"])
 
 
 @app.get("/")

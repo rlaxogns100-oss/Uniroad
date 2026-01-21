@@ -9,15 +9,10 @@ class Settings(BaseSettings):
     # Supabase
     SUPABASE_URL: str
     SUPABASE_KEY: str
+    SUPABASE_JWT_SECRET: str = "your-jwt-secret"  # JWT 토큰 검증용
     
-    # OpenAI (임베딩용)
-    OPENAI_API_KEY: str
-    
-    # Gemini (채팅/분류용)
+    # Gemini (채팅/분류/임베딩용)
     GEMINI_API_KEY: str
-    
-    # LlamaParse
-    LLAMA_API_KEY: str
     
     # Server
     BACKEND_PORT: int = 8000

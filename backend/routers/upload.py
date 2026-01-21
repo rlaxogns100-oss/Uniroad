@@ -2,7 +2,7 @@
 파일 업로드 API 라우터
 """
 from fastapi import APIRouter, File, UploadFile, Form, HTTPException
-from services.llamaparse_service import llamaparse_service
+from services.gemini_pdf_service import gemini_pdf_service as pdf_service
 from services.classifier_service import classifier_service
 from services.embedding_service import embedding_service
 from services.supabase_client import supabase_service
@@ -18,7 +18,7 @@ async def upload_document(
     """
     PDF 문서 업로드 및 처리
     
-    1. LlamaParse로 PDF → Markdown 변환
+    1. Gemini로 PDF → Markdown 변환
     2. Gemini로 요약 + 출처 자동 추출
     3. 텍스트 청킹
     4. 임베딩 생성
@@ -60,9 +60,9 @@ async def upload_document(
             storage_file_name = file.filename  # 원본 파일명 사용
             file_url = ''  # None 대신 빈 문자열
         
-        # 2️⃣ LlamaParse로 PDF 변환
-        print("2️⃣ LlamaParse로 PDF → Markdown 변환 중...")
-        parse_result = await llamaparse_service.parse_pdf(
+        # 2️⃣ PDF → Markdown 변환
+        print(f"2️⃣ GEMINI로 PDF → Markdown 변환 중...")
+        parse_result = await pdf_service.parse_pdf(
             file_bytes,
             file.filename
             # 전체 페이지 파싱
@@ -70,6 +70,10 @@ async def upload_document(
         
         markdown = parse_result['markdown']
         total_pages = parse_result['totalPages']
+        
+        # Markdown이 비어있으면 오류
+        if not markdown or len(markdown.strip()) == 0:
+            raise Exception("PDF 파싱 결과가 비어있습니다. 네트워크 연결을 확인하거나 다시 시도해주세요.")
         
         # 3️⃣ 요약 + 출처 추출 + 해시태그 추출 + 청킹
         print("3️⃣ Gemini 요약 + 출처 + 해시태그 추출 + 청킹...")

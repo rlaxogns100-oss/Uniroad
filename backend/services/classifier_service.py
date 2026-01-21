@@ -2,8 +2,7 @@
 AI 기반 문서 분류 서비스 (개선 버전)
 """
 from services.gemini_service import gemini_service
-from models.rag_models import ClassificationResult
-from config.constants import CLASSIFICATION_SAMPLE_LENGTH, SUMMARY_MAX_LENGTH
+from config.constants import SUMMARY_MAX_LENGTH
 from config.logging_config import classifier_logger as logger
 import json
 
@@ -14,111 +13,6 @@ class ClassifierService:
     def __init__(self):
         """초기화"""
         logger.info("ClassifierService 초기화 완료")
-    
-    async def classify_document(
-        self,
-        text: str,
-        title: str
-    ) -> ClassificationResult:
-        """
-        문서 내용을 읽고 자동 분류
-
-        Args:
-            text: 문서 내용
-            title: 문서 제목
-
-        Returns:
-            분류 결과
-        """
-        logger.info(f"AI 문서 분류 시작 - 제목: {title}")
-
-        # 샘플 추출
-        sample = text[:CLASSIFICATION_SAMPLE_LENGTH]
-        
-        prompt = f"""다음 대학 입시 관련 문서를 읽고 정확히 분류해주세요.
-
-**문서 제목:** {title}
-
-**문서 내용 (앞부분):**
-{sample}
-
----
-
-**분류 기준:**
-1. **policy**: 대학입학 전형 기본사항, 모집요강, 전형 방법, 수시/정시 안내 등
-2. **admission_stats**: 입시 결과, 경쟁률, 합격선, 커트라인, 성적 통계 등
-3. **university_info**: 대학 소개, 학과 정보, 캠퍼스 안내, 장학금 등
-
-**응답 형식 (JSON):**
-{{
-  "category": "policy" 또는 "admission_stats" 또는 "university_info",
-  "confidence": 0.0~1.0 사이 값,
-  "reason": "분류 이유를 한 문장으로",
-  "keywords": ["주요", "키워드", "5개"]
-}}
-
-JSON만 출력하세요."""
-
-        try:
-            # Gemini 호출
-            response_text = await gemini_service.generate(
-                prompt,
-                "당신은 대학 입시 문서 분류 전문가입니다."
-            )
-
-            # JSON 추출
-            result_text = response_text
-            if "```json" in result_text:
-                result_text = result_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in result_text:
-                result_text = result_text.split("```")[1].split("```")[0].strip()
-
-            result = json.loads(result_text)
-
-            # Pydantic 모델로 변환
-            classification = ClassificationResult(
-                category=result.get('category', 'policy'),
-                confidence=float(result.get('confidence', 0.8)),
-                reason=result.get('reason', '자동 분류됨'),
-                keywords=result.get('keywords', [])[:10]
-            )
-
-            emoji = self._get_emoji(classification.category)
-            category_name = self._get_category_name(classification.category)
-
-            logger.info(f"분류 완료 - {emoji} {category_name} (신뢰도: {classification.confidence*100:.0f}%)")
-            logger.info(f"이유: {classification.reason}")
-            logger.info(f"키워드: {', '.join(classification.keywords[:5])}")
-
-            return classification
-
-        except Exception as e:
-            logger.error(f"분류 오류: {e}")
-            # 기본값 반환
-            return ClassificationResult(
-                category='policy',
-                confidence=0.5,
-                reason=f'자동 분류 실패: {str(e)}',
-                keywords=[]
-            )
-    
-    def _get_emoji(self, category: str) -> str:
-        """카테고리별 이모지"""
-        emojis = {
-            'policy': '📋',
-            'admission_stats': '📊',
-            'university_info': '🏫'
-        }
-        return emojis.get(category, '📄')
-    
-    def _get_category_name(self, category: str) -> str:
-        """카테고리 한글명"""
-        names = {
-            'policy': '정책/요강 문서',
-            'admission_stats': '입시 결과 통계',
-            'university_info': '대학 정보'
-        }
-        return names.get(category, '미분류')
     
     async def create_summary_and_extract_source(
         self, 
@@ -202,13 +96,6 @@ JSON만 출력하세요."""
                 "source": "미상"
             }
     
-    async def create_summary(self, text: str, title: str, max_length: int = None) -> str:
-        """
-        하위 호환성을 위한 래퍼 함수
-        """
-        result = await self.create_summary_and_extract_source(text, title, max_length)
-        return result["summary"]
-    
     async def extract_hashtags(self, text: str, title: str) -> list[str]:
         """
         Gemini로 문서 해시태그 자동 추출
@@ -238,15 +125,29 @@ JSON만 출력하세요."""
 
 **해시태그 규칙:**
 
-1. **시기** (필수, 1개):
-   - #2025 (작년/재수생)
-   - #2026 (올해 현역)
-   - #2027 (예비 시행계획)
+1. **연도** (⚠️ 최우선 필수! 문서에 나온 모든 연도 추출):
+   - 문서에 언급된 **모든 연도**를 빠짐없이 태그로 추출
+   - "2025학년도" → #2025
+   - "2026학년도" → #2026
+   - "2027학년도" → #2027
+   - "2028학년도" → #2028
+   - ⚠️ 여러 연도가 있으면 모두 태그로 추가! (예: 2026, 2027 둘 다 있으면 → #2026 #2027)
+   - ⚠️ 절대 빠뜨리지 마세요!
 
-2. **출처** (필수, 1-2개):
-   - #정부 (교육부, 대교협, 평가원 등 공공기관)
-   - #대학 (일반 대학 자료)
-   - #서울대, #연세대, #고려대 등 (특정 대학명이 명시되면 해당 대학 이름 태그 추가)
+2. **대학명** (⚠️ 최우선 필수! 문서에 나온 모든 대학 추출):
+   - 문서에 언급된 **모든 대학**을 빠짐없이 태그로 추출
+   - "서울대학교" → #서울대
+   - "연세대학교" → #연세대
+   - "고려대학교" → #고려대
+   - "성균관대학교" → #성균관대
+   - "한양대학교" → #한양대
+   - "중앙대학교" → #중앙대
+   - "경희대학교" → #경희대
+   - "이화여자대학교" → #이화여대
+   - 기타 대학도 동일하게 (예: "건국대학교" → #건국대)
+   - ⚠️ 여러 대학이 있으면 모두 태그로 추가! (예: 서울대, 연세대, 고려대 → #서울대 #연세대 #고려대)
+   - ⚠️ 절대 빠뜨리지 마세요!
+   - 정부/교육부/대교협 발행 문서면 #정부 태그 추가
 
 3. **문서 성격** (필수, 1-2개):
    - #모집요강 : 규칙 문서 (시행계획, 전형계획, 모집요강, 정책 등)
@@ -263,20 +164,21 @@ JSON만 출력하세요."""
 **JSON 형식으로 출력:**
 ```json
 {{
-  "hashtags": ["#2026", "#서울대", "#모집요강", "#수시"]
+  "hashtags": ["#2026", "#2027", "#서울대", "#연세대", "#고려대", "#입결통계"]
 }}
 ```
 
-**주의사항:**
+**⚠️ 중요 주의사항:**
+- 연도가 여러 개면 모두 포함! (예: 2026, 2027 → #2026 #2027)
+- 대학이 여러 개면 모두 포함! (예: 서울대, 연세대, 고려대 → #서울대 #연세대 #고려대)
 - 해시태그는 반드시 # 기호로 시작
-- 대학명은 정확한 공식 명칭 사용 (예: "서울대학교" → #서울대)
-- 최소 3개, 최대 6개
-- 불필요한 해시태그는 추가하지 마세요
+- 대학명은 줄임말 사용 (예: "고려대학교" → #고려대)
+- 최소 3개, 최대 10개
 """
         
         try:
-            # Gemini 호출 (Lite 모델)
-            response = await gemini_service.generate_text_lite(prompt)
+            # Gemini 호출
+            response = await gemini_service.generate(prompt, "")
             
             # JSON 파싱
             import re
@@ -285,9 +187,9 @@ JSON만 출력하세요."""
                 data = json.loads(json_match.group())
                 hashtags = data.get('hashtags', [])
                 
-                # 검증: # 기호로 시작하는지, 3-6개인지 확인
+                # 검증: # 기호로 시작하는지 확인
                 hashtags = [tag if tag.startswith('#') else f'#{tag}' for tag in hashtags]
-                hashtags = hashtags[:6]  # 최대 6개
+                hashtags = hashtags[:250]  # 최대 250개 (다수 대학/연도 포함 가능)
                 
                 if len(hashtags) < 3:
                     logger.warning(f"해시태그가 {len(hashtags)}개만 추출됨 (최소 3개 권장)")

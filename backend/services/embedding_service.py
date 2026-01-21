@@ -3,7 +3,7 @@
 """
 import google.generativeai as genai
 from config import settings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from typing import List
 import asyncio
 
@@ -46,7 +46,10 @@ class EmbeddingService:
         chunks = splitter.split_text(text)
         
         print(f"   ✅ {len(chunks)}개 청크 생성")
-        print(f"   평균 크기: {sum(len(c) for c in chunks) // len(chunks):,}자\n")
+        if len(chunks) > 0:
+            print(f"   평균 크기: {sum(len(c) for c in chunks) // len(chunks):,}자\n")
+        else:
+            print(f"   ⚠️ 청크가 생성되지 않았습니다\n")
         
         return chunks
     
