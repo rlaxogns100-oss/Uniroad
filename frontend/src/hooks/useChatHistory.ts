@@ -48,7 +48,7 @@ export function useChatHistory() {
       }))
       
       // 최신순 정렬 (updatedAt 기준 내림차순)
-      sessionsData.sort((a, b) => b.updatedAt - a.updatedAt)
+      sessionsData.sort((a: ChatSession, b: ChatSession) => b.updatedAt - a.updatedAt)
       
       setSessions(sessionsData)
       setLoading(false)

@@ -8,7 +8,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://172.30.1.20:8000',
+        target: 'http://localhost:8000',
         changeOrigin: true,
         rewrite: (path) => path,
         timeout: 0,  // SSE를 위해 타임아웃 제거

@@ -897,7 +897,8 @@ export default function AgentAdminPage() {
   // Input 노드 선택 시 textarea 값 동기화
   useEffect(() => {
     if (selectedNode && selectedNode.type === 'input' && globalInputRefs[selectedNode.id]) {
-      setInputTextareaValue(globalInputRefs[selectedNode.id].value || '');
+      const ref = globalInputRefs[selectedNode.id];
+      setInputTextareaValue(ref?.value || '');
     }
   }, [selectedNode]);
 
@@ -1135,8 +1136,10 @@ export default function AgentAdminPage() {
             <div className="px-6 py-4 border-t flex gap-2 justify-end">
               <button 
                 onClick={() => {
-                  if (globalInputRefs[selectedNode?.id || '']) {
-                    globalInputRefs[selectedNode?.id || ''].value = selectedQuestionContent;
+                  const nodeId = selectedNode?.id || '';
+                  const ref = globalInputRefs[nodeId];
+                  if (ref) {
+                    ref.value = selectedQuestionContent;
                     setInputTextareaValue(selectedQuestionContent);
                   }
                   setShowQuestionModal(false);
@@ -1496,14 +1499,16 @@ export default function AgentAdminPage() {
                   onChange={(e) => {
                     const newValue = e.target.value;
                     setInputTextareaValue(newValue);
-                    if (globalInputRefs[selectedNode.id]) {
-                      globalInputRefs[selectedNode.id].value = newValue;
+                    const nodeId = selectedNode?.id;
+                    if (nodeId && globalInputRefs[nodeId]) {
+                      globalInputRefs[nodeId].value = newValue;
                     }
                   }}
                   onFocus={() => {
                     // 포커스 시 globalInputRefs의 값으로 동기화
-                    if (globalInputRefs[selectedNode.id]) {
-                      setInputTextareaValue(globalInputRefs[selectedNode.id].value || '');
+                    const nodeId = selectedNode?.id;
+                    if (nodeId && globalInputRefs[nodeId]) {
+                      setInputTextareaValue(globalInputRefs[nodeId].value || '');
                     }
                   }}
                   className="w-full h-32 px-3 py-2 border rounded text-sm resize-none focus:ring-2 focus:ring-blue-500"
