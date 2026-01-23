@@ -8,11 +8,13 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('Supabase 환경 변수가 설정되지 않았습니다.')
 }
 
-// 기본 Supabase 클라이언트 생성
+// 기본 Supabase 클라이언트 생성 (세션 영구 저장)
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    persistSession: false, // 세션은 AuthContext에서 관리
-    autoRefreshToken: false,
+    persistSession: true, // 세션을 localStorage에 저장하여 새로고침 시에도 유지
+    autoRefreshToken: true, // 토큰 자동 갱신
+    storageKey: 'uniroad-auth', // 저장 키
+    storage: window.localStorage, // localStorage 사용
   },
 })
 
@@ -25,8 +27,8 @@ export const getSupabaseClient = (accessToken?: string): SupabaseClient => {
   // 토큰이 있는 경우 새로운 클라이언트 생성
   return createClient(supabaseUrl, supabaseAnonKey, {
     auth: {
-      persistSession: false,
-      autoRefreshToken: false,
+      persistSession: true,
+      autoRefreshToken: true,
     },
     global: {
       headers: {

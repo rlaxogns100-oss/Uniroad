@@ -1,10 +1,12 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import axios from 'axios'
+import { supabase } from '../lib/supabase'
 
 interface User {
   id: string
   email: string
   name?: string
+  avatar_url?: string
 }
 
 interface AuthContextType {
@@ -13,6 +15,8 @@ interface AuthContextType {
   loading: boolean
   signIn: (email: string, password: string) => Promise<void>
   signUp: (email: string, password: string, name?: string) => Promise<void>
+  signInWithGoogle: () => Promise<void>
+  signInWithKakao: () => Promise<void>
   signOut: () => void
   isAuthenticated: boolean
 }
@@ -24,19 +28,76 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // 로컬스토리지에서 토큰 복원
+  // Supabase Auth 상태 변화 감지 (새로고침 시 세션 복원)
   useEffect(() => {
-    const storedToken = localStorage.getItem('access_token')
-    const storedUser = localStorage.getItem('user')
-    
-    if (storedToken && storedUser) {
-      setAccessToken(storedToken)
-      setUser(JSON.parse(storedUser))
-      
-      // 토큰 유효성 검증
-      verifyToken(storedToken)
-    } else {
-      setLoading(false)
+    // 현재 세션 확인
+    const checkSession = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession()
+        
+        if (session) {
+          // Supabase 세션이 있는 경우
+          const userData: User = {
+            id: session.user.id,
+            email: session.user.email || '',
+            name: session.user.user_metadata?.name || session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
+            avatar_url: session.user.user_metadata?.avatar_url,
+          }
+          setUser(userData)
+          setAccessToken(session.access_token)
+          localStorage.setItem('access_token', session.access_token)
+          localStorage.setItem('user', JSON.stringify(userData))
+        } else {
+          // 로컬 스토리지에서 토큰 복원 시도 (기존 이메일/비밀번호 로그인)
+          const storedToken = localStorage.getItem('access_token')
+          const storedUser = localStorage.getItem('user')
+          
+          if (storedToken && storedUser) {
+            setAccessToken(storedToken)
+            setUser(JSON.parse(storedUser))
+            // 토큰 유효성 검증
+            await verifyToken(storedToken)
+          }
+        }
+      } catch (error) {
+        console.error('세션 확인 오류:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    checkSession()
+
+    // Auth 상태 변화 리스너
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        console.log('Auth 상태 변화:', event, session?.user?.email)
+        
+        if (event === 'SIGNED_IN' && session) {
+          const userData: User = {
+            id: session.user.id,
+            email: session.user.email || '',
+            name: session.user.user_metadata?.name || session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
+            avatar_url: session.user.user_metadata?.avatar_url,
+          }
+          setUser(userData)
+          setAccessToken(session.access_token)
+          localStorage.setItem('access_token', session.access_token)
+          localStorage.setItem('user', JSON.stringify(userData))
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null)
+          setAccessToken(null)
+          localStorage.removeItem('access_token')
+          localStorage.removeItem('user')
+        } else if (event === 'TOKEN_REFRESHED' && session) {
+          setAccessToken(session.access_token)
+          localStorage.setItem('access_token', session.access_token)
+        }
+      }
+    )
+
+    return () => {
+      subscription.unsubscribe()
     }
   }, [])
 
@@ -46,12 +107,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         headers: { Authorization: `Bearer ${token}` }
       })
       setUser(response.data)
-      setLoading(false)
     } catch (error) {
       // 토큰이 만료되었거나 유효하지 않음
       console.error('토큰 검증 실패:', error)
       signOut()
-      setLoading(false)
     }
   }
 
@@ -85,12 +144,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const signOut = () => {
+  // Google 소셜 로그인
+  const signInWithGoogle = async () => {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: window.location.origin,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+        },
+      })
+      
+      if (error) {
+        throw new Error(error.message)
+      }
+    } catch (error: any) {
+      throw new Error(error.message || 'Google 로그인 실패')
+    }
+  }
+
+  // 카카오 소셜 로그인
+  const signInWithKakao = async () => {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'kakao',
+        options: {
+          redirectTo: window.location.origin,
+        },
+      })
+      
+      if (error) {
+        throw new Error(error.message)
+      }
+    } catch (error: any) {
+      throw new Error(error.message || '카카오 로그인 실패')
+    }
+  }
+
+  const signOut = async () => {
+    // Supabase 세션도 로그아웃
+    await supabase.auth.signOut()
     setUser(null)
     setAccessToken(null)
     localStorage.removeItem('access_token')
     localStorage.removeItem('user')
     localStorage.removeItem('refresh_token')
+    localStorage.removeItem('uniroad-auth')
   }
 
   return (
@@ -101,6 +203,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loading,
         signIn,
         signUp,
+        signInWithGoogle,
+        signInWithKakao,
         signOut,
         isAuthenticated: !!user,
       }}

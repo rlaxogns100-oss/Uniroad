@@ -99,7 +99,8 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [sessionId, setSessionId] = useState(() => `session-${Date.now()}`)
+  // Supabase 세션 ID만 사용 (로컬 세션 ID 생성 제거)
+  const [sessionId, setSessionId] = useState<string | null>(null)
   const [isSideNavOpen, setIsSideNavOpen] = useState(() => {
     // 데스크톱에서는 기본적으로 열림, 모바일에서는 닫힘
     return window.innerWidth >= 640
@@ -120,6 +121,7 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const sendingRef = useRef(false) // 중복 전송 방지
   const abortControllerRef = useRef<AbortController | null>(null) // 스트리밍 취소용
+  const isAbortedRef = useRef(false) // 사용자가 중단했는지 추적
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -143,6 +145,7 @@ export default function ChatPage() {
   const handleNewChat = () => {
     // 진행 중인 요청 취소
     if (abortControllerRef.current) {
+      isAbortedRef.current = true
       abortControllerRef.current.abort()
       abortControllerRef.current = null
     }
@@ -173,13 +176,13 @@ export default function ChatPage() {
       prevSessionIdRef.current = currentSessionId
       
       if (currentSessionId && isAuthenticated) {
-        // API 호출용 sessionId 업데이트
+        // API 호출용 sessionId 업데이트 (Supabase 세션 ID 사용)
         setSessionId(currentSessionId)
         // 메시지는 loadMessages가 완료되면 savedMessages에 반영되고, 아래 useEffect에서 처리됨
       } else if (!currentSessionId) {
-        // 새 채팅인 경우
+        // 새 채팅인 경우 - 세션 ID는 null로 유지 (새 세션 생성 시 설정됨)
         setMessages([])
-        setSessionId(`session-${Date.now()}`)
+        setSessionId(null)
       }
     }
   }, [currentSessionId, isAuthenticated])
@@ -223,7 +226,7 @@ export default function ChatPage() {
     setInput('')
     setIsLoading(true)
 
-    // 세션 처리: 새 채팅인 경우 세션 생성
+    // 세션 처리: 새 채팅인 경우 Supabase 세션 생성
     let currentSessionIdToUse = currentSessionId
     if (!currentSessionIdToUse && isAuthenticated) {
       // 새 세션 생성 (제목은 사용자 메시지 앞부분)
@@ -231,9 +234,27 @@ export default function ChatPage() {
       const newSessionId = await createSession(title)
       if (newSessionId) {
         currentSessionIdToUse = newSessionId
-        setSessionId(newSessionId)
+        setSessionId(newSessionId)  // Supabase 세션 ID 사용
         await selectSession(newSessionId)
+      } else {
+        // 세션 생성 실패 시 요청 중단
+        setIsLoading(false)
+        sendingRef.current = false
+        return
       }
+    }
+    
+    // 세션 ID가 없으면 요청 중단 (인증된 사용자는 반드시 세션이 있어야 함)
+    if (isAuthenticated && !currentSessionIdToUse) {
+      console.error('세션 ID가 없습니다')
+      setIsLoading(false)
+      sendingRef.current = false
+      return
+    }
+    
+    // 인증되지 않은 사용자도 기본 세션 ID 사용 (하지만 Supabase에 저장 안 됨)
+    if (!isAuthenticated) {
+      currentSessionIdToUse = currentSessionIdToUse || 'default'
     }
 
     const userMessage: Message = {
@@ -261,6 +282,9 @@ export default function ChatPage() {
       await saveMessage(currentSessionIdToUse, 'user', userInput)
     }
 
+    // 중단 상태 초기화
+    isAbortedRef.current = false
+    
     // 로그 초기화
     setAgentData({
       orchestrationResult: null,
@@ -293,21 +317,65 @@ export default function ChatPage() {
           setCurrentLog(formattedLog)
         },
         // 결과 콜백
-        async (response: ChatResponse) => {
+        async (response: ChatResponse & { is_streaming?: boolean }) => {
           // 취소된 경우 콜백 실행 안 함
           if (abortController.signal.aborted) return
           
+          // 스트리밍 답변 청크인 경우 기존 메시지에 누적
+          if (response.is_streaming) {
+            setMessages((prev) => {
+              const lastMessage = prev[prev.length - 1]
+              // 마지막 메시지가 사용자 메시지가 아니고, 아직 완성되지 않은 답변인 경우
+              if (lastMessage && !lastMessage.isUser && lastMessage.id.startsWith('streaming-')) {
+                // 기존 메시지에 청크 추가
+                return prev.map((msg, idx) => 
+                  idx === prev.length - 1 
+                    ? { ...msg, text: msg.text + response.response }
+                    : msg
+                )
+              } else {
+                // 새로운 스트리밍 메시지 생성
+                const streamingMessage: Message = {
+                  id: `streaming-${Date.now()}`,
+                  text: response.response,
+                  isUser: false,
+                  sources: [],
+                  source_urls: [],
+                  used_chunks: [],
+                }
+                return [...prev, streamingMessage]
+              }
+            })
+            return  // 스트리밍 청크는 여기서 종료
+          }
+          
+          // 완성된 답변인 경우
           const botMessage: Message = {
             id: (Date.now() + 1).toString(),
             text: response.response,
             isUser: false,
-            sources: response.sources,
-            source_urls: response.source_urls,
-            used_chunks: response.used_chunks,
+            sources: response.sources || [],
+            source_urls: response.source_urls || [],
+            used_chunks: response.used_chunks || [],
           }
 
-          // 중복 방지: 같은 내용의 메시지가 이미 있으면 추가하지 않음
+          // 스트리밍 메시지가 있으면 완성된 메시지로 교체
           setMessages((prev) => {
+            const lastMessage = prev[prev.length - 1]
+            if (lastMessage && !lastMessage.isUser && lastMessage.id.startsWith('streaming-')) {
+              // 스트리밍 메시지를 완성된 메시지로 교체 (소스 정보 포함)
+              return prev.map((msg, idx) => 
+                idx === prev.length - 1 
+                  ? { 
+                      ...botMessage, 
+                      id: msg.id.replace('streaming-', ''),  // streaming- 제거
+                      text: response.response  // 최종 답변으로 교체
+                    }
+                  : msg
+              )
+            }
+            
+            // 중복 방지: 같은 내용의 메시지가 이미 있으면 추가하지 않음
             const isDuplicate = prev.some(
               (msg) => !msg.isUser && msg.text === response.response && 
               Date.now() - parseInt(msg.id) < 2000 // 2초 이내에 같은 메시지가 있으면 중복으로 간주
@@ -371,13 +439,31 @@ export default function ChatPage() {
       }
       setMessages((prev) => [...prev, errorMessage])
     } finally {
-      // 취소되지 않은 경우에만 상태 초기화
-      if (!abortControllerRef.current?.signal.aborted) {
-        setIsLoading(false)
-        setCurrentLog('')
+      // 중단된 경우 메시지에 중단 표시 추가 (버튼 클릭 시 이미 추가되었을 수 있으므로 중복 방지)
+      if (isAbortedRef.current) {
+        setMessages((prev) => {
+          const lastMsg = prev[prev.length - 1]
+          // 이미 중단 메시지가 추가되었는지 확인
+          if (lastMsg && lastMsg.text.includes('중지되었습니다')) {
+            return prev // 이미 추가됨
+          }
+          // 스트리밍 메시지가 있으면 업데이트
+          if (lastMsg && !lastMsg.isUser && lastMsg.id.startsWith('streaming-')) {
+            return prev.map((msg, idx) =>
+              idx === prev.length - 1
+                ? { ...msg, text: msg.text + '\n\n✨ 대답이 중지되었습니다.' }
+                : msg
+            )
+          }
+          return prev
+        })
       }
+      
+      setIsLoading(false)
+      setCurrentLog('')
       sendingRef.current = false
       abortControllerRef.current = null
+      isAbortedRef.current = false // 초기화
       console.log('✅ 메시지 전송 완료')
     }
   }
@@ -872,15 +958,69 @@ export default function ChatPage() {
             />
               </div>
               
-              {/* 전송 버튼 */}
+              {/* 전송/정지 버튼 */}
             <button
-              onClick={handleSend}
-              disabled={isLoading || !input.trim()}
+              onClick={() => {
+                if (isLoading) {
+                  // 응답 중단
+                  if (abortControllerRef.current) {
+                    isAbortedRef.current = true
+                    abortControllerRef.current.abort()
+                    
+                    // 즉시 중단 메시지 표시
+                    setMessages((prev) => {
+                      const lastMsg = prev[prev.length - 1]
+                      if (lastMsg && !lastMsg.isUser) {
+                        // 스트리밍 메시지가 있으면 업데이트
+                        if (lastMsg.id.startsWith('streaming-')) {
+                          return prev.map((msg, idx) =>
+                            idx === prev.length - 1
+                              ? { ...msg, text: msg.text + '\n\n✨ 대답이 중지되었습니다.' }
+                              : msg
+                          )
+                        } else {
+                          // 완료된 메시지면 새 메시지 추가
+                          const abortMessage: Message = {
+                            id: Date.now().toString(),
+                            text: '✨ 대답이 중지되었습니다.',
+                            isUser: false,
+                          }
+                          return [...prev, abortMessage]
+                        }
+                      } else {
+                        // 마지막 메시지가 사용자 메시지이거나 없으면 새 메시지 추가
+                        const abortMessage: Message = {
+                          id: Date.now().toString(),
+                          text: '✨ 대답이 중지되었습니다.',
+                          isUser: false,
+                        }
+                        return [...prev, abortMessage]
+                      }
+                    })
+                    
+                    setIsLoading(false)
+                    setCurrentLog('')
+                    abortControllerRef.current = null
+                  }
+                } else {
+                  // 메시지 전송
+                  handleSend()
+                }
+              }}
+              disabled={!isLoading && !input.trim()}
                 className="flex-shrink-0 w-11 h-11 sm:w-12 sm:h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
             >
-                <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
+                {isLoading ? (
+                  // 정지 아이콘
+                  <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="currentColor" viewBox="0 0 24 24">
+                    <rect x="7" y="7" width="10" height="10" rx="1" />
+                  </svg>
+                ) : (
+                  // 전송 아이콘
+                  <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+                )}
             </button>
             </div>
           </div>

@@ -155,6 +155,12 @@ export const sendMessageStream = async (
           onLog(data.message)
         } else if (data.type === 'result') {
           onResult(data.data)
+        } else if (data.type === 'answer_chunk') {
+          // 스트리밍 답변 청크 처리
+          onResult({
+            response: data.chunk,
+            is_streaming: true
+          } as any)
         } else if (data.type === 'error') {
           onError?.(data.data.response || '오류가 발생했습니다')
         }

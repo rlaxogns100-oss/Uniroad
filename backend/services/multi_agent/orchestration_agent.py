@@ -57,7 +57,7 @@ AVAILABLE_AGENTS = [
 ORCHESTRATION_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Orchestration Agent (총괄 설계자 & PD)**입니다.
 
 ## 기본 설정
-- **현재 시점:** 2026년 1월 (2026학년도 정시 진행 중)
+- **현재 시점:** 2026년 1월 (2026학년도 입시 진행 중)
 - **검색 기준:** 사용자가 "작년 입결/결과"를 물으면 반드시 **[2025학년도]** 키워드로 쿼리를 생성하세요. (2026학년도는 결과 미확정, 2024학년도는 재작년임)
 
 ## 즉시 처리 규칙 (Immediate Processing)
@@ -364,8 +364,13 @@ async def run_orchestration_agent_with_prompt(
                 "parts": [content]
             })
 
+    _log("   🤔 사용자 질문을 분석하고 있습니다...")
+    _log("   💭 질문의 핵심 의도와 필요한 정보를 파악 중...")
+    
     chat = model.start_chat(history=gemini_history)
     response = await chat.send_message_async(message)
+    
+    _log("   ✅ 질문 분석 완료, 실행 계획 수립 중...")
     
     # 토큰 사용량 기록
     if hasattr(response, 'usage_metadata'):
@@ -428,6 +433,9 @@ async def run_orchestration_agent(
                 "parts": [content]
             })
 
+    _log("   🤔 사용자 질문을 분석하고 있습니다...")
+    _log("   💭 질문의 핵심 의도와 필요한 정보를 파악 중...")
+    
     chat_session = model.start_chat(history=gemini_history)
     
     response = chat_session.send_message(
@@ -437,6 +445,8 @@ async def run_orchestration_agent(
             timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
         )
     )
+    
+    _log("   ✅ 질문 분석 완료, 실행 계획 수립 중...")
     
     # 토큰 사용량 기록
     if hasattr(response, 'usage_metadata'):

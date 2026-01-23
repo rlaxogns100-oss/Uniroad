@@ -66,36 +66,70 @@ async def chat(request: ChatRequest):
         request_id = f"{session_id}:{message}:{int(time.time())}"
         print(f"\n🔵 [REQUEST_START] {request_id}")
 
-        # 로그 수집
+        # 로그 수집 (현재 질문에만 기반 - 이전 로그와 격리)
+        logs.clear()  # 이전 로그 완전히 제거
+        
         def log_and_emit(msg: str):
             print(msg)
             logs.append(msg)
 
+        # 현재 질문 정보를 명확히 표시
         log_and_emit(f"{'#'*80}")
         log_and_emit(f"# 🚀 멀티에이전트 파이프라인 시작")
+        log_and_emit(f"# ⏰ 시작 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}")
         log_and_emit(f"# 세션: {session_id}")
-        log_and_emit(f"# 질문: {message}")
+        log_and_emit(f"# 📝 현재 질문: {message}")
         log_and_emit(f"# Request ID: {request_id}")
         log_and_emit(f"{'#'*80}")
 
-        # 세션 히스토리 초기화
-        if session_id not in conversation_sessions:
-            conversation_sessions[session_id] = []
-
-        history = conversation_sessions[session_id]
+        # 세션 히스토리 로드 (Supabase와 동기화)
+        # UUID 형식의 세션 ID는 Supabase 세션, 그 외는 인메모리만 사용
+        import re
+        is_uuid = re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', session_id, re.I)
+        
+        if is_uuid:
+            # Supabase 세션인 경우 conversation_context에서 로드
+            try:
+                context_response = supabase_service.client.table("conversation_context")\
+                    .select("context")\
+                    .eq("session_id", session_id)\
+                    .execute()
+                
+                if context_response.data and len(context_response.data) > 0:
+                    history = context_response.data[0].get("context", [])
+                    conversation_sessions[session_id] = history
+                    log_and_emit(f"   💾 Supabase에서 대화 히스토리 로드: {len(history)}개 메시지")
+                else:
+                    # Supabase에 컨텍스트가 없으면 빈 배열로 시작
+                    history = []
+                    conversation_sessions[session_id] = []
+                    log_and_emit(f"   📝 새 Supabase 세션 시작")
+            except Exception as e:
+                # Supabase 조회 실패 시 인메모리로 폴백
+                print(f"⚠️ Supabase 컨텍스트 조회 실패: {e}")
+                if session_id not in conversation_sessions:
+                    conversation_sessions[session_id] = []
+                history = conversation_sessions[session_id]
+        else:
+            # 인메모리 세션 (로컬 개발용)
+            if session_id not in conversation_sessions:
+                conversation_sessions[session_id] = []
+            history = conversation_sessions[session_id]
 
         # ========================================
         # 1단계: Orchestration Agent
         # ========================================
         log_and_emit("")
         log_and_emit("="*80)
-        log_and_emit("🎯 Orchestration Agent 실행")
+        log_and_emit("🎯 [1단계] Orchestration Agent 실행")
         log_and_emit("="*80)
-        log_and_emit(f"질문: {message}")
+        log_and_emit(f"📝 분석할 질문: \"{message}\"")
+        log_and_emit(f"💭 이전 대화: {len(history)}개 메시지")
         
-        # 실시간 로그 콜백 설정
+        # 실시간 로그 콜백 설정 (현재 요청에만 적용)
         from services.multi_agent import orchestration_agent, sub_agents, final_agent
         
+        # 각 요청마다 새로운 콜백 설정 (이전 로그와 격리)
         orchestration_agent.set_log_callback(log_and_emit)
         sub_agents.set_log_callback(log_and_emit)
         final_agent.set_log_callback(log_and_emit)
@@ -120,12 +154,17 @@ async def chat(request: ChatRequest):
         answer_structure = orchestration_result.get("answer_structure", [])
         direct_response = orchestration_result.get("direct_response", None)
         extracted_scores = orchestration_result.get("extracted_scores", {})
+        user_intent = orchestration_result.get('user_intent', 'N/A')
         
         log_and_emit("")
         log_and_emit(f"📋 Orchestration 결과:")
-        log_and_emit(f"   사용자 의도: {orchestration_result.get('user_intent', 'N/A')}")
+        log_and_emit(f"   사용자 의도: {user_intent}")
         log_and_emit(f"   실행 계획: {len(execution_plan)}개 step")
         log_and_emit(f"   답변 구조: {len(answer_structure)}개 섹션")
+        
+        # 사용자 의도를 명확히 표시 (프론트엔드 파싱용)
+        if user_intent and user_intent != 'N/A':
+            log_and_emit(f"💡 사용자 의도 파악: {user_intent}")
         
         # extracted_scores 로그
         if extracted_scores:
@@ -156,7 +195,22 @@ async def chat(request: ChatRequest):
 
             # 최근 10턴만 유지
             if len(history) > 20:
-                conversation_sessions[session_id] = history[-20:]
+                history = history[-20:]
+                conversation_sessions[session_id] = history
+            
+            # Supabase 세션인 경우 conversation_context에 저장
+            import re
+            is_uuid = re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', session_id, re.I)
+            if is_uuid:
+                try:
+                    supabase_service.client.table("conversation_context")\
+                        .upsert({
+                            "session_id": session_id,
+                            "context": history,
+                        })\
+                        .execute()
+                except Exception as e:
+                    print(f"⚠️ Supabase 컨텍스트 저장 실패: {e}")
 
             # 채팅 로그 저장
             await supabase_service.insert_chat_log(
@@ -193,12 +247,20 @@ async def chat(request: ChatRequest):
         # ========================================
         log_and_emit("")
         log_and_emit("="*80)
-        log_and_emit("🤖 Sub Agents 실행")
+        log_and_emit("🤖 [2단계] Sub Agents 실행")
         log_and_emit("="*80)
+        log_and_emit(f"📋 실행 계획: {len(execution_plan)}개 Step")
         
         for step in execution_plan:
-            log_and_emit(f"   Step {step['step']}: {step['agent']}")
-            log_and_emit(f"   Query: {step['query']}")
+            step_num = step.get('step', '?')
+            agent_name = step.get('agent', 'Unknown')
+            query = step.get('query', '')
+            query_preview = query[:80] + "..." if len(query) > 80 else query
+            log_and_emit(f"   Step {step_num}: {agent_name}")
+            log_and_emit(f"      📝 Query: {query_preview}")
+        
+        log_and_emit("")
+        log_and_emit("   🚀 병렬 실행 시작...")
         
         sub_start = time.time()
         sub_agent_results = await execute_sub_agents(
@@ -209,14 +271,16 @@ async def chat(request: ChatRequest):
         sub_time = time.time() - sub_start
         
         log_and_emit("")
+        log_and_emit("   📊 Sub Agents 실행 결과:")
         for key, result in sub_agent_results.items():
             status = result.get('status', 'unknown')
             agent = result.get('agent', 'Unknown')
             sources_count = len(result.get('sources', []))
             exec_time = result.get('execution_time', 0)
             status_icon = "✅" if status == "success" else "❌"
-            log_and_emit(f"{status_icon} {key} ({agent}): {status} (출처 {sources_count}개, ⏱️ {exec_time:.2f}초)")
-        log_and_emit(f"   총 Sub Agents 처리 시간: {sub_time:.2f}초")
+            sources_info = f"출처 {sources_count}개" if sources_count > 0 else "출처 없음"
+            log_and_emit(f"      {status_icon} {key} ({agent}): {status} ({sources_info}, ⏱️ {exec_time:.2f}초)")
+        log_and_emit(f"   ⏱️  총 Sub Agents 처리 시간: {sub_time:.2f}초")
         log_and_emit("="*80)
 
         # ========================================
@@ -224,9 +288,17 @@ async def chat(request: ChatRequest):
         # ========================================
         log_and_emit("")
         log_and_emit("="*80)
-        log_and_emit("📝 Final Agent 실행")
+        log_and_emit("📝 [3단계] Final Agent 실행")
         log_and_emit("="*80)
-        log_and_emit(f"   섹션 수: {len(answer_structure)}")
+        log_and_emit(f"   📋 답변 구조: {len(answer_structure)}개 섹션")
+        for idx, section in enumerate(answer_structure[:5], 1):  # 상위 5개만 표시
+            section_title = section.get('title', '제목 없음') or section.get('section', '섹션')
+            log_and_emit(f"      {idx}. {section_title}")
+        if len(answer_structure) > 5:
+            log_and_emit(f"      ... 외 {len(answer_structure) - 5}개 섹션")
+        
+        log_and_emit("")
+        log_and_emit("   ✍️  최종 답변 작성 중...")
         
         final_start = time.time()
         final_result = await generate_final_answer(
@@ -253,7 +325,24 @@ async def chat(request: ChatRequest):
 
         # 최근 10턴만 유지
         if len(history) > 20:
-            conversation_sessions[session_id] = history[-20:]
+            history = history[-20:]
+            conversation_sessions[session_id] = history
+        
+        # Supabase 세션인 경우 conversation_context에 저장
+        import re
+        is_uuid = re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', session_id, re.I)
+        if is_uuid:
+            try:
+                supabase_service.client.table("conversation_context")\
+                    .upsert({
+                        "session_id": session_id,
+                        "context": history,
+                    })\
+                    .execute()
+                log_and_emit(f"   💾 Supabase에 대화 히스토리 저장 완료")
+            except Exception as e:
+                print(f"⚠️ Supabase 컨텍스트 저장 실패: {e}")
+                # 저장 실패해도 계속 진행
 
         # 채팅 로그 저장
         await supabase_service.insert_chat_log(
@@ -279,6 +368,11 @@ async def chat(request: ChatRequest):
         log_and_emit(f"#   • 전체: {pipeline_time:.2f}초")
         log_and_emit(f"{'#'*80}")
         
+        # 로그 콜백 초기화 (다음 요청과 격리)
+        orchestration_agent.set_log_callback(None)
+        sub_agents.set_log_callback(None)
+        final_agent.set_log_callback(None)
+        
         print(f"🟢 [REQUEST_END] {request_id}\n")
 
         return ChatResponse(
@@ -289,7 +383,8 @@ async def chat(request: ChatRequest):
             used_chunks=final_result.get("used_chunks", []),  # 사용된 청크 추가
             orchestration_result=orchestration_result,
             sub_agent_results=sub_agent_results,
-            metadata=final_result.get("metadata", {})
+            metadata=final_result.get("metadata", {}),
+            logs=logs  # 로그 추가
         )
 
     except Exception as e:
@@ -314,6 +409,7 @@ async def chat_stream(request: ChatRequest):
     async def generate():
         logs = []
         log_queue = asyncio.Queue()
+        pipeline_active = True  # 파이프라인 활성 상태
         
         try:
             session_id = request.session_id
@@ -337,27 +433,82 @@ async def chat_stream(request: ChatRequest):
             def send_log(msg: str):
                 log_callback(msg)
                 return f"data: {json.dumps({'type': 'log', 'message': msg})}\n\n"
+            
+            # 로그를 실시간으로 전송하는 태스크 (백그라운드)
+            async def stream_logs_background():
+                """백그라운드에서 로그를 계속 읽어서 즉시 전송"""
+                while pipeline_active:
+                    try:
+                        # 매우 짧은 타임아웃으로 빠른 응답
+                        msg = await asyncio.wait_for(log_queue.get(), timeout=0.01)
+                        yield f"data: {json.dumps({'type': 'log', 'message': msg})}\n\n"
+                    except asyncio.TimeoutError:
+                        # 큐가 비어있으면 잠시 대기 후 계속
+                        await asyncio.sleep(0.01)
+                        continue
+                    except Exception as e:
+                        print(f"로그 스트리밍 오류: {e}")
+                        break
+                
+                # 파이프라인 종료 후 남은 로그 처리
+                while not log_queue.empty():
+                    try:
+                        msg = log_queue.get_nowait()
+                        yield f"data: {json.dumps({'type': 'log', 'message': msg})}\n\n"
+                    except:
+                        break
 
+            # 로그 초기화 (현재 질문에만 기반)
+            logs.clear()
+            
             yield send_log(f"{'#'*80}")
             yield send_log(f"# 🚀 멀티에이전트 파이프라인 시작")
+            yield send_log(f"# ⏰ 시작 시간: {time.strftime('%Y-%m-%d %H:%M:%S')}")
             yield send_log(f"# 세션: {session_id}")
-            yield send_log(f"# 질문: {message}")
+            yield send_log(f"# 📝 현재 질문: {message}")
+            yield send_log(f"# Request ID: {request_id}")
             yield send_log(f"{'#'*80}")
 
-            # 세션 히스토리 초기화
-            if session_id not in conversation_sessions:
-                conversation_sessions[session_id] = []
-
-            history = conversation_sessions[session_id]
+            # 세션 히스토리 로드 (Supabase와 동기화)
+            import re
+            is_uuid = re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', session_id, re.I)
+            
+            if is_uuid:
+                # Supabase 세션인 경우 conversation_context에서 로드
+                try:
+                    context_response = supabase_service.client.table("conversation_context")\
+                        .select("context")\
+                        .eq("session_id", session_id)\
+                        .execute()
+                    
+                    if context_response.data and len(context_response.data) > 0:
+                        history = context_response.data[0].get("context", [])
+                        conversation_sessions[session_id] = history
+                        yield send_log(f"   💾 Supabase에서 대화 히스토리 로드: {len(history)}개 메시지")
+                    else:
+                        history = []
+                        conversation_sessions[session_id] = []
+                        yield send_log(f"   📝 새 Supabase 세션 시작")
+                except Exception as e:
+                    print(f"⚠️ Supabase 컨텍스트 조회 실패: {e}")
+                    if session_id not in conversation_sessions:
+                        conversation_sessions[session_id] = []
+                    history = conversation_sessions[session_id]
+            else:
+                # 인메모리 세션 (로컬 개발용)
+                if session_id not in conversation_sessions:
+                    conversation_sessions[session_id] = []
+                history = conversation_sessions[session_id]
 
             # ========================================
             # 1단계: Orchestration Agent
             # ========================================
             yield send_log("")
             yield send_log("="*80)
-            yield send_log("🎯 Orchestration Agent 실행")
+            yield send_log("🎯 [1단계] Orchestration Agent 실행")
             yield send_log("="*80)
-            yield send_log(f"질문: {message}")
+            yield send_log(f"📝 분석할 질문: \"{message}\"")
+            yield send_log(f"💭 이전 대화: {len(history)}개 메시지")
             
             # Agent들이 로그를 찍을 때마다 큐에 추가
             from services.multi_agent import orchestration_agent, sub_agents, final_agent
@@ -373,18 +524,27 @@ async def chat_stream(request: ChatRequest):
             
             orch_task = asyncio.create_task(run_orch())
             
-            # 큐에서 로그를 읽어서 스트리밍
+            # 로그를 실시간으로 스트리밍 (Orchestration Agent 실행 중)
+            # 매우 짧은 타임아웃으로 빠른 응답 (0.01초)
             while not orch_task.done():
                 try:
-                    log_msg = await asyncio.wait_for(log_queue.get(), timeout=0.1)
+                    log_msg = await asyncio.wait_for(log_queue.get(), timeout=0.01)
                     yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"
                 except asyncio.TimeoutError:
+                    # 태스크가 완료되었는지 확인
+                    if orch_task.done():
+                        break
+                    # 태스크가 아직 실행 중이면 계속 대기
+                    await asyncio.sleep(0.01)
                     continue
             
-            # 남은 로그 처리
+            # 남은 로그 즉시 처리
             while not log_queue.empty():
-                log_msg = log_queue.get_nowait()
-                yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"
+                try:
+                    log_msg = log_queue.get_nowait()
+                    yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"
+                except:
+                    break
             
             orchestration_result = orch_task.result()
             orch_time = time.time() - orch_start
@@ -445,7 +605,22 @@ async def chat_stream(request: ChatRequest):
 
                 # 최근 10턴만 유지
                 if len(history) > 20:
-                    conversation_sessions[session_id] = history[-20:]
+                    history = history[-20:]
+                    conversation_sessions[session_id] = history
+                
+                # Supabase 세션인 경우 conversation_context에 저장
+                import re
+                is_uuid = re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', session_id, re.I)
+                if is_uuid:
+                    try:
+                        supabase_service.client.table("conversation_context")\
+                            .upsert({
+                                "session_id": session_id,
+                                "context": history,
+                            })\
+                            .execute()
+                    except Exception as e:
+                        print(f"⚠️ Supabase 컨텍스트 저장 실패: {e}")
 
                 # 채팅 로그 저장
                 await supabase_service.insert_chat_log(
@@ -463,6 +638,14 @@ async def chat_stream(request: ChatRequest):
                 yield send_log(f"# 응답 길이: {len(direct_response)}자")
                 yield send_log(f"# ⏱️ 처리 시간: {pipeline_time:.2f}초")
                 yield send_log(f"{'#'*80}")
+                
+                # 로그 콜백 초기화 (다음 요청과 격리)
+                orchestration_agent.set_log_callback(None)
+                sub_agents.set_log_callback(None)
+                final_agent.set_log_callback(None)
+                
+                # 파이프라인 종료
+                pipeline_active = False
                 
                 print(f"🟢 [STREAM_REQUEST_END] {request_id}\n")
 
@@ -486,12 +669,20 @@ async def chat_stream(request: ChatRequest):
             # ========================================
             yield send_log("")
             yield send_log("="*80)
-            yield send_log("🤖 Sub Agents 실행")
+            yield send_log("🤖 [2단계] Sub Agents 실행")
             yield send_log("="*80)
+            yield send_log(f"📋 실행 계획: {len(execution_plan)}개 Step")
             
             for step in execution_plan:
-                yield send_log(f"   Step {step['step']}: {step['agent']}")
-                yield send_log(f"   Query: {step['query']}")
+                step_num = step.get('step', '?')
+                agent_name = step.get('agent', 'Unknown')
+                query = step.get('query', '')
+                query_preview = query[:80] + "..." if len(query) > 80 else query
+                yield send_log(f"   Step {step_num}: {agent_name}")
+                yield send_log(f"      📝 Query: {query_preview}")
+            
+            yield send_log("")
+            yield send_log("   🚀 병렬 실행 시작...")
             
             # Sub Agents 실행 (백그라운드)
             sub_start = time.time()
@@ -504,7 +695,7 @@ async def chat_stream(request: ChatRequest):
             
             subs_task = asyncio.create_task(run_subs())
             
-            # 큐에서 로그를 읽어서 스트리밍 (최대 대기 시간 추가)
+            # 큐에서 로그를 읽어서 스트리밍 (실시간 전송)
             max_wait_time = 180.0  # 최대 3분 대기
             wait_start = time.time()
             while not subs_task.done():
@@ -514,15 +705,24 @@ async def chat_stream(request: ChatRequest):
                     break
                     
                 try:
-                    log_msg = await asyncio.wait_for(log_queue.get(), timeout=0.1)
+                    # 매우 짧은 타임아웃으로 빠른 응답 (실시간 스트리밍)
+                    log_msg = await asyncio.wait_for(log_queue.get(), timeout=0.01)
                     yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"
                 except asyncio.TimeoutError:
+                    # 태스크가 완료되었는지 확인
+                    if subs_task.done():
+                        break
+                    # 태스크가 아직 실행 중이면 계속 대기
+                    await asyncio.sleep(0.01)
                     continue
             
-            # 남은 로그 처리
+            # 남은 로그 즉시 처리
             while not log_queue.empty():
-                log_msg = log_queue.get_nowait()
-                yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"
+                try:
+                    log_msg = log_queue.get_nowait()
+                    yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"
+                except:
+                    break
             
             sub_agent_results = subs_task.result()
             sub_time = time.time() - sub_start
@@ -543,23 +743,43 @@ async def chat_stream(request: ChatRequest):
             # ========================================
             yield send_log("")
             yield send_log("="*80)
-            yield send_log("📝 Final Agent 실행")
+            yield send_log("📝 [3단계] Final Agent 실행")
             yield send_log("="*80)
-            yield send_log(f"   섹션 수: {len(answer_structure)}")
+            yield send_log(f"   📋 답변 구조: {len(answer_structure)}개 섹션")
+            for idx, section in enumerate(answer_structure[:5], 1):  # 상위 5개만 표시
+                section_title = section.get('title', '제목 없음') or section.get('section', '섹션')
+                yield send_log(f"      {idx}. {section_title}")
+            if len(answer_structure) > 5:
+                yield send_log(f"      ... 외 {len(answer_structure) - 5}개 섹션")
             
-            # Final Agent 실행 (백그라운드)
+            yield send_log("")
+            yield send_log("   ✍️  최종 답변 작성 중...")
+            
+            # Final Agent 실행 (백그라운드) - 스트리밍 답변 지원
             final_start = time.time()
+            streaming_answer_chunks = []  # 스트리밍 답변 청크 수집
+            
+            # 스트리밍 콜백 함수
+            def stream_answer_chunk(chunk: str):
+                """답변 청크를 큐에 추가하여 실시간 전송"""
+                streaming_answer_chunks.append(chunk)
+                try:
+                    log_queue.put_nowait(f"__STREAM_ANSWER__:{chunk}")
+                except:
+                    pass
+            
             async def run_final():
                 return await generate_final_answer(
                     user_question=message,
                     answer_structure=answer_structure,
                     sub_agent_results=sub_agent_results,
-                    history=history
+                    history=history,
+                    stream_callback=stream_answer_chunk  # 스트리밍 콜백 전달
                 )
             
             final_task = asyncio.create_task(run_final())
             
-            # 큐에서 로그를 읽어서 스트리밍 (최대 대기 시간 추가)
+            # 큐에서 로그와 답변 청크를 읽어서 스트리밍 (실시간 전송)
             max_wait_time = 180.0  # 최대 3분 대기
             wait_start = time.time()
             while not final_task.done():
@@ -569,17 +789,36 @@ async def chat_stream(request: ChatRequest):
                     break
                     
                 try:
-                    log_msg = await asyncio.wait_for(log_queue.get(), timeout=0.1)
-                    yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"
+                    # 매우 짧은 타임아웃으로 빠른 응답 (실시간 스트리밍)
+                    log_msg = await asyncio.wait_for(log_queue.get(), timeout=0.01)
+                    
+                    # 답변 스트리밍 청크인지 확인
+                    if log_msg.startswith("__STREAM_ANSWER__:"):
+                        chunk = log_msg.replace("__STREAM_ANSWER__:", "")
+                        yield f"data: {json.dumps({'type': 'answer_chunk', 'chunk': chunk})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"
                 except asyncio.TimeoutError:
+                    # 태스크가 완료되었는지 확인
+                    if final_task.done():
+                        break
+                    # 태스크가 아직 실행 중이면 계속 대기
+                    await asyncio.sleep(0.01)
                     continue
             
-            # 남은 로그 처리
+            # 남은 로그와 답변 청크 즉시 처리
             while not log_queue.empty():
-                log_msg = log_queue.get_nowait()
-                yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"
+                try:
+                    log_msg = log_queue.get_nowait()
+                    if log_msg.startswith("__STREAM_ANSWER__:"):
+                        chunk = log_msg.replace("__STREAM_ANSWER__:", "")
+                        yield f"data: {json.dumps({'type': 'answer_chunk', 'chunk': chunk})}\n\n"
+                    else:
+                        yield f"data: {json.dumps({'type': 'log', 'message': log_msg})}\n\n"
+                except:
+                    break
             
-            final_result = final_task.result()
+            final_result = await final_task
             final_time = time.time() - final_start
 
             final_answer = final_result.get("final_answer", "답변 생성 실패")
@@ -600,7 +839,24 @@ async def chat_stream(request: ChatRequest):
 
             # 최근 10턴만 유지
             if len(history) > 20:
-                conversation_sessions[session_id] = history[-20:]
+                history = history[-20:]
+                conversation_sessions[session_id] = history
+            
+            # Supabase 세션인 경우 conversation_context에 저장
+            import re
+            is_uuid = re.match(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', session_id, re.I)
+            if is_uuid:
+                try:
+                    supabase_service.client.table("conversation_context")\
+                        .upsert({
+                            "session_id": session_id,
+                            "context": history,
+                        })\
+                        .execute()
+                    yield send_log(f"   💾 Supabase에 대화 히스토리 저장 완료")
+                except Exception as e:
+                    print(f"⚠️ Supabase 컨텍스트 저장 실패: {e}")
+                    # 저장 실패해도 계속 진행
 
             # 채팅 로그 저장
             await supabase_service.insert_chat_log(
@@ -625,6 +881,14 @@ async def chat_stream(request: ChatRequest):
             yield send_log(f"#   • Final Agent: {final_time:.2f}초 ({final_time/pipeline_time*100:.1f}%)")
             yield send_log(f"#   • 전체: {pipeline_time:.2f}초")
             yield send_log(f"{'#'*80}")
+            
+            # 로그 콜백 초기화 (다음 요청과 격리)
+            orchestration_agent.set_log_callback(None)
+            sub_agents.set_log_callback(None)
+            final_agent.set_log_callback(None)
+            
+            # 파이프라인 종료
+            pipeline_active = False
             
             print(f"🟢 [STREAM_REQUEST_END] {request_id}\n")
 
