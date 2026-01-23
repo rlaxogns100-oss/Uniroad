@@ -45,7 +45,11 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
       if (processedLogsRef.current.has(logKey)) return
       processedLogsRef.current.add(logKey)
 
+      // 디버깅: 받은 로그 출력
+      console.log(`[ThinkingProcess] 로그 ${index}:`, log.substring(0, 80))
+
       const parsed = parseLog(log)
+      console.log(`[ThinkingProcess] 파싱 결과:`, parsed)
       if (parsed) {
         if (parsed.type === 'step') {
           const newStepId = `step-${stepIdCounter.current++}`
@@ -124,6 +128,182 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
       return { type: 'detail', detail: '질문의 의도를 파악하고 있어요' }
     }
     
+    // 분석 대상 표시
+    if (log.includes('📝 분석 대상:')) {
+      const match = log.match(/📝 분석 대상:\s*"(.+)"/)
+      if (match) {
+        const target = match[1].trim()
+        const shortTarget = target.length > 30 ? target.substring(0, 30) + '...' : target
+        return { type: 'detail', detail: `분석 대상: "${shortTarget}"` }
+      }
+    }
+    
+    // 질문 유형 예측
+    if (log.includes('예상 질문 유형:')) {
+      const match = log.match(/예상 질문 유형:\s*(.+)/)
+      if (match) {
+        return { type: 'detail', detail: `🏷️ 유형: ${match[1].trim()}` }
+      }
+    }
+    
+    // AI 모델 분석
+    if (log.includes('AI 모델에 분석 요청')) {
+      return { type: 'detail', detail: '🧠 AI 모델이 분석 중...' }
+    }
+    if (log.includes('AI 분석 완료')) {
+      return { type: 'detail', detail: '✅ AI 분석 완료!' }
+    }
+    if (log.includes('실행 계획 수립 중')) {
+      return { type: 'detail', detail: '📋 실행 계획 수립 중...' }
+    }
+    
+    // Orchestration 결과 - 파악된 의도
+    if (log.includes('💡 파악된 의도:')) {
+      const match = log.match(/💡 파악된 의도:\s*(.+)/)
+      if (match) {
+        const intent = match[1].trim()
+        const shortIntent = intent.length > 45 ? intent.substring(0, 45) + '...' : intent
+        return { type: 'detail', detail: `💡 의도: "${shortIntent}"` }
+      }
+    }
+    
+    // Orchestration 결과 - 실행 계획 상세
+    if (log.includes('📝 실행 계획:') && log.includes('단계')) {
+      const match = log.match(/(\d+)개\s*단계/)
+      if (match) return { type: 'detail', detail: `📝 ${match[1]}단계 실행 계획 수립 완료` }
+    }
+    
+    // 실행 계획 내 에이전트 표시
+    if (log.match(/^\s*\d+\.\s+.+Agent:/i) || log.match(/^\s*\d+\.\s+(서울대|연세대|고려대|경희대|컨설팅|선생님).*:/)) {
+      const match = log.match(/^\s*\d+\.\s+(.+?):\s*"(.+)"/)
+      if (match) {
+        const agent = match[1].trim()
+        const query = match[2].trim()
+        const shortQuery = query.length > 25 ? query.substring(0, 25) + '...' : query
+        return { type: 'detail', detail: `📋 ${agent}: "${shortQuery}"` }
+      }
+    }
+    
+    // 답변 구조 표시
+    if (log.includes('📋 답변 구조:') && log.includes('섹션')) {
+      const match = log.match(/(\d+)개\s*섹션/)
+      if (match) return { type: 'detail', detail: `📋 ${match[1]}개 섹션으로 답변 구성 예정` }
+    }
+    
+    // 추출된 성적 상세
+    if (log.includes('📊 추출된 성적:')) {
+      return { type: 'detail', detail: '📊 입력된 성적 분석 중...' }
+    }
+    
+    // 과목별 성적 표시
+    if (log.includes('•') && log.includes('등급')) {
+      const match = log.match(/•\s*(\S+):\s*(\d)등급/)
+      if (match) {
+        return { type: 'detail', detail: `📊 ${match[1]}: ${match[2]}등급` }
+      }
+    }
+    
+    // Sub Agents 결과 요약
+    if (log.includes('[Sub Agents 결과 요약]')) {
+      return { type: 'detail', detail: '📋 에이전트 결과 정리 중...' }
+    }
+    
+    // 발견된 자료
+    if (log.includes('📚 발견된 자료:')) {
+      const match = log.match(/(\d+)개/)
+      if (match) return { type: 'detail', detail: `📚 관련 자료 ${match[1]}개 수집 완료` }
+    }
+    
+    // 핵심 정보 표시 (UniversityAgent 결과)
+    if (log.includes('💡 핵심발견:')) {
+      const match = log.match(/💡 핵심발견:\s*"(.+)"/)
+      if (match) {
+        const info = match[1].trim()
+        const shortInfo = info.length > 50 ? info.substring(0, 50) + '...' : info
+        return { type: 'detail', detail: `💡 발견: "${shortInfo}"` }
+      }
+    }
+    
+    // 핵심 정보 표시
+    if (log.includes('💡 핵심 정보:')) {
+      const match = log.match(/💡 핵심 정보:\s*"(.+)"/)
+      if (match) {
+        const info = match[1].trim()
+        const shortInfo = info.length > 45 ? info.substring(0, 45) + '...' : info
+        return { type: 'detail', detail: `💡 "${shortInfo}"` }
+      }
+    }
+    
+    // 분석 결과 표시 (ConsultingAgent 결과)
+    if (log.includes('💡 분석결과:')) {
+      const match = log.match(/💡 분석결과:\s*"(.+)"/)
+      if (match) {
+        const result = match[1].trim()
+        const shortResult = result.length > 50 ? result.substring(0, 50) + '...' : result
+        return { type: 'detail', detail: `💡 분석: "${shortResult}"` }
+      }
+    }
+    
+    // 분석 결과 표시
+    if (log.includes('💡 분석 결과:')) {
+      const match = log.match(/💡 분석 결과:\s*"(.+)"/)
+      if (match) {
+        const result = match[1].trim()
+        const shortResult = result.length > 45 ? result.substring(0, 45) + '...' : result
+        return { type: 'detail', detail: `💡 "${shortResult}"` }
+      }
+    }
+    
+    // 조언 표시
+    if (log.includes('💡 조언:')) {
+      const match = log.match(/💡 조언:\s*"(.+)"/)
+      if (match) {
+        const advice = match[1].trim()
+        const shortAdvice = advice.length > 45 ? advice.substring(0, 45) + '...' : advice
+        return { type: 'detail', detail: `💡 "${shortAdvice}"` }
+      }
+    }
+    
+    // 추출 완료 표시 (문서 분석 결과)
+    if (log.includes('✅ 추출 완료:')) {
+      const match = log.match(/(\d+)자/)
+      if (match) return { type: 'detail', detail: `✅ 정보 추출 완료 (${match[1]}자)` }
+    }
+    
+    // 분석 완료 표시 (컨설팅 결과)
+    if (log.includes('✅ 분석 완료:')) {
+      const match = log.match(/(\d+)자/)
+      if (match) return { type: 'detail', detail: `✅ 성적 분석 완료 (${match[1]}자)` }
+    }
+    
+    // AI 분석 중 (실시간)
+    if (log.includes('🤖 AI 분석 중')) {
+      const docMatch = log.match(/문서\s*(\d+)개/)
+      const charMatch = log.match(/총\s*(\d+)자/)
+      if (docMatch && charMatch) {
+        return { type: 'detail', detail: `🤖 AI가 문서 ${docMatch[1]}개 분석 중... (${charMatch[1]}자)` }
+      }
+      return { type: 'detail', detail: '🤖 AI가 문서를 분석하고 있어요...' }
+    }
+    
+    // 사용된 문서 표시
+    if (log.includes('📄 사용된 문서:')) {
+      const match = log.match(/📄 사용된 문서:\s*(.+)/)
+      if (match) {
+        const docs = match[1].trim()
+        const shortDocs = docs.length > 40 ? docs.substring(0, 40) + '...' : docs
+        return { type: 'detail', detail: `📄 참고: ${shortDocs}` }
+      }
+    }
+    
+    // 대학별 환산 점수 결과
+    if (log.includes('📊') && log.includes('점')) {
+      const match = log.match(/📊\s*(서울대|연세대|고려대|성균관대|경희대|서강대)\s*(\S+):\s*(\d+(?:\.\d+)?)\s*점/)
+      if (match) {
+        return { type: 'detail', detail: `📊 ${match[1]} ${match[2]}: ${match[3]}점` }
+      }
+    }
+    
     // 사용자 의도 (실제 의도)
     if (log.includes('사용자 의도') || log.includes('💡 사용자 의도 파악')) {
       const match = log.match(/(?:사용자 의도|💡 사용자 의도 파악):\s*(.+)/)
@@ -159,30 +339,120 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
       if (match) return { type: 'detail', detail: `${match[1]}개 과목 성적 인식 완료` }
     }
     if (log.includes('2단계') || log.includes('Sub Agents 실행')) {
-      return { type: 'step', title: '정보 수집하기', detail: '관련 정보를 찾고 있어요' }
+      return { type: 'step', title: '정보 수집하기', detail: '데이터베이스에서 자료를 찾는 중...' }
     }
     
     // 대학별 Agent (더 상세하게)
     if (log.includes('서울대') && (log.includes('Agent') || log.includes('실행'))) {
-      return { type: 'detail', detail: '🏫 서울대학교 입시 정보 검색 중' }
+      return { type: 'detail', detail: '🏫 서울대학교 입시 데이터베이스 조회 시작' }
     }
     if (log.includes('연세대') && (log.includes('Agent') || log.includes('실행'))) {
-      return { type: 'detail', detail: '🏫 연세대학교 입시 정보 검색 중' }
+      return { type: 'detail', detail: '🏫 연세대학교 입시 데이터베이스 조회 시작' }
     }
     if (log.includes('고려대') && (log.includes('Agent') || log.includes('실행'))) {
-      return { type: 'detail', detail: '🏫 고려대학교 입시 정보 검색 중' }
+      return { type: 'detail', detail: '🏫 고려대학교 입시 데이터베이스 조회 시작' }
     }
     if (log.includes('성균관대') && (log.includes('Agent') || log.includes('실행'))) {
-      return { type: 'detail', detail: '🏫 성균관대학교 입시 정보 검색 중' }
+      return { type: 'detail', detail: '🏫 성균관대학교 입시 데이터베이스 조회 시작' }
     }
     if (log.includes('경희대') && (log.includes('Agent') || log.includes('실행'))) {
-      return { type: 'detail', detail: '🏫 경희대학교 입시 정보 검색 중' }
+      return { type: 'detail', detail: '🏫 경희대학교 입시 데이터베이스 조회 시작' }
     }
     if (log.includes('컨설팅') && (log.includes('Agent') || log.includes('실행'))) {
       return { type: 'step', title: '합격 가능성 분석', detail: '성적 기반으로 분석하고 있어요' }
     }
     if (log.includes('선생님') && (log.includes('Agent') || log.includes('실행'))) {
       return { type: 'detail', detail: '👨‍🏫 맞춤형 학습 조언 준비 중' }
+    }
+    
+    // 점수 계산 시작
+    if (log.includes('[점수 계산 시작]') || log.includes('5개 대학 환산 점수 계산')) {
+      return { type: 'detail', detail: '📊 5개 대학 환산 점수 계산 시작' }
+    }
+    
+    // 대학별 점수 계산 중
+    if (log.includes('환산 점수 계산 중')) {
+      const univMatch = log.match(/(서울대|연세대|고려대|성균관대|경희대|서강대)/)
+      if (univMatch) return { type: 'detail', detail: `🏫 ${univMatch[1]} 환산 점수 계산 중...` }
+    }
+    
+    // 대학별 점수 계산 결과 (실제 점수)
+    if (log.includes('✅') && log.includes('점')) {
+      const univMatch = log.match(/(서울대|연세대|고려대|성균관대|경희대|서강대)/)
+      const scoreMatch = log.match(/(\d+(?:\.\d+)?)\s*점/)
+      const trackMatch = log.match(/(인문|자연|예체능)/)
+      if (univMatch && scoreMatch) {
+        const track = trackMatch ? ` ${trackMatch[1]}` : ''
+        return { type: 'detail', detail: `✅ ${univMatch[1]}${track}: ${scoreMatch[1]}점` }
+      }
+    }
+    
+    // 5개 대학 점수 계산 완료
+    if (log.includes('5개 대학 환산 점수 계산 완료')) {
+      return { type: 'detail', detail: '✅ 모든 대학 점수 계산 완료!' }
+    }
+    
+    // 해시태그 검색 (1단계)
+    if (log.includes('해시태그 검색') || log.includes('[1단계] 해시태그')) {
+      const match = log.match(/#(\S+)/)
+      if (match) return { type: 'detail', detail: `🏷️ "${match[1]}" 태그로 문서 검색 중` }
+      return { type: 'detail', detail: '🏷️ 관련 태그로 문서 검색 중' }
+    }
+    
+    // 문서 관련 상세 로그 (대학명 + 문서 발견)
+    if (log.includes('관련 문서') && log.includes('발견')) {
+      const univMatch = log.match(/(서울대|연세대|고려대|성균관대|경희대|서강대)/)
+      const countMatch = log.match(/(\d+)개/)
+      if (univMatch && countMatch) {
+        return { type: 'detail', detail: `📚 ${univMatch[1]} 관련 문서 ${countMatch[1]}개 찾음!` }
+      }
+    }
+    
+    // 요약본 분석
+    if (log.includes('요약본 분석') || log.includes('관련성 평가')) {
+      return { type: 'detail', detail: '📋 문서 관련성 분석 중...' }
+    }
+    
+    // 선별된 문서
+    if (log.includes('선별된 문서')) {
+      const match = log.match(/(\d+)개/)
+      if (match) return { type: 'detail', detail: `✅ 핵심 문서 ${match[1]}개 선별 완료` }
+    }
+    
+    // 문서 내용 로드
+    if (log.includes('문서 내용 로드') || log.includes('[3단계] 문서')) {
+      return { type: 'detail', detail: '📖 문서 전체 내용 읽는 중...' }
+    }
+    
+    // 문서 읽는 중 (상세)
+    if (log.includes('문서 읽는 중')) {
+      const titleMatch = log.match(/문서 읽는 중:\s*(.+?)(?:\s*\(|$)/)
+      if (titleMatch) {
+        const title = titleMatch[1].trim()
+        const shortTitle = title.length > 25 ? title.substring(0, 25) + '...' : title
+        return { type: 'detail', detail: `📖 "${shortTitle}" 읽는 중` }
+      }
+    }
+    
+    // 청크 로드
+    if (log.includes('청크') && log.includes('발견')) {
+      const match = log.match(/청크\s*(\d+)개/)
+      if (match) return { type: 'detail', detail: `📄 문서 조각 ${match[1]}개 로드 중...` }
+    }
+    if (log.includes('청크') && log.includes('로드 완료')) {
+      const match = log.match(/(\d+)\/(\d+)/)
+      if (match) return { type: 'detail', detail: `📄 문서 로드 ${match[1]}/${match[2]} 완료` }
+    }
+    
+    // 정보 추출 단계
+    if (log.includes('[4단계]') || log.includes('정보 추출 중')) {
+      return { type: 'detail', detail: '🔍 핵심 정보 추출 중...' }
+    }
+    
+    // 참고 문서 목록
+    if (log.includes('참고 문서') && log.includes('개')) {
+      const match = log.match(/(\d+)개/)
+      if (match) return { type: 'detail', detail: `📚 참고 자료 ${match[1]}개 준비 완료` }
     }
     
     // 점수 계산 (실제 점수 표시)
@@ -206,26 +476,93 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
       if (match) {
         const query = match[1].trim()
         if (query && query.length > 5) {
-          const shortQ = query.length > 30 ? query.substring(0, 30) + '...' : query
+          const shortQ = query.length > 35 ? query.substring(0, 35) + '...' : query
           return { type: 'detail', detail: `🔍 "${shortQ}" 검색 중` }
         }
       }
     }
     
     // 문서 발견 (실제 개수)
-    if (log.includes('발견된 문서') || log.includes('선별된 문서')) {
+    if (log.includes('발견된 문서')) {
       const match = log.match(/(\d+)개/)
       if (match) return { type: 'detail', detail: `📄 관련 자료 ${match[1]}개 발견!` }
+    }
+    
+    // 발견된 문서 목록 표시
+    if (log.includes('발견된 문서 목록')) {
+      return { type: 'detail', detail: '📚 발견된 문서 목록 확인 중...' }
+    }
+    
+    // 개별 문서 제목
+    if (log.match(/^\s*\d+\.\s+.+/)) {
+      const match = log.match(/^\s*\d+\.\s+(.+)/)
+      if (match) {
+        const title = match[1].trim()
+        const shortTitle = title.length > 30 ? title.substring(0, 30) + '...' : title
+        return { type: 'detail', detail: `📄 "${shortTitle}"` }
+      }
     }
     
     if (log.includes('전형결과 조회') || log.includes('입결 데이터 검색')) {
       return { type: 'detail', detail: '📈 과거 입결 데이터 조회 중' }
     }
     
+    // Supabase 검색
+    if (log.includes('Supabase') && log.includes('검색')) {
+      return { type: 'detail', detail: '🗄️ 데이터베이스 조회 중...' }
+    }
+    
     // 3단계: 답변 작성
     if (log.includes('3단계') || log.includes('Final Agent 실행')) {
       return { type: 'step', title: '답변 작성하기', detail: '수집한 정보를 정리하고 있어요' }
     }
+    
+    // 답변 생성 시작
+    if (log.includes('[답변 생성 시작]')) {
+      return { type: 'detail', detail: '📝 답변 생성 준비 중...' }
+    }
+    
+    // 수집한 정보 정리
+    if (log.includes('수집한 정보 정리')) {
+      return { type: 'detail', detail: '📚 수집한 정보를 정리하고 있어요' }
+    }
+    
+    // 참고 자료 개수
+    if (log.includes('참고 자료:') && log.includes('에이전트')) {
+      const match = log.match(/(\d+)개\s*에이전트/)
+      if (match) return { type: 'detail', detail: `📊 ${match[1]}개 에이전트 결과 분석 중` }
+    }
+    
+    // 답변 구조
+    if (log.includes('답변 구조:') && log.includes('섹션')) {
+      const match = log.match(/(\d+)개\s*섹션/)
+      if (match) return { type: 'detail', detail: `📋 ${match[1]}개 섹션으로 답변 구성 중` }
+    }
+    
+    // AI 답변 작성 중
+    if (log.includes('AI가 맞춤형 답변을 작성')) {
+      return { type: 'detail', detail: '✍️ AI가 맞춤형 답변을 작성하고 있어요' }
+    }
+    
+    // 답변 작성 진행 상황
+    if (log.includes('답변 작성 중') && log.includes('자 완료')) {
+      const match = log.match(/(\d+)자\s*완료/)
+      if (match) {
+        const charCount = parseInt(match[1])
+        if (charCount > 500) return { type: 'detail', detail: `✍️ 답변 작성 중... (${charCount}자 완료)` }
+      }
+    }
+    
+    // 답변 후처리
+    if (log.includes('답변 후처리')) {
+      return { type: 'detail', detail: '🔄 답변을 다듬고 있어요...' }
+    }
+    
+    // 답변 작성 완료
+    if (log.includes('✅ 답변 작성 완료')) {
+      return { type: 'detail', detail: '✅ 답변 작성 완료!' }
+    }
+    
     if (log.includes('답변 생성') || log.includes('최종 답변')) {
       return { type: 'detail', detail: '✍️ 맞춤형 답변 작성 중' }
     }
@@ -317,8 +654,8 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
             <div className="flex items-center gap-3 mb-3">
               <div className="relative">
                 <div className="absolute inset-0 bg-blue-400 rounded-full animate-ping opacity-30"></div>
-                <div className="relative w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center shadow-lg">
-                  <span className="text-white font-bold text-sm">{currentStepIndex + 1}</span>
+                <div className="relative w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center shadow-lg">
+                  <span className="text-white font-bold text-xs">{currentStepIndex + 1}</span>
                 </div>
               </div>
               <div className="flex-1">
@@ -332,39 +669,34 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
               </div>
             </div>
 
-            {/* 현재 작업 내용 (가장 최근 detail) */}
+            {/* 작업 내용들 (모두 같은 위계로 표시) */}
             {activeStep.details.length > 0 && (
-              <div className="ml-[52px] mb-3 p-3 bg-blue-50 rounded-lg border border-blue-100 animate-fadeIn">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
-                  <span className="text-sm text-blue-700 font-medium">
-                    {activeStep.details[activeStep.details.length - 1]}
-                  </span>
-                </div>
-              </div>
-            )}
-
-            {/* 이전 세부 내용들 (최근 것 제외) */}
-            {activeStep.details.length > 1 && (
-              <div className="ml-[52px] space-y-1.5">
-                {activeStep.details.slice(0, -1).map((detail, idx) => (
-                  <div 
-                    key={idx}
-                    className="text-xs text-gray-400 flex items-center gap-2 animate-slideIn"
-                    style={{ animationDelay: `${idx * 60}ms` }}
-                  >
-                    <span className="w-1 h-1 bg-gray-300 rounded-full flex-shrink-0"></span>
-                    <span>{detail}</span>
-                  </div>
-                ))}
+              <div className="ml-11 space-y-2">
+                {activeStep.details.slice(-5).map((detail, idx) => {
+                  const isLatest = idx === activeStep.details.slice(-5).length - 1
+                  return (
+                    <div 
+                      key={idx}
+                      className={`flex items-center gap-2 text-sm animate-slideIn ${
+                        isLatest ? 'text-blue-700' : 'text-gray-500'
+                      }`}
+                      style={{ animationDelay: `${idx * 50}ms` }}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                        isLatest ? 'bg-blue-500 animate-pulse' : 'bg-gray-400'
+                      }`}></span>
+                      <span>{detail}</span>
+                    </div>
+                  )
+                })}
               </div>
             )}
           </div>
         ) : isCompleted ? (
           /* 완료 상태 */
           <div className="flex items-center gap-3 animate-fadeIn">
-            <div className="w-10 h-10 bg-gradient-to-br from-green-400 to-green-600 rounded-full flex items-center justify-center shadow-lg">
-              <svg className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+            <div className="w-8 h-8 bg-gradient-to-br from-green-400 to-green-600 rounded-full flex items-center justify-center shadow-lg">
+              <svg className="w-5 h-5 text-white" fill="currentColor" viewBox="0 0 20 20">
                 <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
               </svg>
             </div>
@@ -378,8 +710,8 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
           <div className="flex items-center gap-3">
             <div className="relative">
               <div className="absolute inset-0 bg-blue-400 rounded-full animate-ping opacity-30"></div>
-              <div className="relative w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center">
-                <div className="w-3 h-3 bg-white rounded-full"></div>
+              <div className="relative w-8 h-8 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-full flex items-center justify-center">
+                <div className="w-2.5 h-2.5 bg-white rounded-full"></div>
               </div>
             </div>
             <div>

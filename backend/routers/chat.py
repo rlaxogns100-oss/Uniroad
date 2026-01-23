@@ -563,7 +563,42 @@ async def chat_stream(request: ChatRequest):
             yield send_log("="*80)
             yield send_log("🎯 [1단계] Orchestration Agent 실행")
             yield send_log("="*80)
-            yield send_log(f"📝 분석할 질문: \"{message}\"")
+            yield send_log(f"📝 받은 질문: \"{message}\"")
+            yield send_log("🔍 질문 분석을 시작합니다...")
+            
+            # 질문에서 키워드 추출하여 즉시 표시
+            keywords = []
+            universities = ['서울대', '연세대', '고려대', '성균관대', '경희대', '서강대', 'SKY', '스카이']
+            years = ['2024', '2025', '2026', '2027', '2028']
+            admission_types = ['정시', '수시', '입결', '모집요강', '전형', '커트라인', '변경사항', '요강']
+            
+            for univ in universities:
+                if univ in message:
+                    keywords.append(univ)
+            for year in years:
+                if year in message:
+                    keywords.append(f"{year}학년도")
+            for atype in admission_types:
+                if atype in message:
+                    keywords.append(atype)
+            
+            if keywords:
+                yield send_log(f"   → 키워드 발견: {', '.join(keywords)}")
+            
+            # 성적 정보 감지
+            grade_patterns = [
+                r'(\d)[등급]',
+                r'국어\s*(\d)',
+                r'수학\s*(\d)',
+                r'영어\s*(\d)',
+                r'탐구\s*(\d)',
+                r'(\d{2,3})점',
+            ]
+            has_grades = any(re.search(p, message) for p in grade_patterns)
+            if has_grades:
+                yield send_log("   → 성적 정보 감지됨 - 합격 분석 가능")
+            
+            yield send_log("   → AI가 최적의 답변 전략을 수립 중...")
             yield send_log(f"💭 이전 대화: {len(history)}개 메시지")
             
             # Agent들이 로그를 찍을 때마다 큐에 추가
@@ -627,22 +662,50 @@ async def chat_stream(request: ChatRequest):
             extracted_scores = orchestration_result.get("extracted_scores", {})
             
             yield send_log("")
-            yield send_log(f"📋 Orchestration 결과:")
-            yield send_log(f"   사용자 의도: {orchestration_result.get('user_intent', 'N/A')}")
-            yield send_log(f"   실행 계획: {len(execution_plan)}개 step")
-            yield send_log(f"   답변 구조: {len(answer_structure)}개 섹션")
+            yield send_log(f"📋 [Orchestration 결과]")
             
-            # extracted_scores 로그
+            # 사용자 의도 상세 표시
+            user_intent = orchestration_result.get('user_intent', 'N/A')
+            if user_intent and user_intent != 'N/A':
+                short_intent = user_intent[:80] + '...' if len(user_intent) > 80 else user_intent
+                yield send_log(f"   💡 파악된 의도: {short_intent}")
+            
+            # 실행 계획 상세 표시
+            if execution_plan:
+                yield send_log(f"   📝 실행 계획: {len(execution_plan)}개 단계")
+                for idx, step in enumerate(execution_plan[:3], 1):  # 최대 3개만 표시
+                    agent_name = step.get('agent', 'Unknown')
+                    step_query = step.get('query', '')[:50]
+                    yield send_log(f"      {idx}. {agent_name}: \"{step_query}...\"")
+                if len(execution_plan) > 3:
+                    yield send_log(f"      ... 외 {len(execution_plan) - 3}개 단계")
+            
+            # 답변 구조 상세 표시
+            if answer_structure:
+                yield send_log(f"   📋 답변 구조: {len(answer_structure)}개 섹션")
+                for idx, section in enumerate(answer_structure[:4], 1):  # 최대 4개만 표시
+                    section_title = section.get('section', section.get('title', 'Unknown'))
+                    yield send_log(f"      {idx}. {section_title}")
+            
+            # 추출된 성적 상세 표시
             if extracted_scores:
-                yield send_log(f"   📊 추출된 성적: {len(extracted_scores)}개 과목")
-            else:
-                yield send_log(f"   ℹ️  성적 추출 없음")
+                yield send_log(f"   📊 추출된 성적:")
+                scores_list = extracted_scores.get('과목별_성적', extracted_scores)
+                if isinstance(scores_list, dict):
+                    for subject, score_info in list(scores_list.items())[:4]:  # 최대 4개
+                        if isinstance(score_info, dict):
+                            grade = score_info.get('등급', score_info.get('grade', ''))
+                            percentile = score_info.get('백분위', score_info.get('percentile', ''))
+                            if grade:
+                                yield send_log(f"      • {subject}: {grade}등급 (백분위 {percentile})")
+                            else:
+                                yield send_log(f"      • {subject}: {score_info}")
             
             # 즉시 응답 체크
             if direct_response:
                 yield send_log(f"   ⚡ 즉시 응답 모드")
             
-            yield send_log(f"   ⏱️ 처리 시간: {orch_time:.2f}초")
+            yield send_log(f"   ⏱️ 분석 시간: {orch_time:.2f}초")
             yield send_log("="*80)
 
             # ========================================
@@ -784,14 +847,71 @@ async def chat_stream(request: ChatRequest):
             sub_time = time.time() - sub_start
             
             yield send_log("")
+            yield send_log(f"📋 [Sub Agents 결과 요약]")
+            
             for key, result in sub_agent_results.items():
                 status = result.get('status', 'unknown')
                 agent = result.get('agent', 'Unknown')
-                sources_count = len(result.get('sources', []))
+                sources = result.get('sources', [])
                 exec_time = result.get('execution_time', 0)
                 status_icon = "✅" if status == "success" else "❌"
-                yield send_log(f"{status_icon} {key} ({agent}): {status} (출처 {sources_count}개, ⏱️ {exec_time:.2f}초)")
-            yield send_log(f"   총 Sub Agents 처리 시간: {sub_time:.2f}초")
+                
+                yield send_log(f"{status_icon} {agent}:")
+                
+                # 에이전트 종류에 따라 결과물 표시
+                if '대학' in agent or 'University' in agent:
+                    # 대학 에이전트: 발견된 문서 표시
+                    if sources:
+                        yield send_log(f"   📚 발견된 자료: {len(sources)}개")
+                        for idx, source in enumerate(sources[:2], 1):  # 최대 2개 표시
+                            short_source = source[:40] + '...' if len(source) > 40 else source
+                            yield send_log(f"      {idx}. {short_source}")
+                        if len(sources) > 2:
+                            yield send_log(f"      ... 외 {len(sources) - 2}개")
+                    
+                    # 핵심 발견 내용 (result에서 추출)
+                    content = result.get('content', result.get('summary', ''))
+                    if content and isinstance(content, str) and len(content) > 50:
+                        # 첫 100자 정도만 표시
+                        preview = content[:100].replace('\n', ' ').strip()
+                        yield send_log(f"   💡 핵심 정보: \"{preview}...\"")
+                
+                elif '컨설팅' in agent or 'Consulting' in agent:
+                    # 컨설팅 에이전트: 계산된 점수 표시
+                    content = result.get('content', '')
+                    
+                    # 환산 점수 정보 추출 (정규화된 성적에서)
+                    if isinstance(content, dict):
+                        normalized = content.get('학생_정규화_성적', content)
+                        if isinstance(normalized, dict):
+                            # 대학별 환산 점수 표시
+                            for univ in ['서울대', '연세대', '고려대', '경희대', '서강대']:
+                                key_name = f"{univ}_환산점수"
+                                if key_name in normalized:
+                                    scores = normalized[key_name]
+                                    if isinstance(scores, dict):
+                                        for track, score_data in list(scores.items())[:1]:  # 첫 번째만
+                                            if isinstance(score_data, dict) and score_data.get('계산_가능'):
+                                                final_score = score_data.get('최종점수', 'N/A')
+                                                yield send_log(f"   📊 {univ} {track}: {final_score}점")
+                    
+                    # 합격 가능성 요약
+                    summary = result.get('summary', '')
+                    if summary and len(summary) > 20:
+                        preview = summary[:80].replace('\n', ' ').strip()
+                        yield send_log(f"   💡 분석 결과: \"{preview}...\"")
+                
+                elif '선생님' in agent or 'Teacher' in agent:
+                    # 선생님 에이전트: 조언 내용 표시
+                    content = result.get('content', result.get('summary', ''))
+                    if content and isinstance(content, str) and len(content) > 30:
+                        preview = content[:80].replace('\n', ' ').strip()
+                        yield send_log(f"   💡 조언: \"{preview}...\"")
+                
+                yield send_log(f"   ⏱️ 처리 시간: {exec_time:.2f}초")
+            
+            yield send_log(f"")
+            yield send_log(f"   🎯 총 Sub Agents 처리 시간: {sub_time:.2f}초")
             yield send_log("="*80)
 
             # ========================================

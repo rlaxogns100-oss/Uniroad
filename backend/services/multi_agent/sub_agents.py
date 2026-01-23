@@ -363,6 +363,12 @@ class UniversityAgent(SubAgentBase):
             
             _log(f"   ✅ 추출 완료: {len(extracted_info)}자")
             _log(f"   📄 사용된 문서: {', '.join(sources[:3])}{'...' if len(sources) > 3 else ''}")
+            
+            # 핵심 정보 미리보기 (첫 150자)
+            if extracted_info and len(extracted_info) > 50:
+                preview = extracted_info[:150].replace('\n', ' ').strip()
+                _log(f"   💡 핵심발견: \"{preview}...\"")
+            
             _log("="*60)
 
             return {
@@ -467,49 +473,50 @@ class ConsultingAgent(SubAgentBase):
             normalized_scores = self._normalize_scores(raw_grade_info)
             _log(f"   정규화된 성적: {json.dumps(normalized_scores, ensure_ascii=False, indent=2)}")
 
+        _log("")
+        _log("📊 [점수 계산 시작] 5개 대학 환산 점수 계산")
+        
         # 경희대 환산 점수 계산 (로컬 연산, API 호출 없음)
+        _log("   🏫 경희대 환산 점수 계산 중...")
         khu_scores = calculate_khu_score(normalized_scores)
         normalized_scores["경희대_환산점수"] = khu_scores
-        _log(f"   경희대 환산 점수 계산 완료")
         for track, score_data in khu_scores.items():
             if score_data.get("계산_가능"):
-                _log(f"      {track}: {score_data['최종점수']}점 / 600점")
-            else:
-                _log(f"      {track}: 계산 불가 ({score_data.get('오류', 'Unknown')})")
+                _log(f"      ✅ 경희대 {track}: {score_data['최종점수']}점 / 600점")
         
         # 서울대 환산 점수 계산 (로컬 연산, API 호출 없음)
+        _log("   🏫 서울대 환산 점수 계산 중...")
         snu_scores = calculate_snu_score(normalized_scores)
         normalized_scores["서울대_환산점수"] = snu_scores
-        _log(f"   서울대 환산 점수 계산 완료")
         for track, score_data in snu_scores.items():
             if score_data.get("계산_가능"):
-                _log(f"      {track}: {score_data['최종점수']}점 (1000점: {score_data.get('최종점수_1000', 'N/A')})")
-            else:
-                _log(f"      {track}: 계산 불가 ({score_data.get('오류', 'Unknown')})")
+                _log(f"      ✅ 서울대 {track}: {score_data['최종점수']}점")
         
         # 연세대 환산 점수 계산 (로컬 연산, API 호출 없음)
+        _log("   🏫 연세대 환산 점수 계산 중...")
         yonsei_scores = calculate_yonsei_score(normalized_scores)
         normalized_scores["연세대_환산점수"] = yonsei_scores
-        _log(f"   연세대 환산 점수 계산 완료")
         for track, score_data in yonsei_scores.items():
             if score_data.get("계산_가능"):
-                _log(f"      {track}: {score_data['최종점수']}점 / 1000점")
+                _log(f"      ✅ 연세대 {track}: {score_data['최종점수']}점 / 1000점")
         
         # 고려대 환산 점수 계산 (로컬 연산, API 호출 없음)
+        _log("   🏫 고려대 환산 점수 계산 중...")
         korea_scores = calculate_korea_score(normalized_scores)
         normalized_scores["고려대_환산점수"] = korea_scores
-        _log(f"   고려대 환산 점수 계산 완료")
         for track, score_data in korea_scores.items():
             if score_data.get("계산_가능"):
-                _log(f"      {track}: {score_data['최종점수']}점 / 1000점")
+                _log(f"      ✅ 고려대 {track}: {score_data['최종점수']}점 / 1000점")
         
         # 서강대 환산 점수 계산 (로컬 연산, API 호출 없음)
+        _log("   🏫 서강대 환산 점수 계산 중...")
         sogang_scores = calculate_sogang_score(normalized_scores)
         normalized_scores["서강대_환산점수"] = sogang_scores
-        _log(f"   서강대 환산 점수 계산 완료")
         for track, score_data in sogang_scores.items():
             if score_data.get("계산_가능"):
-                _log(f"      {track}: {score_data['최종점수']}점 ({score_data.get('적용방식', '')})")
+                _log(f"      ✅ 서강대 {track}: {score_data['최종점수']}점")
+        
+        _log("   ✅ 5개 대학 환산 점수 계산 완료!")
 
         # ============================================================
         # Supabase에서 전형결과 문서 조회
@@ -671,7 +678,23 @@ class ConsultingAgent(SubAgentBase):
             #         "url": "https://rnitmphvahpkosvxjshw.supabase.co/storage/v1/object/public/document/pdfs/5d5c4455-bf58-4ef5-9e7f-a82d602aaa51.pdf"
             #     })
 
-            _log(f"   분석 완료")
+            _log(f"   ✅ 분석 완료: {len(result_text)}자")
+            
+            # 분석 결과 미리보기 (핵심 부분)
+            if result_text:
+                # 환산 점수 정보 추출해서 표시
+                lines = result_text.split('\n')
+                score_lines = [l for l in lines if '점' in l and ('환산' in l or '/' in l)]
+                if score_lines:
+                    for line in score_lines[:3]:  # 최대 3줄
+                        clean_line = line.strip()[:60]
+                        if clean_line:
+                            _log(f"   📊 {clean_line}")
+                
+                # 첫 100자 미리보기
+                preview = result_text[:120].replace('\n', ' ').strip()
+                _log(f"   💡 분석결과: \"{preview}...\"")
+            
             _log("="*60)
 
             # sources 목록 구성 - Supabase 전형결과 데이터 포함

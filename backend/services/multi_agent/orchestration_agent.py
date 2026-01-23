@@ -435,6 +435,22 @@ async def run_orchestration_agent(
 
     _log("   🤔 사용자 질문을 분석하고 있습니다...")
     _log("   💭 질문의 핵심 의도와 필요한 정보를 파악 중...")
+    _log(f"   📝 분석 대상: \"{message[:50]}{'...' if len(message) > 50 else ''}\"")
+    
+    # 질문 유형 사전 분석
+    question_types = []
+    if any(kw in message for kw in ['정시', '수시', '전형', '모집']):
+        question_types.append("입시 정보")
+    if any(kw in message for kw in ['등급', '점수', '백분위', '성적']):
+        question_types.append("성적 분석")
+    if any(kw in message for kw in ['합격', '가능성', '갈 수 있']):
+        question_types.append("합격 예측")
+    if any(kw in message for kw in ['변경', '달라진', '바뀐']):
+        question_types.append("변경사항")
+    if question_types:
+        _log(f"   🏷️ 예상 질문 유형: {', '.join(question_types)}")
+    
+    _log("   🧠 AI 모델에 분석 요청 중...")
     
     chat_session = model.start_chat(history=gemini_history)
     
@@ -446,7 +462,8 @@ async def run_orchestration_agent(
         )
     )
     
-    _log("   ✅ 질문 분석 완료, 실행 계획 수립 중...")
+    _log("   ✅ AI 분석 완료!")
+    _log("   📋 실행 계획 수립 중...")
     
     # 토큰 사용량 기록
     if hasattr(response, 'usage_metadata'):
