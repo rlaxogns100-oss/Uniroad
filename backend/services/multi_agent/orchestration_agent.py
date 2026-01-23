@@ -57,7 +57,7 @@ AVAILABLE_AGENTS = [
 ORCHESTRATION_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Orchestration Agent (총괄 설계자 & PD)**입니다.
 
 ## 기본 설정
-- **현재 시점:** 2026년 1월 (2026학년도 정시 진행 중)
+- **현재 시점:** 2026년 1월 (2026학년도 입시 진행 중)
 - **검색 기준:** 사용자가 "작년 입결/결과"를 물으면 반드시 **[2025학년도]** 키워드로 쿼리를 생성하세요. (2026학년도는 결과 미확정, 2024학년도는 재작년임)
 
 ## 즉시 처리 규칙 (Immediate Processing)
@@ -85,6 +85,8 @@ ORCHESTRATION_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **O
 - 특정 대학이 언급되면 해당 대학 agent 호출
 - 공부 계획, 멘탈 관리 질문은 선생님 agent 호출
 - 합격 가능성, 대학 추천, 점수 환산 질문은 컨설팅 agent 호출
+- 어디 갈까? 라는 막연한 질문에 대학 Agent를 호출하거나, 에이전트 목록 중에서 고르지 말고 전적으로 컨설팅 Agent 에 맡길 것.
+
 
 ## 성적 정보 추출 규칙 (매우 중요!)
 **컨설팅 agent를 호출할 계획이고, 사용자 질문에 성적 정보가 포함된 경우에만** `extracted_scores` 필드를 생성하세요.
@@ -212,7 +214,8 @@ ORCHESTRATION_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **O
 ```
 - ✅ 올바른 쿼리: "주어진 성적 기반 서울대 합격 가능성 분석"
 - ❌ 틀린 쿼리: "국어 1등급, 수학 1등급... 서울대 합격 가능성 분석" (성적을 쿼리에 포함하지 마세요!)
-
+- ✅ 올바른 쿼리: "주어진 성적 기반 합격 가능성 높은 대학교 추천"
+- ❌ 틀린 쿼리: "주어진 성적 기반 서울대, 연세대, 고려대, 성균관대, 경희대 2025학년도 입결 기준 합격 가능성 분석" (에이전트 목록을 쿼리에 포함하지 마세요!)
 **instruction 필드는 필수입니다!** Final Agent가 이 지시를 기반으로 답변을 생성합니다.
 
 ### 다른 agent 호출 시 (성적 없음)
@@ -361,8 +364,13 @@ async def run_orchestration_agent_with_prompt(
                 "parts": [content]
             })
 
+    _log("   🤔 사용자 질문을 분석하고 있습니다...")
+    _log("   💭 질문의 핵심 의도와 필요한 정보를 파악 중...")
+    
     chat = model.start_chat(history=gemini_history)
     response = await chat.send_message_async(message)
+    
+    _log("   ✅ 질문 분석 완료, 실행 계획 수립 중...")
     
     # 토큰 사용량 기록
     if hasattr(response, 'usage_metadata'):
@@ -425,6 +433,9 @@ async def run_orchestration_agent(
                 "parts": [content]
             })
 
+    _log("   🤔 사용자 질문을 분석하고 있습니다...")
+    _log("   💭 질문의 핵심 의도와 필요한 정보를 파악 중...")
+    
     chat_session = model.start_chat(history=gemini_history)
     
     response = chat_session.send_message(
@@ -434,6 +445,8 @@ async def run_orchestration_agent(
             timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
         )
     )
+    
+    _log("   ✅ 질문 분석 완료, 실행 계획 수립 중...")
     
     # 토큰 사용량 기록
     if hasattr(response, 'usage_metadata'):

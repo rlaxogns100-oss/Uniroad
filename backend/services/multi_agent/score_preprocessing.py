@@ -6,6 +6,12 @@
 
 from typing import Dict, Any
 
+# ScoreConverter import
+try:
+    from backend.services.score_converter import ScoreConverter
+except ModuleNotFoundError:
+    from score_converter import ScoreConverter
+
 
 def normalize_scores_from_extracted(extracted_scores: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -29,10 +35,20 @@ def normalize_scores_from_extracted(extracted_scores: Dict[str, Any]) -> Dict[st
         "선택과목": {}
     }
     
-    # 등급별 대략적인 백분위
-    grade_to_percentile = {
-        1: 98, 2: 92, 3: 83, 4: 68, 5: 50,
-        6: 31, 7: 17, 8: 7, 9: 2
+    # ScoreConverter 초기화 (2026 수능 데이터 기반 정확한 변환)
+    converter = ScoreConverter()
+    
+    # 등급별 중간 백분위 (등급 기준 범위의 중간값)
+    grade_to_mid_percentile = {
+        1: 98,   # 96~100% -> 중간 98%
+        2: 92,   # 89~96% -> 중간 92%
+        3: 83,   # 77~89% -> 중간 83%
+        4: 68,   # 60~77% -> 중간 68%
+        5: 50,   # 40~60% -> 중간 50%
+        6: 31,   # 23~40% -> 중간 31%
+        7: 17,   # 11~23% -> 중간 17%
+        8: 7,    # 4~11% -> 중간 7%
+        9: 2     # 0~4% -> 중간 2%
     }
     
     for subject, score_info in extracted_scores.items():
@@ -50,10 +66,9 @@ def normalize_scores_from_extracted(extracted_scores: Dict[str, Any]) -> Dict[st
         if elective and subject in ["국어", "수학"]:
             normalized["선택과목"][subject] = elective
         
-        # 등급 기반 변환
+        # 등급 기반 변환 (ScoreConverter 사용)
         if score_type == "등급":
             grade = int(value)
-            percentile = grade_to_percentile.get(grade, 50)
             
             # 영어/한국사는 백분위 없음 (절대평가)
             if subject in ["영어", "한국사"]:
@@ -64,27 +79,97 @@ def normalize_scores_from_extracted(extracted_scores: Dict[str, Any]) -> Dict[st
                     "선택과목": elective
                 }
             else:
-                # 간단한 표준점수 추정 (국어/수학: 120-145, 탐구: 50-70)
-                if subject in ["국어", "수학"]:
-                    std_score = 145 - (grade - 1) * 5
-                else:
-                    std_score = 70 - (grade - 1) * 3
+                # 등급 -> 중간 백분위 -> 표준점수 (정확한 2026 수능 데이터 사용)
+                mid_percentile = grade_to_mid_percentile.get(grade, 50)
                 
+                try:
+                    # ScoreConverter로 정확한 표준점수 조회
+                    result = converter.find_closest_by_percentile(subject, mid_percentile)
+                    
+                    if result:
+                        normalized["과목별_성적"][subject] = {
+                            "등급": grade,
+                            "표준점수": result["standard_score"],
+                            "백분위": result["percentile"],
+                            "선택과목": elective
+                        }
+                    else:
+                        # 변환 실패 시 백분위만 저장
+                        normalized["과목별_성적"][subject] = {
+                            "등급": grade,
+                            "표준점수": None,
+                            "백분위": mid_percentile,
+                            "선택과목": elective
+                        }
+                except Exception as e:
+                    print(f"⚠️ {subject} 등급 변환 오류: {e}")
+                    # 변환 실패 시 백분위만 저장
+                    normalized["과목별_성적"][subject] = {
+                        "등급": grade,
+                        "표준점수": None,
+                        "백분위": mid_percentile,
+                        "선택과목": elective
+                    }
+        
+        # 표준점수 입력 시 -> 백분위, 등급 조회
+        elif score_type == "표준점수":
+            std_score = int(value)
+            
+            try:
+                result = converter.find_closest_by_standard(subject, std_score)
+                
+                if result:
+                    normalized["과목별_성적"][subject] = {
+                        "등급": result["grade"],
+                        "표준점수": result["standard_score"],
+                        "백분위": result["percentile"],
+                        "선택과목": elective
+                    }
+                else:
+                    normalized["과목별_성적"][subject] = {
+                        "등급": None,
+                        "표준점수": std_score,
+                        "백분위": None,
+                        "선택과목": elective
+                    }
+            except Exception as e:
+                print(f"⚠️ {subject} 표준점수 변환 오류: {e}")
                 normalized["과목별_성적"][subject] = {
-                    "등급": grade,
+                    "등급": None,
                     "표준점수": std_score,
-                    "백분위": percentile,
+                    "백분위": None,
                     "선택과목": elective
                 }
         
-        # 표준점수/백분위는 그대로 사용
-        elif score_type in ["표준점수", "백분위"]:
-            normalized["과목별_성적"][subject] = {
-                "등급": None,
-                "표준점수": int(value) if score_type == "표준점수" else None,
-                "백분위": int(value) if score_type == "백분위" else None,
-                "선택과목": elective
-            }
+        # 백분위 입력 시 -> 표준점수, 등급 조회
+        elif score_type == "백분위":
+            percentile = int(value)
+            
+            try:
+                result = converter.find_closest_by_percentile(subject, percentile)
+                
+                if result:
+                    normalized["과목별_성적"][subject] = {
+                        "등급": result["grade"],
+                        "표준점수": result["standard_score"],
+                        "백분위": result["percentile"],
+                        "선택과목": elective
+                    }
+                else:
+                    normalized["과목별_성적"][subject] = {
+                        "등급": None,
+                        "표준점수": None,
+                        "백분위": percentile,
+                        "선택과목": elective
+                    }
+            except Exception as e:
+                print(f"⚠️ {subject} 백분위 변환 오류: {e}")
+                normalized["과목별_성적"][subject] = {
+                    "등급": None,
+                    "표준점수": None,
+                    "백분위": percentile,
+                    "선택과목": elective
+                }
     
     return normalized
 

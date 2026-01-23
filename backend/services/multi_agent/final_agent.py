@@ -126,7 +126,8 @@ class FinalAgent:
         answer_structure: List[Dict],
         sub_agent_results: Dict[str, Any],
         custom_prompt: str = None,
-        history: List[Dict] = None
+        history: List[Dict] = None,
+        stream_callback=None  # 스트리밍 콜백 추가
     ) -> Dict[str, Any]:
         """
         Answer Structure에 따라 최종 답변 생성
@@ -151,17 +152,31 @@ class FinalAgent:
         _log("="*80)
         _log("📝 Final Agent 실행")
         _log("="*80)
+        _log(f"📋 답변 구조: {len(answer_structure)}개 섹션")
+        _log(f"   ✍️  {len(answer_structure)}개 섹션으로 답변을 구성하고 있어요...")
+        for idx, section in enumerate(answer_structure[:5], 1):  # 상위 5개만 표시
+            section_title = section.get('title', '제목 없음') or section.get('section', '섹션')
+            _log(f"   {idx}. {section_title}")
+        if len(answer_structure) > 5:
+            _log(f"   ... 외 {len(answer_structure) - 5}개 섹션")
         
         # history를 user_question에 병합
         user_question_with_context = self._merge_history_with_question(user_question, history)
         
         # 입력 데이터 검증 로그
+        _log("")
         _log(f"🔍 [입력 검증]")
-        _log(f"   user_question: {user_question[:100]}..." if len(user_question) > 100 else f"   user_question: {user_question}")
-        _log(f"   history 대화 수: {len(history) if history else 0}")
-        _log(f"   answer_structure 섹션 수: {len(answer_structure)}")
-        _log(f"   sub_agent_results 키: {list(sub_agent_results.keys())}")
-        _log(f"   custom_prompt 사용: {'✅ Yes' if custom_prompt else '❌ No (기본 prompt4 사용)'}")
+        _log(f"   📝 질문: {user_question[:100]}..." if len(user_question) > 100 else f"   📝 질문: {user_question}")
+        _log(f"   💬 이전 대화: {len(history) if history else 0}개")
+        _log(f"   📋 답변 구조: {len(answer_structure)}개 섹션")
+        _log(f"   🤖 Sub Agent 결과: {len(sub_agent_results)}개")
+        for key in list(sub_agent_results.keys())[:3]:
+            agent_name = sub_agent_results[key].get('agent', 'Unknown')
+            sources_count = len(sub_agent_results[key].get('sources', []))
+            _log(f"      - {key} ({agent_name}): 출처 {sources_count}개")
+        if len(sub_agent_results) > 3:
+            _log(f"      ... 외 {len(sub_agent_results) - 3}개 결과")
+        _log(f"   🎨 커스텀 프롬프트: {'✅ 사용' if custom_prompt else '❌ 미사용 (기본 prompt5)'}")
 
         # Sub Agent 결과 정리 + 출처 정보 수집
         results_text, all_sources, all_source_urls, all_citations, all_chunks = self._format_sub_agent_results(sub_agent_results)
@@ -218,7 +233,11 @@ class FinalAgent:
         _log(f"   최종 프롬프트 길이: {len(prompt)}자")
 
         try:
-            response = self.model.generate_content(
+            _log("   📝 수집한 정보를 바탕으로 답변을 작성하고 있어요...")
+            _log("   ✍️  AI가 답변을 생성하는 중...")
+            
+            # 스트리밍으로 답변 생성
+            response_stream = self.model.generate_content(
                 prompt,
                 generation_config={
                     "temperature": 0.7,
@@ -227,12 +246,38 @@ class FinalAgent:
                 request_options=genai.types.RequestOptions(
                     retry=None,
                     timeout=120.0  # 멀티에이전트 파이프라인을 위해 120초로 증가
-                )
+                ),
+                stream=True  # 스트리밍 활성화
             )
-
-            # 토큰 사용량 기록
-            if hasattr(response, 'usage_metadata'):
-                usage = response.usage_metadata
+            
+            # 스트리밍 응답 수집 및 실시간 전송
+            raw_answer = ""
+            chunk_count = 0
+            accumulated_text = ""
+            for chunk in response_stream:
+                # chunk가 GenerateContentResponse 타입이므로 text 속성 확인
+                chunk_text = getattr(chunk, 'text', None)
+                if chunk_text:
+                    raw_answer += chunk_text
+                    accumulated_text += chunk_text
+                    chunk_count += 1
+                    
+                    # 스트리밍 콜백이 있으면 실시간으로 전송 (20자 이상일 때)
+                    if stream_callback and len(accumulated_text) >= 20:
+                        stream_callback(accumulated_text)
+                        accumulated_text = ""  # 전송 후 초기화
+                    
+                    # 일정 간격으로 진행 상황 로그
+                    if chunk_count % 10 == 0:
+                        _log(f"   ✍️  답변 생성 중... ({len(raw_answer)}자 작성됨)")
+            
+            # 마지막 남은 텍스트 전송
+            if stream_callback and accumulated_text:
+                stream_callback(accumulated_text)
+            
+            # 최종 토큰 사용량 기록 (스트리밍 완료 후)
+            if hasattr(response_stream, 'usage_metadata'):
+                usage = response_stream.usage_metadata
                 print(f"💰 토큰 사용량 (final_agent): {usage}")
                 
                 log_token_usage(
@@ -245,8 +290,9 @@ class FinalAgent:
                 )
 
             # 후처리: 섹션 마커 제거 및 cite 태그 정리
-            raw_answer = response.text
+            _log("   🔄 답변 후처리 중...")
             final_answer = self._post_process_sections(raw_answer)
+            _log("   ✅ 답변 작성 완료")
 
             # 답변에 사용된 청크 찾기
             used_chunks = []
@@ -555,12 +601,14 @@ async def generate_final_answer(
     user_question: str,
     answer_structure: List[Dict],
     sub_agent_results: Dict[str, Any],
-    history: List[Dict] = None
+    history: List[Dict] = None,
+    stream_callback=None  # 스트리밍 콜백 추가
 ) -> Dict[str, Any]:
     """Final Agent를 통해 최종 답변 생성"""
     return await final_agent.generate_final_answer(
         user_question=user_question,
         answer_structure=answer_structure,
         sub_agent_results=sub_agent_results,
+        stream_callback=stream_callback,  # 스트리밍 콜백 전달
         history=history
     )

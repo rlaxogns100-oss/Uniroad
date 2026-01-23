@@ -1,7 +1,7 @@
 """
 Sub Agents
 - 대학별 Agent: Supabase에서 해당 대학 해시태그 문서 검색
-- 컨설팅 Agent: 임시 DB에서 입결/환산점수 데이터 조회
+- 컨설팅 Agent: Supabase에서 입결/환산점수 데이터 조회
 - 선생님 Agent: 학습 계획 및 멘탈 관리 조언
 """
 
@@ -170,7 +170,17 @@ class UniversityAgent(SubAgentBase):
             relevant_docs.sort(key=lambda x: x[0], reverse=True)
             relevant_docs = [doc for score, doc in relevant_docs]
             
-            _log(f"   {self.university_name} 관련 문서: {len(relevant_docs)}개")
+            _log(f"   📊 {self.university_name} 관련 문서: {len(relevant_docs)}개 발견")
+            
+            # 발견된 문서 목록 상세 표시
+            if relevant_docs:
+                _log(f"   📚 발견된 문서 목록:")
+                for idx, doc in enumerate(relevant_docs[:5], 1):  # 상위 5개만 표시
+                    title = doc.get('title', '제목 없음')
+                    doc_year = doc.get('docu_cat', '')
+                    year_match = re.search(r'(\d{4})', doc_year)
+                    year_info = f" ({year_match.group(1)}년)" if year_match else ""
+                    _log(f"      {idx}. {title}{year_info}")
             
             if not relevant_docs:
                 return {
@@ -186,7 +196,7 @@ class UniversityAgent(SubAgentBase):
             # 2단계: 요약본 분석 (500자 이내)
             # ============================================================
             _log("")
-            _log(f"📋 [2단계] 요약본 분석")
+            _log(f"📋 [2단계] 요약본 분석 - 질문과 관련성 평가 중...")
             
             docs_summary_list = []
             for idx, doc in enumerate(relevant_docs[:10], 1):  # 최대 10개
@@ -233,28 +243,34 @@ class UniversityAgent(SubAgentBase):
                 _log(f"   ⚠️ 요약본 분석 실패: {e}")
                 selected_docs = relevant_docs[:2]
             
-            _log(f"   선별된 문서: {len(selected_docs)}개")
+            _log(f"   ✅ 선별된 문서: {len(selected_docs)}개")
+            for idx, doc in enumerate(selected_docs, 1):
+                title = doc.get('title', '제목 없음')
+                _log(f"      {idx}. {title}")
 
             # ============================================================
             # 3단계: 전체 내용 로드
             # ============================================================
             _log("")
-            _log(f"📋 [3단계] 문서 내용 로드")
+            _log(f"📋 [3단계] 문서 내용 로드 중...")
             
             full_content = ""
             sources = []
             source_urls = []
-            citations = []
+            citations = []  # citations 비활성화 - 항상 빈 배열 유지
             
-            for doc in selected_docs:
+            for idx, doc in enumerate(selected_docs, 1):
                 filename = doc['file_name']
                 title = doc['title']
                 file_url = doc.get('file_url') or ''
+                doc_year = doc.get('docu_cat', '')
+                year_match = re.search(r'(\d{4})', doc_year)
+                year_info = f" ({year_match.group(1)}년)" if year_match else ""
                 
                 sources.append(title)
                 source_urls.append(file_url)
                 
-                _log(f"   📄 {title}")
+                _log(f"   📖 [{idx}/{len(selected_docs)}] 문서 읽는 중: {title}{year_info}")
                 
                 # 청크 가져오기
                 chunks_response = client.table('policy_documents')\
@@ -268,37 +284,48 @@ class UniversityAgent(SubAgentBase):
                         key=lambda x: x.get('metadata', {}).get('chunkIndex', 0)
                     )
                     
+                    chunk_count = len(sorted_chunks)
+                    _log(f"      → 청크 {chunk_count}개 발견, 내용 로드 중...")
+                    
                     full_content += f"\n\n{'='*60}\n"
                     full_content += f"📄 {title}\n"
                     full_content += f"{'='*60}\n\n"
                     
                     # 청크 정보 저장 (답변 추적용)
-                    for chunk in sorted_chunks:
+                    for chunk_idx, chunk in enumerate(sorted_chunks, 1):
                         chunk_content = chunk['content']
                         full_content += chunk_content
                         full_content += "\n\n"
                         
-                        # 각 청크 정보를 citations에 저장 (chunk 키로)
-                        # citations는 나중에 final_agent에서 추출됨
-                        chunk_info = {
-                            "id": chunk.get('id'),
-                            "content": chunk_content,
-                            "title": title,
-                            "source": doc.get('source', ''),
-                            "file_url": file_url,
-                            "metadata": chunk.get('metadata', {})
-                        }
-                        citations.append({
-                            "chunk": chunk_info,
-                            "source": title,  # 기존 형식 유지
-                            "url": file_url
-                        })
+                        # 진행 상황 표시 (5개마다)
+                        if chunk_idx % 5 == 0 or chunk_idx == chunk_count:
+                            _log(f"      → 청크 {chunk_idx}/{chunk_count} 로드 완료...")
+                else:
+                    _log(f"      ⚠️  청크 데이터 없음")
+                        
+                        # citations 비활성화 - 주석 처리
+                        # chunk_info = {
+                        #     "id": chunk.get('id'),
+                        #     "content": chunk_content,
+                        #     "title": title,
+                        #     "source": doc.get('source', ''),
+                        #     "file_url": file_url,
+                        #     "metadata": chunk.get('metadata', {})
+                        # }
+                        # citations.append({
+                        #     "chunk": chunk_info,
+                        #     "source": title,
+                        #     "url": file_url
+                        # })
 
             # ============================================================
             # 4단계: 정보 추출
             # ============================================================
             _log("")
-            _log(f"📋 [4단계] 정보 추출")
+            _log(f"📋 [4단계] 정보 추출 중...")
+            _log(f"   📚 참고 문서: {len(sources)}개")
+            for idx, source in enumerate(sources, 1):
+                _log(f"      {idx}. {source}")
 
             # 사용 가능한 출처 목록 생성
             sources_list = "\n".join([f"- {s}" for s in sources])
@@ -322,6 +349,7 @@ class UniversityAgent(SubAgentBase):
 6. JSON이 아닌 자연어로 작성"""
 
             try:
+                _log(f"   🤖 AI 분석 중... (문서 {len(sources)}개, 총 {len(full_content)}자)")
                 extracted_info = await gemini_service.generate(
                     extract_prompt,
                     "문서 정보 추출 전문가"
@@ -331,8 +359,10 @@ class UniversityAgent(SubAgentBase):
 
             except Exception as e:
                 extracted_info = f"정보 추출 실패: {e}"
+                _log(f"   ❌ 정보 추출 오류: {e}")
             
-            _log(f"   추출된 정보 길이: {len(extracted_info)}자")
+            _log(f"   ✅ 추출 완료: {len(extracted_info)}자")
+            _log(f"   📄 사용된 문서: {', '.join(sources[:3])}{'...' if len(sources) > 3 else ''}")
             _log("="*60)
 
             return {
@@ -627,20 +657,19 @@ class ConsultingAgent(SubAgentBase):
 
             result_text = response.text
             
-            # citations 구성 - Supabase 전형결과 데이터 포함
+            # citations 비활성화 - 항상 빈 배열 유지
             citations = []
             
-            # 전형결과 데이터에서 citations 가져오기
-            if admission_results and admission_results.get("citations"):
-                citations.extend(admission_results["citations"])
-            
-            # 점수 변환이 실제로 이루어진 경우에만 산출방식 문서 추가
-            if normalized_scores and normalized_scores.get("과목별_성적"):
-                citations.append({
-                    "text": "표준점수·백분위 산출 방식",
-                    "source": "유니로드 2026 수능 표준점수 및 백분위 산출 방식 문서",
-                    "url": "https://rnitmphvahpkosvxjshw.supabase.co/storage/v1/object/public/document/pdfs/5d5c4455-bf58-4ef5-9e7f-a82d602aaa51.pdf"
-                })
+            # citations 비활성화 - 주석 처리
+            # if admission_results and admission_results.get("citations"):
+            #     citations.extend(admission_results["citations"])
+            # 
+            # if normalized_scores and normalized_scores.get("과목별_성적"):
+            #     citations.append({
+            #         "text": "표준점수·백분위 산출 방식",
+            #         "source": "유니로드 2026 수능 표준점수 및 백분위 산출 방식 문서",
+            #         "url": "https://rnitmphvahpkosvxjshw.supabase.co/storage/v1/object/public/document/pdfs/5d5c4455-bf58-4ef5-9e7f-a82d602aaa51.pdf"
+            #     })
 
             _log(f"   분석 완료")
             _log("="*60)
@@ -1775,7 +1804,19 @@ class ConsultingAgent(SubAgentBase):
                                 "campus": doc_campus
                             })
             
-            _log(f"   발견된 전형결과 문서: {len(relevant_docs)}개")
+            _log(f"   📊 발견된 전형결과 문서: {len(relevant_docs)}개")
+            
+            # 발견된 문서 상세 정보 표시
+            if relevant_docs:
+                _log(f"   📚 발견된 전형결과 문서 목록:")
+                for idx, item in enumerate(relevant_docs[:5], 1):  # 상위 5개만 표시
+                    doc = item["doc"]
+                    univ = item["university"]
+                    doc_type = item["type"]
+                    campus = item.get("campus", "")
+                    title = doc.get('title', '제목 없음')
+                    campus_info = f" ({campus})" if campus else ""
+                    _log(f"      {idx}. {univ}{campus_info} - {doc_type} - {title[:50]}...")
             
             # 문서 내용 로드 및 정리
             admission_results = {
@@ -1785,7 +1826,9 @@ class ConsultingAgent(SubAgentBase):
                 "citations": []
             }
             
-            for item in relevant_docs:
+            _log("")
+            _log(f"   📖 전형결과 문서 내용 로드 중...")
+            for idx, item in enumerate(relevant_docs, 1):
                 doc = item["doc"]
                 univ = item["university"]
                 doc_type = item["type"]
@@ -1810,7 +1853,8 @@ class ConsultingAgent(SubAgentBase):
                 
                 admission_results["sources"].append(source_name)
                 
-                _log(f"   📄 {source_name}")
+                # 진행 상황 로그
+                _log(f"      [{idx}/{len(relevant_docs)}] {source_name} 로드 중...")
                 
                 # 청크 가져오기
                 chunks_response = client.table('policy_documents')\
@@ -1824,25 +1868,34 @@ class ConsultingAgent(SubAgentBase):
                         key=lambda x: x.get('metadata', {}).get('chunkIndex', 0)
                     )
                     
+                    chunk_count = len(sorted_chunks)
+                    _log(f"         → 청크 {chunk_count}개 발견, 내용 추출 중...")
+                    
                     # 청크 내용 합치기
                     full_content = ""
-                    for chunk in sorted_chunks:
+                    for chunk_idx, chunk in enumerate(sorted_chunks, 1):
                         full_content += chunk['content'] + "\n\n"
                         
-                        # citations 추가
-                        chunk_info = {
-                            "id": chunk.get('id'),
-                            "content": chunk['content'],
-                            "title": title,
-                            "source": doc.get('source', ''),
-                            "file_url": file_url,
-                            "metadata": chunk.get('metadata', {})
-                        }
-                        admission_results["citations"].append({
-                            "chunk": chunk_info,
-                            "source": source_name,
-                            "url": file_url
-                        })
+                        # 진행 상황 표시 (10개마다)
+                        if chunk_idx % 10 == 0 or chunk_idx == chunk_count:
+                            _log(f"         → 청크 {chunk_idx}/{chunk_count} 처리 완료...")
+                else:
+                    _log(f"         ⚠️  청크 데이터 없음")
+                        
+                        # citations 비활성화 - 주석 처리
+                        # chunk_info = {
+                        #     "id": chunk.get('id'),
+                        #     "content": chunk['content'],
+                        #     "title": title,
+                        #     "source": doc.get('source', ''),
+                        #     "file_url": file_url,
+                        #     "metadata": chunk.get('metadata', {})
+                        # }
+                        # admission_results["citations"].append({
+                        #     "chunk": chunk_info,
+                        #     "source": source_name,
+                        #     "url": file_url
+                        # })
                     
                     # 대학별로 데이터 저장
                     univ_key = univ
@@ -2034,7 +2087,7 @@ async def execute_sub_agents(
     user_message: str = None
 ) -> Dict[str, Any]:
     """
-    Execution Plan에 따라 Sub Agent들 실행
+    Execution Plan에 따라 Sub Agent들 실행 (병렬 처리)
     
     Args:
         execution_plan: Orchestration Agent가 생성한 실행 계획
@@ -2048,7 +2101,8 @@ async def execute_sub_agents(
             ...
         }
     """
-    results = {}
+    import asyncio
+    import time
     
     # extracted_scores 전달 상태 로그
     if extracted_scores:
@@ -2057,12 +2111,14 @@ async def execute_sub_agents(
             _log(f"      - {subj}: {info.get('type')} {info.get('value')}")
     else:
         _log("   ℹ️  Orchestration에서 전달받은 성적 없음")
-
+    
+    # 1단계: 모든 step의 쿼리 전처리 (병렬 처리 전에 완료)
+    processed_steps = []
     for step in execution_plan:
         step_num = step.get("step")
         agent_name = step.get("agent")
         query = step.get("query")
-
+        
         _log(f"   Step {step_num}: {agent_name}")
         
         # 컨설팅 agent 호출 시 성적 전처리
@@ -2099,27 +2155,86 @@ async def execute_sub_agents(
                 # 실패해도 원본 쿼리로 계속 진행
         
         _log(f"   Query: {query[:150]}..." if len(query) > 150 else f"   Query: {query}")
-
+        
+        processed_steps.append({
+            "step_num": step_num,
+            "agent_name": agent_name,
+            "query": query
+        })
+    
+    # 2단계: 모든 에이전트를 병렬로 실행
+    _log("")
+    _log(f"   🚀 {len(processed_steps)}개 Sub Agent 병렬 실행 시작...")
+    
+    async def execute_single_agent(step_info: dict) -> tuple:
+        """단일 에이전트 실행 (병렬 처리용)"""
+        step_num = step_info["step_num"]
+        agent_name = step_info["agent_name"]
+        query = step_info["query"]
+        
+        _log("")
+        _log(f"   🔄 Step {step_num}: {agent_name} 시작")
+        query_preview = query[:100] + "..." if len(query) > 100 else query
+        _log(f"      📝 Query: {query_preview}")
+        
         try:
+            import time
             agent = get_agent(agent_name)
+            step_start_time = time.time()
+            _log(f"      ⚙️  {agent_name} 실행 중...")
             result = await agent.execute(query)
-            results[f"Step{step_num}_Result"] = result
+            step_execution_time = time.time() - step_start_time
+            
+            # 실행 시간을 결과에 추가
+            result["execution_time"] = step_execution_time
             
             status_icon = "✅" if result.get('status') == 'success' else "❌"
-            _log(f"   {status_icon} Status: {result.get('status')}")
+            _log(f"      {status_icon} Step {step_num} 완료: {result.get('status')} (⏱️ {step_execution_time:.2f}초)")
             sources_count = len(result.get('sources', []))
             if sources_count > 0:
-                _log(f"   출처: {sources_count}개")
+                sources_list = result.get('sources', [])[:3]  # 상위 3개만 표시
+                sources_display = ", ".join(sources_list)
+                if sources_count > 3:
+                    sources_display += f" 외 {sources_count - 3}개"
+                _log(f"      📚 출처: {sources_count}개 ({sources_display})")
+            else:
+                _log(f"      ℹ️  출처 없음")
+            
+            return (step_num, result)
             
         except Exception as e:
-            _log(f"   ❌ Error: {e}")
-            results[f"Step{step_num}_Result"] = {
+            import time
+            step_start_time = time.time()
+            step_execution_time = time.time() - step_start_time
+            _log(f"      ❌ Step {step_num} 오류: {str(e)[:100]} (⏱️ {step_execution_time:.2f}초)")
+            
+            error_result = {
                 "agent": agent_name,
                 "status": "error",
                 "result": str(e),
+                "execution_time": step_execution_time,
                 "sources": [],
                 "source_urls": [],
                 "citations": []
             }
-
+            return (step_num, error_result)
+    
+    # 병렬 실행
+    parallel_start_time = time.time()
+    tasks = [execute_single_agent(step_info) for step_info in processed_steps]
+    results_list = await asyncio.gather(*tasks)
+    parallel_execution_time = time.time() - parallel_start_time
+    
+    # 결과를 딕셔너리로 변환 (step_num 순서대로)
+    results = {}
+    for step_num, result in results_list:
+        results[f"Step{step_num}_Result"] = result
+    
+    _log("")
+    _log(f"   ✅ 병렬 실행 완료: 총 {parallel_execution_time:.2f}초")
+    sequential_time = sum(r.get('execution_time', 0) for r in results.values())
+    time_saved = sequential_time - parallel_execution_time
+    if time_saved > 0:
+        _log(f"   ⚡ 시간 절약: {time_saved:.2f}초 (순차 실행 시 {sequential_time:.2f}초 예상)")
+    
     return results
