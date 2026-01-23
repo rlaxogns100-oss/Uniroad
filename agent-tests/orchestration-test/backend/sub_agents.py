@@ -28,15 +28,75 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
+# 설정 파일 경로
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "agent_models_config.json")
+
+# 에이전트별 모델 설정 기본값
+DEFAULT_AGENT_MODEL_CONFIG = {
+    "서울대 agent": "gemini-2.5-flash-lite",
+    "연세대 agent": "gemini-2.5-flash-lite",
+    "고려대 agent": "gemini-2.5-flash-lite",
+    "성균관대 agent": "gemini-2.5-flash-lite",
+    "경희대 agent": "gemini-2.5-flash-lite",
+    "컨설팅 agent": "gemini-2.5-flash-lite",
+    "선생님 agent": "gemini-2.5-flash-lite"
+}
+
+# 사용 가능한 모델 목록
+AVAILABLE_MODELS = [
+    "gemini-2.5-flash-lite",
+    "gemini-3-flash-preview",
+    "gemini-2.0-flash",
+    "gemini-1.5-pro"
+]
+
+def load_agent_model_config():
+    """저장된 모델 설정 로드"""
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"⚠️  설정 파일 로드 실패: {e}")
+    return DEFAULT_AGENT_MODEL_CONFIG.copy()
+
+def save_agent_model_config(config):
+    """모델 설정 저장"""
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        print(f"✅ 모델 설정 저장 완료: {CONFIG_FILE}")
+    except Exception as e:
+        print(f"⚠️  설정 파일 저장 실패: {e}")
+
+# 시작 시 설정 로드
+AGENT_MODEL_CONFIG = load_agent_model_config()
+
+def set_agent_model(agent_name: str, model_name: str):
+    """에이전트의 모델 설정 (영구 저장)"""
+    if model_name not in AVAILABLE_MODELS:
+        raise ValueError(f"사용할 수 없는 모델: {model_name}")
+    AGENT_MODEL_CONFIG[agent_name] = model_name
+    save_agent_model_config(AGENT_MODEL_CONFIG)
+
+def get_agent_model_config():
+    """현재 에이전트 모델 설정 반환"""
+    return AGENT_MODEL_CONFIG.copy()
+
+def get_available_models():
+    """사용 가능한 모델 목록 반환"""
+    return AVAILABLE_MODELS.copy()
+
 
 class SubAgentBase:
     """Sub Agent 기본 클래스"""
 
-    def __init__(self, name: str, description: str):
+    def __init__(self, name: str, description: str, model_name: str = "gemini-2.5-flash-lite"):
         self.name = name
         self.description = description
+        self.model_name = model_name
         self.model = genai.GenerativeModel(
-            model_name="gemini-2.0-flash",  # 빠른 모델 사용
+            model_name=model_name,
         )
 
     async def execute(self, query: str) -> Dict[str, Any]:
@@ -47,11 +107,12 @@ class SubAgentBase:
 class UniversityAgent(SubAgentBase):
     """대학별 Agent - 해당 대학 입학처 자료 조회"""
 
-    def __init__(self, university_name: str):
+    def __init__(self, university_name: str, model_name: str = "gemini-2.5-flash-lite"):
         self.university_name = university_name
         super().__init__(
             name=f"{university_name} agent",
-            description=f"{university_name} 입시 정보(입결, 모집요강, 전형별 정보)를 조회하는 에이전트"
+            description=f"{university_name} 입시 정보(입결, 모집요강, 전형별 정보)를 조회하는 에이전트",
+            model_name=model_name
         )
 
     async def execute(self, query: str) -> Dict[str, Any]:
@@ -105,10 +166,11 @@ class UniversityAgent(SubAgentBase):
 class ConsultingAgent(SubAgentBase):
     """컨설팅 Agent - 전국 대학 합격 데이터 비교 분석"""
 
-    def __init__(self):
+    def __init__(self, model_name: str = "gemini-2.5-flash-lite"):
         super().__init__(
             name="컨설팅 agent",
-            description="여러 대학/전형을 비교 분석, 합격 가능성 평가"
+            description="여러 대학/전형을 비교 분석, 합격 가능성 평가",
+            model_name=model_name
         )
 
     async def execute(self, query: str) -> Dict[str, Any]:
@@ -227,10 +289,11 @@ class ConsultingAgent(SubAgentBase):
 class TeacherAgent(SubAgentBase):
     """선생님 Agent - 목표 설정 및 공부 계획"""
 
-    def __init__(self):
+    def __init__(self, model_name: str = "gemini-2.0-flash"):
         super().__init__(
             name="선생님 agent",
-            description="현실적인 목표 설정 및 공부 계획 수립"
+            description="현실적인 목표 설정 및 공부 계획 수립",
+            model_name=model_name
         )
 
     async def execute(self, query: str) -> Dict[str, Any]:
@@ -276,25 +339,30 @@ class TeacherAgent(SubAgentBase):
 # ============================================================
 
 def get_agent(agent_name: str) -> SubAgentBase:
-    """에이전트 이름으로 에이전트 인스턴스 반환"""
+    """에이전트 이름으로 에이전트 인스턴스 반환 (설정된 모델 사용)"""
 
     agent_name_lower = agent_name.lower()
+    model_name = AGENT_MODEL_CONFIG.get(agent_name, "gemini-2.5-flash-lite")
 
     if "서울대" in agent_name:
-        return UniversityAgent("서울대")
+        return UniversityAgent("서울대", model_name=model_name)
     elif "고려대" in agent_name:
-        return UniversityAgent("고려대")
+        return UniversityAgent("고려대", model_name=model_name)
     elif "연세대" in agent_name:
-        return UniversityAgent("연세대")
+        return UniversityAgent("연세대", model_name=model_name)
+    elif "성균관대" in agent_name:
+        return UniversityAgent("성균관대", model_name=model_name)
+    elif "경희대" in agent_name:
+        return UniversityAgent("경희대", model_name=model_name)
     elif "컨설팅" in agent_name:
-        return ConsultingAgent()
+        return ConsultingAgent(model_name=model_name)
     elif "선생님" in agent_name:
-        return TeacherAgent()
+        return TeacherAgent(model_name=model_name)
     else:
         # 알 수 없는 에이전트는 기본 대학 에이전트로 처리 시도
-        for univ in ["서울대", "고려대", "연세대"]:
+        for univ in ["서울대", "고려대", "연세대", "성균관대", "경희대"]:
             if univ in agent_name:
-                return UniversityAgent(univ)
+                return UniversityAgent(univ, model_name=model_name)
 
         raise ValueError(f"알 수 없는 에이전트: {agent_name}")
 
@@ -304,43 +372,59 @@ async def execute_sub_agents(
     extracted_scores: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
-    Execution Plan에 따라 Sub Agent들 실행
+    Execution Plan에 따라 Sub Agent들을 병렬로 실행
     
     Args:
         execution_plan: 실행 계획
         extracted_scores: Orchestration이 추출한 구조화된 성적
     """
-    results = {}
-
-    for step in execution_plan:
+    
+    # 병렬 실행을 위한 단일 스텝 실행 함수
+    async def execute_single_step(step):
         step_num = step.get("step")
         agent_name = step.get("agent")
         query = step.get("query")
+        
+        print(f"🚀 [Step {step_num}] {agent_name} 병렬 실행 시작")
 
         # 컨설팅 agent 호출 시 성적 전처리
         if "컨설팅" in agent_name and extracted_scores:
             try:
                 from score_preprocessing import build_preprocessed_query
                 
-                print(f"📊 성적 전처리: {len(extracted_scores)}개 과목")
+                print(f"📊 [Step {step_num}] 성적 전처리: {len(extracted_scores)}개 과목")
                 preprocessed_query = build_preprocessed_query(extracted_scores, query)
                 
                 if preprocessed_query != query:
                     query = preprocessed_query
-                    print(f"✅ 전처리 완료")
+                    print(f"✅ [Step {step_num}] 전처리 완료")
                     
             except Exception as e:
-                print(f"⚠️ 성적 전처리 실패: {e}")
+                print(f"⚠️ [Step {step_num}] 성적 전처리 실패: {e}")
 
         try:
             agent = get_agent(agent_name)
             result = await agent.execute(query)
-            results[f"Step{step_num}_Result"] = result
+            print(f"✅ [Step {step_num}] {agent_name} 완료")
+            return (step_num, result)
         except Exception as e:
-            results[f"Step{step_num}_Result"] = {
+            print(f"❌ [Step {step_num}] {agent_name} 실패: {e}")
+            return (step_num, {
                 "agent": agent_name,
                 "status": "error",
                 "result": str(e)
-            }
-
+            })
+    
+    # 모든 스텝을 병렬로 실행
+    print(f"\n⚡ {len(execution_plan)}개 에이전트 병렬 실행 시작")
+    tasks = [execute_single_step(step) for step in execution_plan]
+    step_results = await asyncio.gather(*tasks)
+    
+    # 결과를 딕셔너리로 변환
+    results = {}
+    for step_num, result in step_results:
+        results[f"Step{step_num}_Result"] = result
+    
+    print(f"⚡ 병렬 실행 완료\n")
+    
     return results

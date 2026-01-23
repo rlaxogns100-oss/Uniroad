@@ -64,16 +64,102 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
+# 설정 파일 경로
+CONFIG_FILE = os.path.join(os.path.dirname(__file__), "agent_models_config.json")
+
+# 에이전트별 모델 설정 기본값
+DEFAULT_AGENT_MODEL_CONFIG = {
+    # 기존 5개 대학
+    "서울대 agent": "gemini-2.5-flash-lite",
+    "연세대 agent": "gemini-2.5-flash-lite",
+    "고려대 agent": "gemini-2.5-flash-lite",
+    "성균관대 agent": "gemini-2.5-flash-lite",
+    "경희대 agent": "gemini-2.5-flash-lite",
+    # 주요 사립대
+    "한양대 agent": "gemini-2.5-flash-lite",
+    "서강대 agent": "gemini-2.5-flash-lite",
+    "중앙대 agent": "gemini-2.5-flash-lite",
+    "이화여대 agent": "gemini-2.5-flash-lite",
+    "건국대 agent": "gemini-2.5-flash-lite",
+    "동국대 agent": "gemini-2.5-flash-lite",
+    "홍익대 agent": "gemini-2.5-flash-lite",
+    "아주대 agent": "gemini-2.5-flash-lite",
+    "인하대 agent": "gemini-2.5-flash-lite",
+    # 특수목적대
+    "한국외대 agent": "gemini-2.5-flash-lite",
+    "숭실대 agent": "gemini-2.5-flash-lite",
+    "서울시립대 agent": "gemini-2.5-flash-lite",
+    "경북대 agent": "gemini-2.5-flash-lite",
+    "부산대 agent": "gemini-2.5-flash-lite",
+    # 과학기술원
+    "KAIST agent": "gemini-2.5-flash-lite",
+    "POSTECH agent": "gemini-2.5-flash-lite",
+    "GIST agent": "gemini-2.5-flash-lite",
+    "DGIST agent": "gemini-2.5-flash-lite",
+    "카이스트 agent": "gemini-2.5-flash-lite",
+    "포스텍 agent": "gemini-2.5-flash-lite",
+    "지스트 agent": "gemini-2.5-flash-lite",
+    # 기타 에이전트
+    "컨설팅 agent": "gemini-2.5-flash-lite",
+    "선생님 agent": "gemini-2.5-flash-lite"
+}
+
+# 사용 가능한 모델 목록
+AVAILABLE_MODELS = [
+    "gemini-2.5-flash-lite",
+    "gemini-3-flash-preview",
+    "gemini-2.0-flash",
+    "gemini-1.5-pro"
+]
+
+def load_agent_model_config():
+    """저장된 모델 설정 로드"""
+    try:
+        if os.path.exists(CONFIG_FILE):
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception as e:
+        print(f"⚠️  설정 파일 로드 실패: {e}")
+    return DEFAULT_AGENT_MODEL_CONFIG.copy()
+
+def save_agent_model_config(config):
+    """모델 설정 저장"""
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        print(f"✅ 모델 설정 저장 완료: {CONFIG_FILE}")
+    except Exception as e:
+        print(f"⚠️  설정 파일 저장 실패: {e}")
+
+# 시작 시 설정 로드
+AGENT_MODEL_CONFIG = load_agent_model_config()
+
+def set_agent_model(agent_name: str, model_name: str):
+    """에이전트의 모델 설정 (영구 저장)"""
+    if model_name not in AVAILABLE_MODELS:
+        raise ValueError(f"사용할 수 없는 모델: {model_name}")
+    AGENT_MODEL_CONFIG[agent_name] = model_name
+    save_agent_model_config(AGENT_MODEL_CONFIG)
+
+def get_agent_model_config():
+    """현재 에이전트 모델 설정 반환"""
+    return AGENT_MODEL_CONFIG.copy()
+
+def get_available_models():
+    """사용 가능한 모델 목록 반환"""
+    return AVAILABLE_MODELS.copy()
+
 
 class SubAgentBase:
     """Sub Agent 기본 클래스"""
 
-    def __init__(self, name: str, description: str, custom_system_prompt: str = None):
+    def __init__(self, name: str, description: str, custom_system_prompt: str = None, model_name: str = "gemini-2.5-flash-lite"):
         self.name = name
         self.description = description
         self.custom_system_prompt = custom_system_prompt
+        self.model_name = model_name
         self.model = genai.GenerativeModel(
-            model_name="gemini-3-flash-preview",
+            model_name=model_name,
         )
 
     async def execute(self, query: str) -> Dict[str, Any]:
@@ -92,14 +178,26 @@ class UniversityAgent(SubAgentBase):
     4. 정보 추출 후 출처와 함께 반환
     """
 
-    SUPPORTED_UNIVERSITIES = ["서울대", "연세대", "고려대", "성균관대", "경희대"]
+    SUPPORTED_UNIVERSITIES = [
+        # 기존 5개 대학
+        "서울대", "연세대", "고려대", "성균관대", "경희대",
+        # 주요 사립대
+        "한양대", "서강대", "중앙대", "이화여대", "건국대", 
+        "동국대", "홍익대", "아주대", "인하대",
+        # 특수목적대
+        "한국외대", "숭실대", "서울시립대", "경북대", "부산대",
+        # 과학기술원
+        "KAIST", "POSTECH", "GIST", "DGIST",
+        "카이스트", "포스텍", "지스트"
+    ]
 
-    def __init__(self, university_name: str, custom_system_prompt: str = None):
+    def __init__(self, university_name: str, custom_system_prompt: str = None, model_name: str = "gemini-2.5-flash-lite"):
         self.university_name = university_name
         super().__init__(
             name=f"{university_name} agent",
             description=f"{university_name} 입시 정보(입결, 모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트",
-            custom_system_prompt=custom_system_prompt
+            custom_system_prompt=custom_system_prompt,
+            model_name=model_name
         )
 
     async def execute(self, query: str) -> Dict[str, Any]:
@@ -367,11 +465,12 @@ class ConsultingAgent(SubAgentBase):
     - 2026 수능 데이터 기준
     """
 
-    def __init__(self, custom_system_prompt: str = None):
+    def __init__(self, custom_system_prompt: str = None, model_name: str = "gemini-2.5-flash-lite"):
         super().__init__(
             name="컨설팅 agent",
             description="5개 대학 합격 데이터 비교 분석, 합격 가능성 평가",
-            custom_system_prompt=custom_system_prompt
+            custom_system_prompt=custom_system_prompt,
+            model_name=model_name
         )
         # ScoreConverter 초기화
         self.score_converter = ScoreConverter()
@@ -1922,11 +2021,12 @@ class ConsultingAgent(SubAgentBase):
 class TeacherAgent(SubAgentBase):
     """선생님 Agent - 학습 계획 및 멘탈 관리 조언"""
 
-    def __init__(self, custom_system_prompt: str = None):
+    def __init__(self, custom_system_prompt: str = None, model_name: str = "gemini-2.5-flash-lite"):
         super().__init__(
             name="선생님 agent",
             description="현실적인 목표 설정 및 공부 계획 수립, 멘탈 관리",
-            custom_system_prompt=custom_system_prompt
+            custom_system_prompt=custom_system_prompt,
+            model_name=model_name
         )
 
     async def execute(self, query: str) -> Dict[str, Any]:
@@ -2009,21 +2109,22 @@ class TeacherAgent(SubAgentBase):
 # ============================================================
 
 def get_agent(agent_name: str) -> SubAgentBase:
-    """에이전트 이름으로 에이전트 인스턴스 반환"""
+    """에이전트 이름으로 에이전트 인스턴스 반환 (설정된 모델 사용)"""
     agent_name_lower = agent_name.lower()
+    model_name = AGENT_MODEL_CONFIG.get(agent_name, "gemini-2.5-flash-lite")
 
     # 대학별 Agent
     for univ in UniversityAgent.SUPPORTED_UNIVERSITIES:
         if univ in agent_name:
-            return UniversityAgent(univ)
+            return UniversityAgent(univ, model_name=model_name)
 
     # 컨설팅 Agent
     if "컨설팅" in agent_name or "컨설턴트" in agent_name:
-        return ConsultingAgent()
+        return ConsultingAgent(model_name=model_name)
 
     # 선생님 Agent
     if "선생님" in agent_name or "선생" in agent_name:
-        return TeacherAgent()
+        return TeacherAgent(model_name=model_name)
 
     raise ValueError(f"알 수 없는 에이전트: {agent_name}")
 

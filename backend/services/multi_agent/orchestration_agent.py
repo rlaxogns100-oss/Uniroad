@@ -21,8 +21,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# 가용 에이전트 목록 (5개 대학 + 컨설팅 + 선생님)
+# 가용 에이전트 목록 (26개 대학 + 컨설팅 + 선생님)
 AVAILABLE_AGENTS = [
+    # 기존 5개 대학
     {
         "name": "서울대 agent",
         "description": "서울대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
@@ -43,9 +44,97 @@ AVAILABLE_AGENTS = [
         "name": "경희대 agent",
         "description": "경희대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
     },
+    # 주요 사립대
+    {
+        "name": "한양대 agent",
+        "description": "한양대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "서강대 agent",
+        "description": "서강대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "중앙대 agent",
+        "description": "중앙대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "이화여대 agent",
+        "description": "이화여자대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "건국대 agent",
+        "description": "건국대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "동국대 agent",
+        "description": "동국대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "홍익대 agent",
+        "description": "홍익대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "아주대 agent",
+        "description": "아주대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "인하대 agent",
+        "description": "인하대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    # 특수목적대
+    {
+        "name": "한국외대 agent",
+        "description": "한국외국어대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "숭실대 agent",
+        "description": "숭실대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "서울시립대 agent",
+        "description": "서울시립대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "경북대 agent",
+        "description": "경북대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "부산대 agent",
+        "description": "부산대학교 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    # 과학기술원
+    {
+        "name": "KAIST agent",
+        "description": "KAIST(한국과학기술원) 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "POSTECH agent",
+        "description": "POSTECH(포항공과대학교) 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "GIST agent",
+        "description": "GIST(광주과학기술원) 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "DGIST agent",
+        "description": "DGIST(대구경북과학기술원) 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "카이스트 agent",
+        "description": "카이스트(KAIST) 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "포스텍 agent",
+        "description": "포스텍(POSTECH) 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    {
+        "name": "지스트 agent",
+        "description": "지스트(GIST) 입시 정보(모집요강, 전형별 정보)를 Supabase에서 검색하는 에이전트"
+    },
+    # 기타 에이전트
     {
         "name": "컨설팅 agent",
-        "description": "5개 대학(서울대/연세대/고려대/성균관대/경희대) 합격 데이터 비교 분석, 학생 성적 기반 합격 가능성 평가 및 대학 추천, 정시 점수 환산"
+        "description": "주요 대학 합격 데이터 비교 분석, 학생 성적 기반 합격 가능성 평가 및 대학 추천, 정시 점수 환산 (서울대/연세대/고려대/경희대/서강대 점수 환산 지원)"
     },
     {
         "name": "선생님 agent",
@@ -57,7 +146,7 @@ AVAILABLE_AGENTS = [
 ORCHESTRATION_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Orchestration Agent (총괄 설계자 & PD)**입니다.
 
 ## 기본 설정
-- **현재 시점:** 2026년 1월 (2026학년도 정시 진행 중)
+- **현재 시점:** 2026년 1월 (2026학년도 입시 진행 중)
 - **검색 기준:** 사용자가 "작년 입결/결과"를 물으면 반드시 **[2025학년도]** 키워드로 쿼리를 생성하세요. (2026학년도는 결과 미확정, 2024학년도는 재작년임)
 
 ## 즉시 처리 규칙 (Immediate Processing)
@@ -103,6 +192,7 @@ ORCHESTRATION_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **O
 - 백분위: "국어 백분위 98"
 - 원점수: "국어 92점" (100점 만점, 100 미만)
 - 자연어: "국어가 1등급이고 수학도 1등급인데요"
+- 예외: "나 211332"야 -> 6개 숫자가 제시된 경우 한국사/국어/수학/영어/탐구1/탐구2
 
 ### 과목명 규칙
 - **주요 과목**: 국어, 수학, 영어, 한국사
@@ -347,7 +437,7 @@ async def run_orchestration_agent_with_prompt(
         )
     
     model = genai.GenerativeModel(
-        model_name="gemini-3-flash-preview",
+        model_name="gemini-2.5-flash-lite",
         system_instruction=system_prompt
     )
 
@@ -377,7 +467,7 @@ async def run_orchestration_agent_with_prompt(
             prompt_tokens=getattr(usage, 'prompt_token_count', 0),
             output_tokens=getattr(usage, 'candidates_token_count', 0),
             total_tokens=getattr(usage, 'total_token_count', 0),
-            model="gemini-3-flash-preview",
+            model="gemini-2.5-flash-lite",
             details="실행계획 수립"
         )
     
@@ -411,7 +501,7 @@ async def run_orchestration_agent(
     )
 
     model = genai.GenerativeModel(
-        model_name="gemini-3-flash-preview",
+        model_name="gemini-2.5-flash-lite",
         system_instruction=system_prompt
     )
 
@@ -448,7 +538,7 @@ async def run_orchestration_agent(
             prompt_tokens=getattr(usage, 'prompt_token_count', 0),
             output_tokens=getattr(usage, 'candidates_token_count', 0),
             total_tokens=getattr(usage, 'total_token_count', 0),
-            model="gemini-3-flash-preview",
+            model="gemini-2.5-flash-lite",
             details="실행계획 수립"
         )
     

@@ -19,7 +19,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Sub Agents와 Final Agent import
-from sub_agents import execute_sub_agents, get_agent
+from sub_agents import (
+    execute_sub_agents, 
+    get_agent,
+    set_agent_model,
+    get_agent_model_config,
+    get_available_models
+)
 from final_agent import generate_final_answer
 
 # Gemini API 키 설정 (환경 변수에서 로드)
@@ -476,6 +482,43 @@ async def clear_history(session_id: str):
     if session_id in conversation_history:
         del conversation_history[session_id]
     return {"message": "대화 이력 초기화 완료"}
+
+
+@app.get("/api/models")
+async def get_models():
+    """사용 가능한 LLM 모델 목록 조회"""
+    return {
+        "models": get_available_models()
+    }
+
+
+@app.get("/api/agents/models")
+async def get_agents_models():
+    """모든 에이전트의 현재 모델 설정 조회"""
+    return {
+        "agent_models": get_agent_model_config()
+    }
+
+
+@app.put("/api/agents/{agent_name}/model")
+async def update_agent_model(agent_name: str, request: Dict[str, str]):
+    """특정 에이전트의 모델 설정 변경"""
+    try:
+        model_name = request.get("model_name")
+        if not model_name:
+            raise HTTPException(status_code=400, detail="model_name이 필요합니다")
+        
+        set_agent_model(agent_name, model_name)
+        
+        return {
+            "message": "모델 설정 완료",
+            "agent_name": agent_name,
+            "model_name": model_name
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # 프론트엔드 정적 파일 서빙

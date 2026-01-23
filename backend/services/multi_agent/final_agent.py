@@ -44,7 +44,7 @@ class FinalAgent:
     def __init__(self):
         self.name = "Final Agent"
         self.model = genai.GenerativeModel(
-            model_name="gemini-3-flash-preview",
+            model_name="gemini-2.5-flash-lite",
         )
 
     def _post_process_sections(self, text: str) -> str:
@@ -239,7 +239,7 @@ class FinalAgent:
                     prompt_tokens=getattr(usage, 'prompt_token_count', 0),
                     output_tokens=getattr(usage, 'candidates_token_count', 0),
                     total_tokens=getattr(usage, 'total_token_count', 0),
-                    model="gemini-3-flash-preview",
+                    model="gemini-2.5-flash-lite",
                     details="Final Agent"
                 )
 
@@ -247,14 +247,14 @@ class FinalAgent:
             raw_answer = response.text
             final_answer = self._post_process_sections(raw_answer)
 
-            # 답변에 사용된 청크 찾기
+            # 답변에서 실제 인용된 출처만 추출 (cite 태그 기반)
             used_chunks = []
             if all_chunks:
-                used_chunks = self._find_relevant_chunks(final_answer, all_chunks)
+                used_chunks = self._extract_cited_chunks_only(final_answer, all_chunks)
 
             _log(f"   원본 답변 길이: {len(raw_answer)}자")
             _log(f"   후처리 답변 길이: {len(final_answer)}자")
-            _log(f"   관련 청크 수: {len(used_chunks)}개")
+            _log(f"   실제 인용된 청크 수: {len(used_chunks)}개 (중복 제거됨)")
             _log("="*80)
 
             return {
@@ -284,6 +284,100 @@ class FinalAgent:
                 "used_chunks": [],
                 "metadata": {}
             }
+
+    def _extract_cited_chunks_only(self, answer: str, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        답변에서 <cite> 태그로 실제 인용된 출처만 추출합니다.
+        같은 PDF 문서는 하나의 청크만 선택합니다 (중복 제거).
+        
+        Args:
+            answer: 생성된 답변 (cite 태그 포함)
+            chunks: 검색된 모든 청크 목록
+            
+        Returns:
+            실제 인용된 청크 목록 (같은 문서당 하나씩만)
+        """
+        if not chunks or not answer:
+            return []
+        
+        # 답변에서 <cite> 태그 파싱
+        cite_pattern = r'<cite\s+data-source="([^"]*)"(?:\s+data-url="([^"]*)")?\s*>.*?</cite>'
+        cited_sources = set()
+        
+        for match in re.finditer(cite_pattern, answer, flags=re.DOTALL):
+            source = match.group(1)
+            if source:
+                cited_sources.add(source)
+        
+        if not cited_sources:
+            _log(f"   ⚠️ 답변에 <cite> 태그가 없습니다. 출처 없이 답변 생성됨.")
+            return []
+        
+        _log(f"   📋 답변에서 인용된 출처: {len(cited_sources)}개")
+        for idx, source in enumerate(cited_sources, 1):
+            _log(f"      {idx}. {source[:80]}...")
+        
+        # 인용된 출처에 해당하는 청크만 찾기 (같은 PDF 문서당 하나만)
+        cited_chunks = []
+        seen_documents = set()  # 같은 PDF 문서는 한 번만 (파일명 기준)
+        
+        for chunk in chunks:
+            chunk_title = chunk.get('title', '')
+            chunk_source = chunk.get('source', '')
+            chunk_file_url = chunk.get('file_url', '')
+            
+            # PDF 문서명 추출 (file_url에서 추출)
+            document_name = self._extract_document_name(chunk_file_url, chunk_title)
+            
+            # 이미 이 문서에서 청크를 추가했으면 스킵
+            if document_name in seen_documents:
+                continue
+            
+            # 청크의 출처가 cited_sources에 있는지 확인
+            for cited_source in cited_sources:
+                # 출처 이름이 일치하거나 포함되는 경우
+                if (cited_source in chunk_title or 
+                    chunk_title in cited_source or
+                    cited_source in chunk_source or
+                    chunk_source in cited_source):
+                    
+                    # 같은 문서에서 처음 발견된 청크만 추가
+                    cited_chunks.append(chunk)
+                    seen_documents.add(document_name)
+                    _log(f"      ✅ 선택: {document_name}")
+                    break
+        
+        _log(f"   ✅ 실제 인용된 청크: {len(cited_chunks)}개 (같은 문서당 1개씩)")
+        return cited_chunks
+    
+    def _extract_document_name(self, file_url: str, title: str) -> str:
+        """
+        청크에서 문서명 추출 (같은 문서 구별용)
+        
+        Args:
+            file_url: 파일 URL
+            title: 청크 제목
+            
+        Returns:
+            문서 고유 식별자 (파일명 또는 제목 기반)
+        """
+        # 1. file_url에서 PDF 파일명 추출 시도
+        if file_url and '.pdf' in file_url.lower():
+            # URL에서 파일명만 추출 (마지막 / 이후 부분)
+            filename = file_url.split('/')[-1]
+            # ?query 파라미터 제거
+            filename = filename.split('?')[0]
+            return filename
+        
+        # 2. title에서 문서 구별 (연도 + 학교 + 캠퍼스 + 전형 등으로 구별)
+        # 예: "경희대 용인캠퍼스 2025학년도 정시 전형결과"
+        if title:
+            # 불필요한 공백 제거 및 정규화
+            normalized_title = re.sub(r'\s+', '_', title.strip())
+            return normalized_title[:100]  # 최대 100자로 제한
+        
+        # 3. 둘 다 없으면 기본값 (거의 없는 경우)
+        return "unknown_document"
 
     def _find_relevant_chunks(self, answer: str, chunks: List[Dict[str, Any]], max_chunks: int = 3) -> List[Dict[str, Any]]:
         """
