@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF 다운로드 테스트</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        button {
+            padding: 12px 24px;
+            margin: 10px;
+            font-size: 14px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            background: #f5f5f5;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #e5e5e5;
+        }
+        .result {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f0f0f0;
+            border-radius: 6px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>PDF 다운로드 테스트</h1>
+    <p>Supabase Storage에서 PDF 다운로드 방식 테스트</p>
+
+    <div>
+        <button onclick="testMethod1()">방법 1: a 태그 + download 속성</button>
+        <button onclick="testMethod2()">방법 2: window.open + ?download</button>
+        <button onclick="testMethod3()">방법 3: fetch + blob</button>
+    </div>
+
+    <div id="result" class="result"></div>
+
+    <script>
+        const PDF_URL = 'https://rnitmphvahpkosvxjshw.supabase.co/storage/v1/object/public/document/pdfs/efe55407-d51c-4cab-8c20-aabb2445ac2b.pdf';
+        const FILENAME = '수능_점수_변환_및_추정_방법.pdf';
+
+        function log(message, isError = false) {
+            const result = document.getElementById('result');
+            result.className = 'result ' + (isError ? 'error' : 'success');
+            result.textContent = message;
+        }
+
+        // 방법 1: a 태그 + download 속성 (cross-origin에서 작동 안 함)
+        function testMethod1() {
+            log('방법 1 시도 중...');
+            const link = document.createElement('a');
+            link.href = PDF_URL;
+            link.download = FILENAME;
+            link.target = '_blank';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            log('방법 1 실행 완료\n(cross-origin이라 다운로드 안 되고 새 탭에서 열릴 수 있음)');
+        }
+
+        // 방법 2: window.open + ?download 파라미터
+        function testMethod2() {
+            log('방법 2 시도 중...');
+            const downloadUrl = `${PDF_URL}?download=${encodeURIComponent(FILENAME)}`;
+            window.open(downloadUrl, '_blank', 'noopener,noreferrer');
+            log('방법 2 실행 완료\n(팝업 차단될 수 있음, Supabase가 다운로드 헤더 제공)');
+        }
+
+        // 방법 3: fetch + blob (가장 안정적)
+        async function testMethod3() {
+            try {
+                log('방법 3 시도 중... (fetch + blob)');
+                
+                const response = await fetch(PDF_URL, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/pdf',
+                    },
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const blob = await response.blob();
+                const blobUrl = URL.createObjectURL(blob);
+
+                const link = document.createElement('a');
+                link.href = blobUrl;
+                link.download = FILENAME;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+                
+                log(`방법 3 성공!\n파일 크기: ${(blob.size / 1024).toFixed(2)} KB\n다운로드 시작됨`);
+            } catch (error) {
+                log(`방법 3 실패: ${error.message}`, true);
+            }
+        }
+    </script>
+</body>
+</html>

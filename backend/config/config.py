@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     BACKEND_PORT: int = 8000
     FRONTEND_URL: str = "http://localhost:5173"
     
+    # Documents
+    SCORE_CONVERSION_GUIDE_URL: str = ""  # 점수 변환 가이드 PDF URL (선택사항)
+    
     class Config:
         env_file = ".env"
         case_sensitive = True

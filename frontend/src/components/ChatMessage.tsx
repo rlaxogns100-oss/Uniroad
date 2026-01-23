@@ -421,55 +421,48 @@ function parseAndRenderMessage(
         {paragraphSources.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5 items-center">
             {paragraphSources.map((source, idx) => {
-              const handleSourceDownload = async (e: React.MouseEvent) => {
-                e.preventDefault()
-                if (!source.url) return
-                
-                try {
-                  // URL에서 파일명 추출
-                  const urlParts = source.url.split('/')
-                  const fileName = urlParts[urlParts.length - 1] || `${source.text}.pdf`
-                  
-                  // fetch로 파일 가져오기
-                  const response = await fetch(source.url)
-                  if (!response.ok) {
-                    // fetch 실패 시 새 탭에서 열기
-                    window.open(source.url, '_blank')
-                    return
-                  }
-                  
-                  const blob = await response.blob()
-                  const url = URL.createObjectURL(blob)
-                  const link = document.createElement('a')
-                  link.href = url
-                  link.download = fileName
-                  document.body.appendChild(link)
-                  link.click()
-                  document.body.removeChild(link)
-                  URL.revokeObjectURL(url)
-                } catch (error) {
-                  console.error('다운로드 실패:', error)
-                  // 에러 발생 시 새 탭에서 열기
-                  window.open(source.url, '_blank')
-                }
+              // 하드코딩 URL (수능 점수 변환 및 추정 방법 PDF)
+              const SCORE_GUIDE_URL = "https://rnitmphvahpkosvxjshw.supabase.co/storage/v1/object/public/document/pdfs/efe55407-d51c-4cab-8c20-aabb2445ac2b.pdf"
+              
+              // "환산" 관련 출처는 모두 "수능 점수 변환 및 추정 방법"으로 통일
+              let finalText = source.text
+              let finalUrl = source.url
+              
+              if (source.text.includes("환산") || source.text.includes("추정") || source.text.includes("변환")) {
+                finalText = "수능 점수 변환 및 추정 방법"
+                finalUrl = SCORE_GUIDE_URL
               }
               
-              return source.url ? (
-                <button
+              // URL 없으면 클릭 불가능한 span
+              if (!finalUrl) {
+                return (
+                  <span
+                    key={idx}
+                    className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium text-gray-400 bg-gray-100 rounded"
+                  >
+                    <svg className="w-3 h-3 flex-shrink-0 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {finalText}
+                  </span>
+                )
+              }
+              
+              // URL 있으면 클릭 가능 - 새 탭에서 열기 (가장 단순하고 확실한 방법)
+              return (
+                <a
                   key={idx}
-                  onClick={handleSourceDownload}
-                  className="inline-flex items-center px-2 py-1 text-xs font-bold text-gray-900 hover:text-gray-700 transition-colors cursor-pointer"
-                  title={`출처: ${source.text} (클릭하면 원본 파일 다운로드)`}
+                  href={finalUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium text-gray-500 bg-gray-100 hover:bg-gray-200 rounded transition-colors cursor-pointer group"
+                  title={`출처: ${finalText} (클릭하여 열기)`}
                 >
-                  {source.text}
-                </button>
-              ) : (
-                <span
-                  key={idx}
-                  className="inline-flex items-center px-2 py-1 text-xs font-bold text-gray-900"
-                >
-                  {source.text}
-                </span>
+                  <svg className="w-3 h-3 flex-shrink-0 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span className="group-hover:underline">{finalText}</span>
+                </a>
               )
             })}
           </div>

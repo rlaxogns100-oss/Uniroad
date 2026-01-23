@@ -38,6 +38,12 @@ def normalize_scores_from_extracted(extracted_scores: Dict[str, Any]) -> Dict[st
     # ScoreConverter 초기화 (2026 수능 데이터 기반 정확한 변환)
     converter = ScoreConverter()
     
+    # 디폴트 선택과목 설정
+    DEFAULT_KOREAN_ELECTIVE = "화법과작문"  # 국어 디폴트
+    DEFAULT_MATH_ELECTIVE = "확률과통계"    # 수학 디폴트 (인문계 기준)
+    DEFAULT_INQUIRY1 = "생활과윤리"         # 탐구1 디폴트 (사회탐구)
+    DEFAULT_INQUIRY2 = "사회문화"           # 탐구2 디폴트 (사회탐구)
+    
     # 등급별 중간 백분위 (등급 기준 범위의 중간값)
     grade_to_mid_percentile = {
         1: 98,   # 96~100% -> 중간 98%
@@ -62,6 +68,19 @@ def normalize_scores_from_extracted(extracted_scores: Dict[str, Any]) -> Dict[st
         if value is None:
             continue
         
+        # 탐구1, 탐구2 → 디폴트 과목으로 매핑
+        lookup_subject = subject
+        if subject == "탐구1":
+            lookup_subject = DEFAULT_INQUIRY1
+        elif subject == "탐구2":
+            lookup_subject = DEFAULT_INQUIRY2
+        
+        # 국어/수학 선택과목 디폴트 설정
+        if subject == "국어" and not elective:
+            elective = DEFAULT_KOREAN_ELECTIVE
+        elif subject == "수학" and not elective:
+            elective = DEFAULT_MATH_ELECTIVE
+        
         # 선택과목 저장
         if elective and subject in ["국어", "수학"]:
             normalized["선택과목"][subject] = elective
@@ -83,8 +102,8 @@ def normalize_scores_from_extracted(extracted_scores: Dict[str, Any]) -> Dict[st
                 mid_percentile = grade_to_mid_percentile.get(grade, 50)
                 
                 try:
-                    # ScoreConverter로 정확한 표준점수 조회
-                    result = converter.find_closest_by_percentile(subject, mid_percentile)
+                    # ScoreConverter로 정확한 표준점수 조회 (lookup_subject 사용)
+                    result = converter.find_closest_by_percentile(lookup_subject, mid_percentile)
                     
                     if result:
                         normalized["과목별_성적"][subject] = {
@@ -102,7 +121,7 @@ def normalize_scores_from_extracted(extracted_scores: Dict[str, Any]) -> Dict[st
                             "선택과목": elective
                         }
                 except Exception as e:
-                    print(f"⚠️ {subject} 등급 변환 오류: {e}")
+                    print(f"⚠️ {subject} 등급 변환 오류 (lookup: {lookup_subject}): {e}")
                     # 변환 실패 시 백분위만 저장
                     normalized["과목별_성적"][subject] = {
                         "등급": grade,
@@ -146,7 +165,8 @@ def normalize_scores_from_extracted(extracted_scores: Dict[str, Any]) -> Dict[st
             percentile = int(value)
             
             try:
-                result = converter.find_closest_by_percentile(subject, percentile)
+                # lookup_subject 사용 (탐구1/탐구2 → 디폴트 과목)
+                result = converter.find_closest_by_percentile(lookup_subject, percentile)
                 
                 if result:
                     normalized["과목별_성적"][subject] = {
@@ -163,13 +183,133 @@ def normalize_scores_from_extracted(extracted_scores: Dict[str, Any]) -> Dict[st
                         "선택과목": elective
                     }
             except Exception as e:
-                print(f"⚠️ {subject} 백분위 변환 오류: {e}")
+                print(f"⚠️ {subject} 백분위 변환 오류 (lookup: {lookup_subject}): {e}")
                 normalized["과목별_성적"][subject] = {
                     "등급": None,
                     "표준점수": None,
                     "백분위": percentile,
                     "선택과목": elective
                 }
+        
+        # 원점수 입력 시 -> 표준점수, 백분위, 등급 조회
+        elif score_type == "원점수":
+            raw_score = int(value)
+            
+            # 국어/수학: ScoreConverter 사용 (선택과목 필요)
+            if subject in ["국어", "수학"]:
+                if not elective:
+                    # 선택과목 없으면 기본값 사용
+                    elective = "화법과작문" if subject == "국어" else "확률과통계"
+                
+                try:
+                    result = converter.convert_score(subject, raw_score=raw_score, elective=elective)
+                    
+                    if result:
+                        normalized["과목별_성적"][subject] = {
+                            "등급": result["grade"],
+                            "표준점수": result["standard_score"],
+                            "백분위": result["percentile"],
+                            "선택과목": elective
+                        }
+                    else:
+                        # 변환 실패 시 원점수만 저장
+                        normalized["과목별_성적"][subject] = {
+                            "등급": None,
+                            "표준점수": None,
+                            "백분위": None,
+                            "선택과목": elective,
+                            "원점수": raw_score
+                        }
+                except Exception as e:
+                    print(f"⚠️ {subject} 원점수 변환 오류: {e}")
+                    normalized["과목별_성적"][subject] = {
+                        "등급": None,
+                        "표준점수": None,
+                        "백분위": None,
+                        "선택과목": elective,
+                        "원점수": raw_score
+                    }
+            
+            # 영어: 절대평가 등급컷으로 변환
+            elif subject == "영어":
+                # 2026 수능 영어 등급컷 (절대평가)
+                english_cuts = {
+                    1: 90, 2: 80, 3: 70, 4: 60, 5: 50, 6: 40, 7: 30, 8: 20, 9: 0
+                }
+                
+                grade = 9
+                for g, cut in english_cuts.items():
+                    if raw_score >= cut:
+                        grade = g
+                        break
+                
+                normalized["과목별_성적"][subject] = {
+                    "등급": grade,
+                    "표준점수": None,
+                    "백분위": None,
+                    "선택과목": None,
+                    "원점수": raw_score
+                }
+            
+            # 탐구 과목: ScoreConverter 사용 (원점수 데이터 있음)
+            else:
+                # 사회탐구/과학탐구 데이터 확인
+                if subject in converter.social_data or subject in converter.science_data:
+                    data_dict = converter.social_data if subject in converter.social_data else converter.science_data
+                    subject_data = data_dict.get(subject)
+                    
+                    if subject_data:
+                        # 탐구 과목은 50점 만점
+                        # 원점수가 50을 초과하면 100점 만점 기준으로 입력된 것으로 간주하고 변환
+                        actual_raw_score = raw_score
+                        if raw_score > 50:
+                            actual_raw_score = int(raw_score * 50 / 100)
+                        
+                        raw_score_str = str(actual_raw_score)
+                        score_info = subject_data.get(raw_score_str)
+                        
+                        if score_info:
+                            # 정확한 데이터 있음
+                            normalized["과목별_성적"][subject] = {
+                                "등급": score_info["grade"],
+                                "표준점수": score_info["std"],
+                                "백분위": score_info["perc"],
+                                "선택과목": None,
+                                "원점수": actual_raw_score
+                            }
+                        else:
+                            # 원점수가 데이터에 없음 → 가장 가까운 값 찾기
+                            available_scores = [int(s) for s in subject_data.keys()]
+                            closest_score = min(available_scores, key=lambda x: abs(x - actual_raw_score))
+                            score_info = subject_data[str(closest_score)]
+                            
+                            normalized["과목별_성적"][subject] = {
+                                "등급": score_info["grade"],
+                                "표준점수": score_info["std"],
+                                "백분위": score_info["perc"],
+                                "선택과목": None,
+                                "원점수": actual_raw_score,
+                                "추정됨": True,
+                                "추정_기준": f"원점수 {actual_raw_score}점 → {closest_score}점 데이터로 추정"
+                            }
+                    else:
+                        # 과목 데이터 없음
+                        normalized["과목별_성적"][subject] = {
+                            "등급": None,
+                            "표준점수": None,
+                            "백분위": None,
+                            "선택과목": None,
+                            "원점수": raw_score
+                        }
+                else:
+                    # 탐구 과목이 아닌 경우 (한국사 등)
+                    normalized["과목별_성적"][subject] = {
+                        "등급": None,
+                        "표준점수": None,
+                        "백분위": None,
+                        "선택과목": None,
+                        "원점수": raw_score
+                    }
     
     return normalized
 

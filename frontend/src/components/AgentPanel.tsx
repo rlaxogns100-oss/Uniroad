@@ -1,5 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import * as React from 'react'
+import axios from 'axios'
+
+// @ts-ignore
+const API_BASE = import.meta.env?.VITE_API_URL || 'http://localhost:8000'
 
 interface OrchestrationResult {
   plan_id?: string
@@ -43,7 +47,7 @@ interface AgentPanelProps {
   onClose: () => void
 }
 
-type TabType = 'orchestration' | 'subagents' | 'final' | 'logs'
+type TabType = 'orchestration' | 'subagents' | 'final' | 'logs' | 'models'
 
 export default function AgentPanel({
   orchestrationResult,
@@ -62,7 +66,8 @@ export default function AgentPanel({
     { id: 'orchestration', label: 'Orchestration' },
     { id: 'subagents', label: 'Sub Agents' },
     { id: 'final', label: 'Final Answer' },
-    { id: 'logs', label: '실시간 로그' }
+    { id: 'logs', label: '실시간 로그' },
+    { id: 'models', label: '⚙️ 모델 설정' }
   ]
 
   return (
@@ -115,6 +120,9 @@ export default function AgentPanel({
         )}
         {activeTab === 'logs' && (
           <LogsTab logs={logs} />
+        )}
+        {activeTab === 'models' && (
+          <ModelsTab />
         )}
       </div>
     </div>
@@ -448,6 +456,116 @@ function EmptyState({ message }: { message: string }) {
         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
       </svg>
       <p className="text-xs text-center">{message}</p>
+    </div>
+  )
+}
+
+// 모델 설정 탭
+function ModelsTab() {
+  const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [agentModels, setAgentModels] = useState<Record<string, string>>({})
+  const [loading, setLoading] = useState(true)
+
+  const agentList = [
+    { name: '서울대 agent', desc: '서울대학교 입시 정보' },
+    { name: '연세대 agent', desc: '연세대학교 입시 정보' },
+    { name: '고려대 agent', desc: '고려대학교 입시 정보' },
+    { name: '성균관대 agent', desc: '성균관대학교 입시 정보' },
+    { name: '경희대 agent', desc: '경희대학교 입시 정보' },
+    { name: '컨설팅 agent', desc: '합격 데이터 분석' },
+    { name: '선생님 agent', desc: '학습 계획 및 멘탈 관리' }
+  ]
+
+  useEffect(() => {
+    loadModels()
+    loadAgentModels()
+  }, [])
+
+  const loadModels = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/api/agent/models`)
+      setAvailableModels(res.data.models || [])
+    } catch (error) {
+      console.error('모델 목록 로드 실패:', error)
+    }
+  }
+
+  const loadAgentModels = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/api/agent/agents/models/config`)
+      setAgentModels(res.data.agent_models || {})
+    } catch (error) {
+      console.error('에이전트 모델 설정 로드 실패:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const updateAgentModel = async (agentName: string, modelName: string) => {
+    try {
+      await axios.put(`${API_BASE}/api/agent/agents/${encodeURIComponent(agentName)}/model`, {
+        model_name: modelName
+      })
+      
+      setAgentModels(prev => ({ ...prev, [agentName]: modelName }))
+      
+      // 성공 알림
+      const toast = document.createElement('div')
+      toast.className = 'fixed top-4 right-4 bg-emerald-500 text-white px-4 py-2 rounded-lg shadow-lg text-sm z-50'
+      toast.textContent = `✅ ${agentName} → ${modelName} 저장 완료`
+      document.body.appendChild(toast)
+      setTimeout(() => toast.remove(), 2000)
+    } catch (error: any) {
+      console.error('모델 변경 실패:', error)
+      alert(`❌ 모델 변경 실패: ${error.response?.data?.detail || error.message}`)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-full text-slate-400">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-400 mx-auto mb-2"></div>
+          <p className="text-xs">로딩 중...</p>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
+        <h3 className="text-emerald-400 font-bold text-sm mb-2">💡 모델 설정 안내</h3>
+        <p className="text-slate-400 text-xs leading-relaxed">
+          각 에이전트가 사용할 LLM 모델을 선택할 수 있습니다. 
+          변경 즉시 저장되며, 다음 실행부터 적용됩니다.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        {agentList.map((agent) => {
+          const currentModel = agentModels[agent.name] || 'gemini-2.5-flash-lite'
+          return (
+            <div key={agent.name} className="bg-slate-800 rounded-lg p-3 border border-slate-700">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="text-emerald-400 font-medium text-sm">{agent.name}</div>
+                  <div className="text-slate-500 text-xs mt-0.5">{agent.desc}</div>
+                </div>
+                <select
+                  value={currentModel}
+                  onChange={(e) => updateAgentModel(agent.name, e.target.value)}
+                  className="bg-slate-900 text-slate-200 text-xs border border-slate-600 rounded px-2 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none cursor-pointer"
+                >
+                  {availableModels.map(model => (
+                    <option key={model} value={model}>{model}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }

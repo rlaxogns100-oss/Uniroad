@@ -23,7 +23,10 @@ from services.multi_agent.sub_agents import (
     execute_sub_agents,
     UniversityAgent,
     ConsultingAgent,
-    TeacherAgent
+    TeacherAgent,
+    set_agent_model,
+    get_agent_model_config,
+    get_available_models
 )
 from services.multi_agent.final_agent import generate_final_answer
 from services.multi_agent.agent_prompts import (
@@ -160,6 +163,43 @@ async def get_agents():
     return {
         "agents": list(AGENT_DEFINITIONS.values())
     }
+
+
+@router.get("/models")
+async def get_models():
+    """사용 가능한 LLM 모델 목록 조회"""
+    return {
+        "models": get_available_models()
+    }
+
+
+@router.get("/agents/models/config")
+async def get_agents_models():
+    """모든 에이전트의 현재 모델 설정 조회"""
+    return {
+        "agent_models": get_agent_model_config()
+    }
+
+
+@router.put("/agents/{agent_name}/model")
+async def update_agent_model(agent_name: str, request: Dict[str, str]):
+    """특정 에이전트의 모델 설정 변경"""
+    try:
+        model_name = request.get("model_name")
+        if not model_name:
+            raise HTTPException(status_code=400, detail="model_name이 필요합니다")
+        
+        set_agent_model(agent_name, model_name)
+        
+        return {
+            "message": "모델 설정 완료",
+            "agent_name": agent_name,
+            "model_name": model_name
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/agents/{agent_id}")

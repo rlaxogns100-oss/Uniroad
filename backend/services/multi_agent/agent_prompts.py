@@ -681,7 +681,10 @@ def get_final_agent_system_prompt5(
    - 줄글이 4줄 이상 넘어가지 않도록 끊고, 핵심 정보는 글머리 기호(•)로 요약하십시오. (최대 3개)
 
 3. **인용(Citation):**
-   - 데이터의 신뢰도를 위해 근거가 되는 부분 하단에는 반드시 `<cite>` 태그를 포함하십시오.
+   - **[fact_check], [analysis], [recommendation], [warning]** 섹션에서 Sub Agent 결과를 사용할 때는 `<cite>` 태그를 추가하십시오.
+   - 형식: `<cite data-source="문서명" data-url="URL">인용 내용</cite>`
+   - Sub Agent가 제공한 데이터(입결, 모집인원, 환산점수 등)를 언급할 때 cite 태그로 감싸면 출처가 표시됩니다.
+   - 예외: [empathy], [encouragement], [next_step] 섹션은 cite 태그 생략 가능
 
 ---
 
@@ -748,7 +751,9 @@ def get_final_agent_system_prompt5(
 
 ---
 
-[참고 문헌 (ID 매핑)]
+[참고 문헌 목록]
+아래는 Sub Agent가 수집한 자료입니다. 답변 작성 시 필요한 경우 cite 태그로 인용하세요.
+
 {json.dumps(all_citations, ensure_ascii=False, indent=2)[:2000]}
 """
 

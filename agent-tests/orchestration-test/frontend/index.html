@@ -396,13 +396,15 @@
             padding: 12px 16px;
             border-top: 1px solid #333;
             background: #0f3460;
+            max-height: 40%;
+            overflow-y: auto;
         }
 
         .agents-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 8px;
+            margin-bottom: 12px;
         }
 
         .agents-header h4 {
@@ -422,25 +424,73 @@
 
         .agent-list {
             display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
+            flex-direction: column;
+            gap: 8px;
         }
 
-        .agent-tag {
-            background: #2a2a4a;
+        .agent-item {
+            background: #1a1a2e;
             border: 1px solid #333;
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 10px;
+            padding: 8px 10px;
+            border-radius: 6px;
             display: flex;
+            justify-content: space-between;
             align-items: center;
-            gap: 6px;
+            gap: 10px;
         }
 
-        .agent-tag .delete {
-            cursor: pointer;
-            color: #e94560;
+        .agent-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .agent-name {
+            color: #4ecca3;
+            font-size: 11px;
             font-weight: bold;
+            margin-bottom: 2px;
+        }
+
+        .agent-model {
+            color: #888;
+            font-size: 9px;
+        }
+
+        .model-select {
+            background: #0f0f23;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 4px 6px;
+            color: #eee;
+            font-size: 10px;
+            cursor: pointer;
+            outline: none;
+            min-width: 140px;
+        }
+
+        .model-select:focus {
+            border-color: #4ecca3;
+        }
+
+        .model-select option {
+            background: #1a1a2e;
+            color: #eee;
+        }
+
+        .delete-agent-btn {
+            background: transparent;
+            border: 1px solid #e94560;
+            color: #e94560;
+            padding: 3px 6px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-size: 9px;
+            white-space: nowrap;
+        }
+
+        .delete-agent-btn:hover {
+            background: #e94560;
+            color: white;
         }
 
         /* 로딩 */
@@ -608,6 +658,28 @@
             0%, 100% { opacity: 1; }
             50% { opacity: 0.5; }
         }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+        }
     </style>
 </head>
 <body>
@@ -746,8 +818,11 @@
         const API_BASE = 'http://localhost:8080';
         const sessionId = 'session_' + Date.now();
         let currentData = null;
+        let availableModels = [];
+        let agentModels = {};
 
         document.addEventListener('DOMContentLoaded', () => {
+            loadModels();
             loadAgents();
             document.getElementById('chatInput').focus();
         });
@@ -761,9 +836,32 @@
             document.getElementById(`tab-${tabName}`).classList.add('active');
         }
 
+        // 모델 목록 로드
+        async function loadModels() {
+            try {
+                const res = await fetch(`${API_BASE}/api/models`);
+                const data = await res.json();
+                availableModels = data.models || [];
+            } catch (e) {
+                console.error('Failed to load models:', e);
+            }
+        }
+
+        // 에이전트 모델 설정 로드
+        async function loadAgentModels() {
+            try {
+                const res = await fetch(`${API_BASE}/api/agents/models`);
+                const data = await res.json();
+                agentModels = data.agent_models || {};
+            } catch (e) {
+                console.error('Failed to load agent models:', e);
+            }
+        }
+
         // 에이전트 목록 로드
         async function loadAgents() {
             try {
+                await loadAgentModels();
                 const res = await fetch(`${API_BASE}/api/agents`);
                 const data = await res.json();
                 renderAgentList(data.agents);
@@ -774,12 +872,83 @@
 
         function renderAgentList(agents) {
             const container = document.getElementById('agentList');
-            container.innerHTML = agents.map(agent => `
-                <div class="agent-tag" title="${agent.description}">
-                    <span>${agent.name}</span>
-                    <span class="delete" onclick="deleteAgent('${agent.name}')">&times;</span>
-                </div>
-            `).join('');
+            
+            container.innerHTML = agents.map(agent => {
+                const currentModel = agentModels[agent.name] || 'gemini-2.5-flash-lite';
+                const modelOptions = availableModels.map(model => 
+                    `<option value="${model}" ${model === currentModel ? 'selected' : ''}>${model}</option>`
+                ).join('');
+                
+                return `
+                    <div class="agent-item">
+                        <div class="agent-info">
+                            <div class="agent-name">${agent.name}</div>
+                            <div class="agent-model" title="${agent.description}">
+                                ${agent.description.substring(0, 40)}${agent.description.length > 40 ? '...' : ''}
+                            </div>
+                        </div>
+                        <select class="model-select" onchange="updateAgentModel('${agent.name}', this.value)">
+                            ${modelOptions}
+                        </select>
+                        <button class="delete-agent-btn" onclick="deleteAgent('${agent.name}')">삭제</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 에이전트 모델 변경
+        async function updateAgentModel(agentName, modelName) {
+            try {
+                const res = await fetch(`${API_BASE}/api/agents/${encodeURIComponent(agentName)}/model`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ model_name: modelName })
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail);
+                }
+
+                console.log(`✅ ${agentName} 모델 변경: ${modelName}`);
+                agentModels[agentName] = modelName;
+                
+                // 성공 메시지 표시 (1.5초 후 사라짐)
+                showToast(`✅ ${agentName} → ${modelName} 저장 완료`);
+            } catch (e) {
+                alert('모델 변경 실패: ' + e.message);
+                loadAgents(); // 실패 시 다시 로드
+            }
+        }
+
+        // 토스트 메시지 표시
+        function showToast(message) {
+            const existingToast = document.getElementById('toast');
+            if (existingToast) existingToast.remove();
+            
+            const toast = document.createElement('div');
+            toast.id = 'toast';
+            toast.style.cssText = `
+                position: fixed;
+                bottom: 70px;
+                right: 20px;
+                background: #4ecca3;
+                color: #1a1a2e;
+                padding: 10px 16px;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: bold;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                z-index: 1000;
+                animation: slideIn 0.3s ease-out;
+            `;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.animation = 'slideOut 0.3s ease-out';
+                setTimeout(() => toast.remove(), 300);
+            }, 1500);
         }
 
         // 메시지 전송

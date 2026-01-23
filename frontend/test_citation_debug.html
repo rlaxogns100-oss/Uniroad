@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Citation 클릭 테스트</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="p-8">
+    <h1 class="text-2xl font-bold mb-4">Citation 클릭 테스트</h1>
+    
+    <div class="bg-white rounded p-4 shadow">
+        <p class="mb-4">테스트 답변 내용입니다.</p>
+        
+        <!-- 실제 코드와 동일한 구조 -->
+        <div class="mt-2 flex flex-wrap gap-1.5 items-center">
+            <a
+                href="https://rnitmphvahpkosvxjshw.supabase.co/storage/v1/object/public/document/pdfs/efe55407-d51c-4cab-8c20-aabb2445ac2b.pdf"
+                onclick="handleClick(event)"
+                class="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium text-gray-500 bg-gray-100 hover:bg-gray-200 rounded transition-colors cursor-pointer group"
+                title="출처: 수능 점수 변환 및 추정 방법 (클릭하여 다운로드)"
+            >
+                <svg class="w-3 h-3 flex-shrink-0 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+                <span class="group-hover:underline">수능 점수 변환 및 추정 방법</span>
+            </a>
+        </div>
+    </div>
+
+    <div class="mt-8 bg-gray-100 p-4 rounded">
+        <h2 class="font-bold mb-2">클릭 로그:</h2>
+        <div id="log" class="text-sm font-mono"></div>
+    </div>
+
+    <script>
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `<div>[${time}] ${message}</div>`;
+        }
+
+        async function handleClick(e) {
+            e.preventDefault();
+            log('✅ 클릭 이벤트 발생!');
+            
+            const url = e.currentTarget.href;
+            log('URL: ' + url);
+            
+            try {
+                log('fetch 시작...');
+                const response = await fetch(url);
+                log('fetch 응답: ' + response.status);
+                
+                const blob = await response.blob();
+                log('blob 생성 완료: ' + (blob.size / 1024).toFixed(2) + ' KB');
+                
+                const blobUrl = URL.createObjectURL(blob);
+                log('blob URL: ' + blobUrl);
+                
+                const link = document.createElement('a');
+                link.href = blobUrl;
+                link.download = '수능_점수_변환_및_추정_방법.pdf';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                log('✅ 다운로드 완료!');
+                
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 100);
+            } catch (error) {
+                log('❌ 오류: ' + error.message);
+                console.error(error);
+            }
+        }
+
+        log('페이지 로드 완료');
+    </script>
+</body>
+</html>
