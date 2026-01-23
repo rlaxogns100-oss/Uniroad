@@ -196,13 +196,14 @@ class FinalAgent:
         _log("=" * 80)
 
         # 프롬프트 가져오기
+        # all_citations는 사용하지 않음 (비활성화)
         if custom_prompt:
             _log(f"🎨 [커스텀 프롬프트 사용] 길이: {len(custom_prompt)}자")
             prompt = custom_prompt.format(
                 user_question=user_question_with_context,
                 structure_text=structure_text,
                 results_text=results_text,
-                all_citations="\n".join([str(c) for c in all_citations])
+                all_citations=""  # citations 비활성화
             )
         else:
             _log(f"📋 [기본 프롬프트 사용: prompt5]")
@@ -211,7 +212,7 @@ class FinalAgent:
                 user_question=user_question_with_context,
                 structure_text=structure_text,
                 results_text=results_text,
-                all_citations=all_citations
+                all_citations=[]  # citations 비활성화
             )
         
         _log(f"   최종 프롬프트 길이: {len(prompt)}자")
@@ -472,25 +473,26 @@ class FinalAgent:
             content = result.get("result", "결과 없음")
             sources = result.get("sources", [])
             source_urls = result.get("source_urls", [])
-            citations = result.get("citations", [])
+            # citations는 Final Agent에서 사용하지 않음 (비활성화)
+            # citations = result.get("citations", [])
 
             # 출처 정보 수집
             all_sources.extend(sources)
             all_source_urls.extend(source_urls)
-            all_citations.extend(citations)
+            # all_citations.extend(citations)  # citations 비활성화
             
-            # 청크 정보 수집 (citations에서 chunk 정보 추출)
-            for citation in citations:
-                if isinstance(citation, dict) and "chunk" in citation:
-                    all_chunks.append(citation["chunk"])
+            # 청크 정보 수집 (citations에서 chunk 정보 추출) - 비활성화
+            # for citation in citations:
+            #     if isinstance(citation, dict) and "chunk" in citation:
+            #         all_chunks.append(citation["chunk"])
 
-            # 출처 정보를 결과에 포함
+            # 출처 정보를 결과에 포함 (⚠️ 임시 비활성화: citation이 너무 커서 전달 비활성화)
             source_info = ""
-            if sources:
-                source_info = f"\n[사용 가능한 출처: {', '.join(sources)}]"
-                if source_urls:
-                    for i, (src, url) in enumerate(zip(sources, source_urls)):
-                        source_info += f"\n  - {src}: {url}"
+            # if sources:
+            #     source_info = f"\n[사용 가능한 출처: {', '.join(sources)}]"
+            #     if source_urls:
+            #         for i, (src, url) in enumerate(zip(sources, source_urls)):
+            #             source_info += f"\n  - {src}: {url}"
 
             formatted.append(f"""### {step_key} ({agent_name})
 상태: {status}
