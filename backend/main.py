@@ -5,7 +5,7 @@ FastAPI 메인 애플리케이션
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
-from routers import chat, upload, documents, agent_admin, auth, sessions
+from routers import chat, upload, documents, agent_admin, auth, sessions, announcements
 
 # FastAPI 앱 생성
 app = FastAPI(
@@ -38,6 +38,7 @@ app.include_router(chat.router, prefix="/api/chat", tags=["채팅"])
 app.include_router(upload.router, prefix="/api/upload", tags=["업로드"])
 app.include_router(documents.router, prefix="/api/documents", tags=["문서관리"])
 app.include_router(agent_admin.router, prefix="/api/agent", tags=["에이전트관리"])
+app.include_router(announcements.router, prefix="/api/announcements", tags=["공지사항"])
 
 @app.get("/")
 async def root():

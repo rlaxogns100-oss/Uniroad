@@ -82,6 +82,17 @@ const formatLogMessage = (log: string): string => {
   return log
 }
 
+// 공지사항 인터페이스
+interface Announcement {
+  id: string
+  title: string
+  content: string
+  author_email: string
+  is_pinned: boolean
+  created_at: string
+  updated_at: string
+}
+
 export default function ChatPage() {
   const navigate = useNavigate()
   const { user, signOut, isAuthenticated } = useAuth()
@@ -105,9 +116,16 @@ export default function ChatPage() {
     return window.innerWidth >= 640
   })
   const [isRecordDropdownOpen, setIsRecordDropdownOpen] = useState(false)
+  const [isAnnouncementDropdownOpen, setIsAnnouncementDropdownOpen] = useState(false)
   const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false)
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
   const [isOpenChatModalOpen, setIsOpenChatModalOpen] = useState(false)
+  const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false)
+  const [announcements, setAnnouncements] = useState<Announcement[]>([])
+  const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [announcementForm, setAnnouncementForm] = useState({ title: '', content: '', is_pinned: false })
+  const [editingAnnouncementId, setEditingAnnouncementId] = useState<string | null>(null)
   const [agentData, setAgentData] = useState<AgentData>({
     orchestrationResult: null,
     subAgentResults: null,
@@ -123,6 +141,136 @@ export default function ChatPage() {
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  // 공지사항 목록 가져오기
+  useEffect(() => {
+    fetchAnnouncements()
+    if (isAuthenticated) {
+      checkAdminStatus()
+    }
+  }, [isAuthenticated])
+
+  const fetchAnnouncements = async () => {
+    try {
+      const response = await fetch('/api/announcements/')
+      if (response.ok) {
+        const data = await response.json()
+        setAnnouncements(data)
+      }
+    } catch (error) {
+      console.error('공지사항 로드 실패:', error)
+    }
+  }
+
+  const checkAdminStatus = async () => {
+    try {
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+
+      const response = await fetch('/api/announcements/check-admin/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setIsAdmin(data.is_admin)
+      }
+    } catch (error) {
+      console.error('관리자 권한 확인 실패:', error)
+    }
+  }
+
+  const handleCreateAnnouncement = async () => {
+    try {
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+
+      const response = await fetch('/api/announcements/', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(announcementForm)
+      })
+
+      if (response.ok) {
+        await fetchAnnouncements()
+        setIsAnnouncementModalOpen(false)
+        setAnnouncementForm({ title: '', content: '', is_pinned: false })
+        alert('공지사항이 등록되었습니다.')
+      }
+    } catch (error) {
+      console.error('공지사항 생성 실패:', error)
+      alert('공지사항 생성에 실패했습니다.')
+    }
+  }
+
+  const handleUpdateAnnouncement = async () => {
+    if (!editingAnnouncementId) return
+
+    try {
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+
+      const response = await fetch(`/api/announcements/${editingAnnouncementId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(announcementForm)
+      })
+
+      if (response.ok) {
+        await fetchAnnouncements()
+        setIsAnnouncementModalOpen(false)
+        setAnnouncementForm({ title: '', content: '', is_pinned: false })
+        setEditingAnnouncementId(null)
+        alert('공지사항이 수정되었습니다.')
+      }
+    } catch (error) {
+      console.error('공지사항 수정 실패:', error)
+      alert('공지사항 수정에 실패했습니다.')
+    }
+  }
+
+  const handleDeleteAnnouncement = async (id: string) => {
+    if (!confirm('정말 삭제하시겠습니까?')) return
+
+    try {
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+
+      const response = await fetch(`/api/announcements/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
+
+      if (response.ok) {
+        await fetchAnnouncements()
+        alert('공지사항이 삭제되었습니다.')
+      }
+    } catch (error) {
+      console.error('공지사항 삭제 실패:', error)
+      alert('공지사항 삭제에 실패했습니다.')
+    }
+  }
+
+  const openEditModal = (announcement: Announcement) => {
+    setEditingAnnouncementId(announcement.id)
+    setAnnouncementForm({
+      title: announcement.title,
+      content: announcement.content,
+      is_pinned: announcement.is_pinned
+    })
+    setIsAnnouncementModalOpen(true)
+  }
+
+  const openCreateModal = () => {
+    setEditingAnnouncementId(null)
+    setAnnouncementForm({ title: '', content: '', is_pinned: false })
+    setIsAnnouncementModalOpen(true)
   }
 
   // 화면 크기 변경 시 사이드바 상태 조정
@@ -419,9 +567,12 @@ export default function ChatPage() {
             </button>
           </div>
 
-          {/* 1. 공지사항 */}
+          {/* 1. 공지사항 (드롭다운) */}
           <div className="px-4 sm:px-6 pt-16 pb-2">
-            <button className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-left">
+            <button 
+              onClick={() => setIsAnnouncementDropdownOpen(!isAnnouncementDropdownOpen)}
+              className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-left"
+            >
               <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center flex-shrink-0">
                 <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -430,7 +581,98 @@ export default function ChatPage() {
               <div className="flex-1">
                 <p className="text-sm font-semibold text-gray-900">공지사항</p>
               </div>
+              <svg 
+                className={`w-5 h-5 text-gray-600 transition-transform ${isAnnouncementDropdownOpen ? 'rotate-180' : ''}`}
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
             </button>
+            
+            {/* 드롭다운 메뉴 */}
+            {isAnnouncementDropdownOpen && (
+              <div className="mt-2 ml-4 space-y-1 border-l-2 border-blue-200 pl-4 max-h-96 overflow-y-auto">
+                {announcements.length === 0 ? (
+                  <p className="text-xs text-gray-500 py-2">등록된 공지사항이 없습니다.</p>
+                ) : (
+                  announcements.map((announcement) => (
+                    <div key={announcement.id} className="group">
+                      <button 
+                        onClick={() => {
+                          setSelectedAnnouncement(announcement)
+                          setIsAnnouncementModalOpen(false)
+                          setTimeout(() => setIsAnnouncementModalOpen(true), 0)
+                        }}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50 rounded-lg transition-colors text-left"
+                      >
+                        <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
+                          announcement.is_pinned ? 'bg-red-500' : 'border-2 border-gray-300'
+                        } group-hover:border-blue-500 transition-colors`}>
+                          {announcement.is_pinned && (
+                            <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                              <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" />
+                            </svg>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-gray-900 truncate">{announcement.title}</p>
+                          <p className="text-[10px] text-gray-500">
+                            {new Date(announcement.created_at).toLocaleDateString('ko-KR')}
+                          </p>
+                        </div>
+                        {isAuthenticated && isAdmin && (
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                openEditModal(announcement)
+                              }}
+                              className="p-1 hover:bg-blue-100 rounded text-blue-600"
+                              title="수정"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                handleDeleteAnnouncement(announcement.id)
+                              }}
+                              className="p-1 hover:bg-red-100 rounded text-red-600"
+                              title="삭제"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
+                          </div>
+                        )}
+                      </button>
+                    </div>
+                  ))
+                )}
+                
+                {/* 관리자 추가 버튼 */}
+                {isAuthenticated && isAdmin && (
+                  <button
+                    onClick={openCreateModal}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 mt-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-left group border-2 border-dashed border-blue-300"
+                  >
+                    <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0">
+                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-blue-700">새 공지사항 추가</p>
+                    </div>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* 2. 오픈채팅방 */}
@@ -951,6 +1193,144 @@ export default function ChatPage() {
               <p className="mt-4 text-xs text-center text-gray-500">
                 여러분의 소중한 의견으로 유니로드는 더 똑똑해집니다 ✨
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 공지사항 모달 */}
+      {isAnnouncementModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto animate-slideUp">
+            {/* 헤더 */}
+            <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
+              <h2 className="text-xl font-bold text-gray-900">
+                {selectedAnnouncement ? '공지사항' : editingAnnouncementId ? '공지사항 수정' : '새 공지사항'}
+              </h2>
+              <button
+                onClick={() => {
+                  setIsAnnouncementModalOpen(false)
+                  setSelectedAnnouncement(null)
+                  setEditingAnnouncementId(null)
+                }}
+                className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* 본문 */}
+            <div className="px-6 py-6">
+              {selectedAnnouncement ? (
+                // 공지사항 보기
+                <div>
+                  <div className="mb-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      {selectedAnnouncement.is_pinned && (
+                        <span className="px-2 py-1 bg-red-100 text-red-700 text-xs font-medium rounded">고정</span>
+                      )}
+                      <span className="text-sm text-gray-500">
+                        {new Date(selectedAnnouncement.created_at).toLocaleDateString('ko-KR', {
+                          year: 'numeric',
+                          month: 'long',
+                          day: 'numeric'
+                        })}
+                      </span>
+                    </div>
+                    <h3 className="text-2xl font-bold text-gray-900 mb-4">{selectedAnnouncement.title}</h3>
+                  </div>
+                  <div className="prose max-w-none">
+                    <p className="text-gray-700 whitespace-pre-wrap">{selectedAnnouncement.content}</p>
+                  </div>
+                  
+                  {isAuthenticated && isAdmin && (
+                    <div className="mt-6 pt-6 border-t flex gap-2">
+                      <button
+                        onClick={() => {
+                          openEditModal(selectedAnnouncement)
+                          setSelectedAnnouncement(null)
+                        }}
+                        className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                      >
+                        수정
+                      </button>
+                      <button
+                        onClick={() => {
+                          handleDeleteAnnouncement(selectedAnnouncement.id)
+                          setIsAnnouncementModalOpen(false)
+                          setSelectedAnnouncement(null)
+                        }}
+                        className="flex-1 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                      >
+                        삭제
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                // 공지사항 작성/수정 폼
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      제목 <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={announcementForm.title}
+                      onChange={(e) => setAnnouncementForm({ ...announcementForm, title: e.target.value })}
+                      placeholder="공지사항 제목을 입력하세요"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      내용 <span className="text-red-500">*</span>
+                    </label>
+                    <textarea
+                      value={announcementForm.content}
+                      onChange={(e) => setAnnouncementForm({ ...announcementForm, content: e.target.value })}
+                      placeholder="공지사항 내용을 입력하세요"
+                      rows={10}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="is_pinned"
+                      checked={announcementForm.is_pinned}
+                      onChange={(e) => setAnnouncementForm({ ...announcementForm, is_pinned: e.target.checked })}
+                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="is_pinned" className="text-sm text-gray-700">
+                      상단 고정
+                    </label>
+                  </div>
+
+                  <div className="flex gap-2 pt-4">
+                    <button
+                      onClick={() => {
+                        setIsAnnouncementModalOpen(false)
+                        setEditingAnnouncementId(null)
+                      }}
+                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      취소
+                    </button>
+                    <button
+                      onClick={editingAnnouncementId ? handleUpdateAnnouncement : handleCreateAnnouncement}
+                      disabled={!announcementForm.title.trim() || !announcementForm.content.trim()}
+                      className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-300 disabled:cursor-not-allowed"
+                    >
+                      {editingAnnouncementId ? '수정' : '등록'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
