@@ -1,84 +1,66 @@
 """
-채팅 API 라우터 (에이전트 기반)
+채팅 API 라우터 (Router Agent 기반)
+Router Agent가 사용자 질문을 분석하고 함수 호출을 결정
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from services.agent_service import agent_service
-from services.supabase_client import supabase_service
-from typing import List, Dict, Any, Optional
+from typing import Dict, List, Any, Optional
+import json
+import time
+
+from services.multi_agent.router_agent import RouterAgent
 
 router = APIRouter()
 
-# 세션별 대화 히스토리 (간단한 인메모리 저장)
-# 실제 운영 환경에서는 Redis나 DB 사용 권장
+# 세션별 대화 히스토리 (메모리)
 conversation_sessions: Dict[str, List[Dict[str, Any]]] = {}
+
+# Router Agent 인스턴스
+router_agent = RouterAgent()
 
 
 class ChatRequest(BaseModel):
     message: str
-    session_id: Optional[str] = "default"  # 세션 ID (프론트에서 생성)
+    session_id: Optional[str] = "default"
 
 
 class ChatResponse(BaseModel):
-    response: str
-    sources: List[str] = []
-    source_urls: List[str] = []  # 다운로드 URL
-    debug_logs: List[Dict[str, Any]] = []  # 디버깅 로그 (선택적)
+    response: Dict[str, Any]  # Router Agent JSON 결과
+    processing_time: float
+    session_id: str
 
 
 @router.post("/", response_model=ChatResponse)
 async def chat(request: ChatRequest):
     """
-    에이전트 기반 채팅 메시지 처리
-
-    - LLM이 대화 흐름을 주도
-    - 필요할 때만 search_documents 도구 호출
-    - 자연스러운 대화 + 출처 기반 팩트 혼합
+    Router Agent 기반 채팅 처리
+    사용자 질문을 분석하고 함수 호출 JSON을 반환
     """
     try:
         session_id = request.session_id
-
-        # 세션 히스토리 가져오기
-        if session_id not in conversation_sessions:
-            conversation_sessions[session_id] = []
-
-        history = conversation_sessions[session_id]
-
-        # 에이전트 대화 실행
-        result = await agent_service.chat(
-            user_message=request.message,
-            history=history
-        )
-
-        # 히스토리 업데이트
-        history.append({"role": "user", "parts": [request.message]})
-        history.append({"role": "model", "parts": [result["response"]]})
-
-        # 최근 10턴만 유지 (메모리 절약)
-        if len(history) > 20:
-            conversation_sessions[session_id] = history[-20:]
-
-        # 채팅 로그 저장
-        await supabase_service.insert_chat_log(
-            request.message,
-            result["response"],
-            is_fact_mode=result["used_search"]
-        )
-
+        message = request.message
+        
+        start_time = time.time()
+        print(f"\n🔵 [ROUTER] 질문: {message}")
+        
+        # Router Agent 실행
+        result = await router_agent.route(message)
+        
+        processing_time = time.time() - start_time
+        print(f"🟢 [ROUTER] 완료 ({processing_time:.2f}초)")
+        print(f"   결과: {json.dumps(result, ensure_ascii=False, indent=2)}")
+        
         return ChatResponse(
-            response=result["response"],
-            sources=result["sources"],
-            source_urls=result.get("source_urls", []),
-            debug_logs=result.get("debug_logs", [])  # 디버그 로그 포함
+            response=result,
+            processing_time=processing_time,
+            session_id=session_id
         )
 
     except Exception as e:
-        print(f"\n{'='*80}")
-        print(f"❌ 채팅 오류: {e}")
-        print(f"{'='*80}\n")
+        print(f"❌ Router 오류: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(500, f"채팅 처리 중 오류가 발생했습니다: {str(e)}")
+        raise HTTPException(500, f"채팅 처리 중 오류: {str(e)}")
 
 
 @router.post("/reset")

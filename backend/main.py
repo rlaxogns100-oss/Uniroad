@@ -5,7 +5,8 @@ FastAPI 메인 애플리케이션
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
-from routers import chat, upload, documents
+from routers import chat, upload, documents, auth, sessions, announcements
+# agent_admin 임시 비활성화 (새 파이프라인으로 마이그레이션 중)
 
 # FastAPI 앱 생성
 app = FastAPI(
@@ -22,6 +23,8 @@ app.add_middleware(
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:3000",  # Next.js 호환
+        "http://3.107.178.26",  # 프로덕션 서버
+        "http://172.30.1.20:5173",  # 로컬 네트워크 접근
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -30,10 +33,13 @@ app.add_middleware(
 
 
 # 라우터 등록
+app.include_router(auth.router, prefix="/api/auth", tags=["인증"])
+app.include_router(sessions.router, prefix="/api/sessions", tags=["세션관리"])
 app.include_router(chat.router, prefix="/api/chat", tags=["채팅"])
 app.include_router(upload.router, prefix="/api/upload", tags=["업로드"])
 app.include_router(documents.router, prefix="/api/documents", tags=["문서관리"])
-
+# app.include_router(agent_admin.router, prefix="/api/agent", tags=["에이전트관리"])  # 임시 비활성화
+app.include_router(announcements.router, prefix="/api/announcements", tags=["공지사항"])
 
 @app.get("/")
 async def root():
