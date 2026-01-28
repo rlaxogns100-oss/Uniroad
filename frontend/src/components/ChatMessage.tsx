@@ -12,6 +12,24 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
       return <div className="whitespace-pre-wrap">{message}</div>
     }
 
+    // JSON 형식인지 확인 ({ 로 시작하고 } 로 끝남)
+    const trimmed = message.trim()
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        // JSON 파싱 가능한지 확인
+        const parsed = JSON.parse(trimmed)
+        // 파싱 성공하면 보기 좋게 표시
+        const formatted = JSON.stringify(parsed, null, 2)
+        return (
+          <pre className="whitespace-pre-wrap font-mono text-sm bg-gray-50 p-3 rounded-lg overflow-x-auto">
+            {formatted}
+          </pre>
+        )
+      } catch {
+        // JSON 아니면 일반 처리
+      }
+    }
+
     // <cite> 태그 개수 세기
     const citeMatches = message.match(/<cite>(.*?)<\/cite>/g)
     const citeCount = citeMatches ? citeMatches.length : 0

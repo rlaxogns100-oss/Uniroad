@@ -61,10 +61,16 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
+    import os
+    
+    # 루트 디렉토리의 multi_agent도 감시하도록 설정
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
         port=settings.BACKEND_PORT,
         reload=True,
+        reload_dirs=[os.getcwd(), os.path.join(root_dir, "multi_agent")],
     )
 

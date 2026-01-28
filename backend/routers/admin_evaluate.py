@@ -11,7 +11,8 @@ import os
 
 # 루트의 multi_agent 폴더를 import 경로에 추가
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-sys.path.insert(0, ROOT_DIR)
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
 
 from multi_agent.admin_agent import evaluate_router_output
 
@@ -20,7 +21,7 @@ router = APIRouter()
 
 class EvaluateRequest(BaseModel):
     user_question: str
-    router_output: Dict[str, Any]
+    router_output: str  # JSON 문자열로 받음
 
 
 class EvaluateResponse(BaseModel):

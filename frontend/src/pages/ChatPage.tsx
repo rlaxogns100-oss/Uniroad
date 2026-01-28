@@ -547,7 +547,7 @@ export default function ChatPage() {
               conversationHistory: messages.map(m => `${m.isUser ? 'User' : 'Bot'}: ${m.text.substring(0, 100)}`),
               userQuestion: userInput,
               routerOutput: response.orchestration_result?.router_result || response.orchestration_result || null,
-              functionResult: null,  // 현재 미구현
+              functionResult: null,
               finalAnswer: response.response,
               elapsedTime: elapsedMs,
             })

@@ -31,31 +31,10 @@ async function evaluateLog(log: ExecutionLog): Promise<void> {
     return
   }
   
-  // routerOutput이 문자열이면 객체로 파싱
-  let routerOutputObj = log.routerOutput
-  if (typeof routerOutputObj === 'string') {
-    try {
-      routerOutputObj = JSON.parse(routerOutputObj)
-    } catch {
-      // JSON 파싱 실패 시 function_calls 추출 시도
-      const match = routerOutputObj.match(/\{[\s\S]*"function_calls"[\s\S]*\}/)
-      if (match) {
-        try {
-          routerOutputObj = JSON.parse(match[0])
-        } catch {
-          evaluation.routerStatus = 'error'
-          evaluation.routerComment = 'Router 출력 파싱 실패'
-          updateLogEvaluation(log.id, evaluation)
-          return
-        }
-      } else {
-        evaluation.routerStatus = 'error'
-        evaluation.routerComment = 'Router 출력 형식 오류'
-        updateLogEvaluation(log.id, evaluation)
-        return
-      }
-    }
-  }
+  // routerOutput을 문자열로 변환 (기존 로그는 객체, 새 로그는 문자열)
+  const routerOutputStr = typeof log.routerOutput === 'string'
+    ? log.routerOutput
+    : JSON.stringify(log.routerOutput, null, 2)
   
   // 백엔드 Admin Agent API 호출
   try {
@@ -64,46 +43,26 @@ async function evaluateLog(log: ExecutionLog): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         user_question: log.userQuestion.replace(/^\[추가실행 \d+\] /, ''), // 추가실행 태그 제거
-        router_output: routerOutputObj
+        router_output: routerOutputStr
       })
     })
     
     if (response.ok) {
       const result = await response.json()
-      
-      // 상태 매핑
       evaluation.routerStatus = result.status as 'ok' | 'warning' | 'error'
       
-      // 코멘트 구성
-      const comments = []
-      if (result.format_check?.comment) comments.push(`[형식] ${result.format_check.comment}`)
-      if (result.function_check?.comment) comments.push(`[함수] ${result.function_check.comment}`)
-      if (result.params_check?.comment) comments.push(`[변수] ${result.params_check.comment}`)
-      
-      evaluation.routerComment = result.overall_comment || comments.join(' | ')
-      
+      if (evaluation.routerStatus !== 'ok') {
+        evaluation.routerComment = result.overall_comment || ''
+      }
     } else {
-      // API 오류 시 기본 평가
       evaluation.routerStatus = 'warning'
-      evaluation.routerComment = 'Admin Agent API 호출 실패'
+      evaluation.routerComment = 'API 호출 실패'
     }
   } catch (error) {
-    // 네트워크 오류 시 기본 평가 로직
-    console.error('Admin Agent 평가 오류:', error)
-    
-    if (log.routerOutput.error) {
-      evaluation.routerStatus = 'error'
-      evaluation.routerComment = `오류: ${log.routerOutput.error}`
-    } else if (!log.routerOutput.function_calls || log.routerOutput.function_calls.length === 0) {
-      evaluation.routerStatus = 'warning'
-      evaluation.routerComment = '함수 호출이 없습니다'
-    } else {
-      evaluation.routerStatus = 'ok'
-      evaluation.routerComment = `${log.routerOutput.function_calls.length}개 함수 호출 (API 오프라인)`
-    }
+    evaluation.routerStatus = 'warning'
+    evaluation.routerComment = 'API 호출 오류'
   }
   
-  // 평가 결과 저장
   updateLogEvaluation(log.id, evaluation)
 }
 
@@ -128,17 +87,40 @@ function getStatusBgColor(status: string): string {
 
 // routerOutput에서 불필요한 필드 제거
 function cleanRouterOutput(output: any): any {
-  if (!output || typeof output !== 'object') return output
+  if (!output) return output
   
-  const cleaned = { ...output }
-  delete cleaned.raw_response  // raw_response 제거
-  delete cleaned.tokens        // tokens도 제거 (필요시)
+  // 문자열이면 먼저 파싱
+  let obj = output
+  if (typeof output === 'string') {
+    try {
+      obj = JSON.parse(output)
+    } catch {
+      return output
+    }
+  }
+  
+  if (typeof obj !== 'object') return obj
+  
+  const cleaned = { ...obj }
+  delete cleaned.raw_response
+  delete cleaned.tokens
   return cleaned
 }
 
 // 드롭다운 셀 컴포넌트 (행 단위 제어)
 function ExpandableCell({ content, maxLength = 30, cleanRouter = false, isExpanded = false }: { content: any, maxLength?: number, cleanRouter?: boolean, isExpanded?: boolean }) {
-  const processedContent = cleanRouter ? cleanRouterOutput(content) : content
+  let processedContent = cleanRouter ? cleanRouterOutput(content) : content
+  
+  // 문자열인 경우 JSON 파싱 시도 (이미 stringify된 경우)
+  if (typeof processedContent === 'string') {
+    try {
+      const parsed = JSON.parse(processedContent)
+      processedContent = parsed
+    } catch {
+      // 파싱 실패하면 원본 문자열 사용
+    }
+  }
+  
   const stringContent = typeof processedContent === 'object' 
     ? JSON.stringify(processedContent, null, 2) 
     : String(processedContent || '-')
