@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2026 수능 표준점수 및 백분위 산출 방식</title>
+    <style>
+        body {
+            font-family: 'Malgun Gothic', '맑은 고딕', 'Apple SD Gothic Neo', sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 20px;
+            line-height: 1.8;
+            color: #333;
+            background-color: #fff;
+        }
+        h1 {
+            color: #1a1a1a;
+            border-bottom: 3px solid #3b82f6;
+            padding-bottom: 10px;
+            margin-top: 40px;
+        }
+        h2 {
+            color: #2563eb;
+            margin-top: 30px;
+            border-left: 4px solid #3b82f6;
+            padding-left: 12px;
+        }
+        h3 {
+            color: #1e40af;
+            margin-top: 20px;
+        }
+        h4 {
+            color: #1e3a8a;
+            margin-top: 15px;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            margin: 20px 0;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        th {
+            background-color: #3b82f6;
+            color: white;
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+        }
+        td {
+            padding: 10px 12px;
+            border: 1px solid #e5e7eb;
+        }
+        tr:nth-child(even) {
+            background-color: #f9fafb;
+        }
+        tr:hover {
+            background-color: #f3f4f6;
+        }
+        code {
+            background-color: #f3f4f6;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        pre {
+            background-color: #1f2937;
+            color: #f9fafb;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            line-height: 1.5;
+        }
+        pre code {
+            background-color: transparent;
+            color: #f9fafb;
+            padding: 0;
+        }
+        hr {
+            border: none;
+            border-top: 2px solid #e5e7eb;
+            margin: 30px 0;
+        }
+        strong {
+            color: #1a1a1a;
+            font-weight: 600;
+        }
+        ul, ol {
+            margin: 15px 0;
+            padding-left: 30px;
+        }
+        li {
+            margin: 8px 0;
+        }
+        .info-box {
+            background-color: #eff6ff;
+            border-left: 4px solid #3b82f6;
+            padding: 15px;
+            margin: 20px 0;
+        }
+        .formula {
+            background-color: #f9fafb;
+            padding: 10px 15px;
+            border-radius: 5px;
+            margin: 15px 0;
+            font-family: 'Courier New', monospace;
+        }
+        .footer {
+            margin-top: 60px;
+            padding-top: 20px;
+            border-top: 2px solid #e5e7eb;
+            text-align: center;
+            color: #6b7280;
+            font-size: 0.9em;
+        }
+        @media print {
+            body {
+                margin: 0;
+                padding: 20px;
+            }
+            h1 {
+                page-break-before: always;
+            }
+            h1:first-of-type {
+                page-break-before: avoid;
+            }
+            table {
+                page-break-inside: avoid;
+            }
+            .footer {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+<h1>2026 수능 표준점수 및 백분위 산출 방식</h1>
+
+<p><strong>버전:</strong> 1.0<br>
+<strong>최종 수정일:</strong> 2026년 1월 22일<br>
+<strong>작성:</strong> UniZ 입시 컨설팅 시스템</p>
+
+<hr>
+
+<h2>1. 개요</h2>
+<p>본 문서는 UniZ 시스템이 학생의 성적 정보를 처리하는 방식과 2026학년도 수능 데이터를 기반으로 한 표준점수, 백분위, 등급 산출 방법을 설명합니다.</p>
+
+<hr>
+
+<h2>2. 데이터 출처</h2>
+<ul>
+    <li><strong>기준 연도:</strong> 2026학년도 대학수학능력시험</li>
+    <li><strong>데이터 범위:</strong> 국어, 수학, 영어, 한국사, 사회탐구(9과목), 과학탐구(8과목)</li>
+    <li><strong>데이터 유형:</strong>
+        <ul>
+            <li>국어/수학: 표준점수-백분위-등급 매핑 테이블</li>
+            <li>탐구 과목: 원점수-표준점수-백분위-등급 매핑 테이블</li>
+            <li>국어/수학 선택과목: 원점수-표준점수-백분위-등급 등급컷 데이터</li>
+        </ul>
+    </li>
+</ul>
+
+<hr>
+
+<h2>3. 성적 입력 형식</h2>
+
+<h3>3.1 지원 형식</h3>
+<table>
+    <thead>
+        <tr>
+            <th>입력 방식</th>
+            <th>예시</th>
+            <th>설명</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>축약 형식</td>
+            <td>"나 11232야"</td>
+            <td>국어1-수학1-영어2-탐구1(3)-탐구2(2)</td>
+        </tr>
+        <tr>
+            <td>과목별 등급</td>
+            <td>"국어 1등급 수학 2등급"</td>
+            <td>과목명 + 등급</td>
+        </tr>
+        <tr>
+            <td>표준점수</td>
+            <td>"국어 표준점수 138"</td>
+            <td>과목명 + 표준점수</td>
+        </tr>
+        <tr>
+            <td>백분위</td>
+            <td>"수학 백분위 95"</td>
+            <td>과목명 + 백분위</td>
+        </tr>
+        <tr>
+            <td>원점수</td>
+            <td>"국어 화법과작문 92점"</td>
+            <td>과목명 + 선택과목 + 원점수</td>
+        </tr>
+    </tbody>
+</table>
+
+<h3>3.2 선택과목 처리</h3>
+<ul>
+    <li><strong>국어:</strong> 화법과작문 / 언어와매체</li>
+    <li><strong>수학:</strong> 확률과통계 / 미적분 / 기하</li>
+    <li><strong>선택과목 미입력 시 기본값:</strong>
+        <ul>
+            <li>국어: 화법과작문</li>
+            <li>수학: 확률과통계</li>
+        </ul>
+    </li>
+</ul>
+
+<hr>
+
+<h2>4. 산출 방식</h2>
+
+<h3>4.1 등급 → 표준점수 / 백분위 변환</h3>
+<p>등급만 입력된 경우, 해당 등급의 <strong>중간 백분위</strong>를 사용하여 보수적으로 산출합니다.</p>
+
+<h4>등급별 백분위 범위 및 중간값</h4>
+<table>
+    <thead>
+        <tr>
+            <th>등급</th>
+            <th>백분위 범위</th>
+            <th>중간값 (사용)</th>
+            <th>설명</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>1등급</td>
+            <td>96~100%</td>
+            <td>98%</td>
+            <td>상위 4% 이내</td>
+        </tr>
+        <tr>
+            <td>2등급</td>
+            <td>89~96%</td>
+            <td>92%</td>
+            <td>상위 11% 이내</td>
+        </tr>
+        <tr>
+            <td>3등급</td>
+            <td>77~89%</td>
+            <td>83%</td>
+            <td>상위 23% 이내</td>
+        </tr>
+        <tr>
+            <td>4등급</td>
+            <td>60~77%</td>
+            <td>68%</td>
+            <td>상위 40% 이내</td>
+        </tr>
+        <tr>
+            <td>5등급</td>
+            <td>40~60%</td>
+            <td>50%</td>
+            <td>상위 60% 이내</td>
+        </tr>
+        <tr>
+            <td>6등급</td>
+            <td>23~40%</td>
+            <td>31%</td>
+            <td>상위 77% 이내</td>
+        </tr>
+        <tr>
+            <td>7등급</td>
+            <td>11~23%</td>
+            <td>17%</td>
+            <td>상위 89% 이내</td>
+        </tr>
+        <tr>
+            <td>8등급</td>
+            <td>4~11%</td>
+            <td>7%</td>
+            <td>상위 96% 이내</td>
+        </tr>
+        <tr>
+            <td>9등급</td>
+            <td>0~4%</td>
+            <td>2%</td>
+            <td>상위 100%</td>
+        </tr>
+    </tbody>
+</table>
+
+<div class="info-box">
+    <p><strong>산출 로직:</strong></p>
+    <ol>
+        <li>입력된 등급의 중간 백분위 선택</li>
+        <li>해당 백분위에서 가장 가까운 표준점수 데이터 검색</li>
+        <li>검색된 표준점수-백분위-등급 반환</li>
+    </ol>
+</div>
+
+<p><strong>예시:</strong></p>
+<ul>
+    <li>입력: "국어 1등급"</li>
+    <li>중간 백분위: 98%</li>
+    <li>2026 수능 데이터 조회: 표준점수 138점, 백분위 98%, 등급 1</li>
+    <li>출력: 1등급 / 표준점수 138 / 백분위 98</li>
+</ul>
+
+<hr>
+
+<h3>4.2 표준점수 → 백분위 / 등급 변환</h3>
+<p>표준점수가 입력된 경우, 2026 수능 데이터 테이블에서 직접 매칭합니다.</p>
+
+<hr>
+
+<h3>4.3 백분위 → 표준점수 / 등급 변환</h3>
+<p>백분위가 입력된 경우, 2026 수능 데이터 테이블에서 가장 가까운 값을 찾습니다.</p>
+
+<hr>
+
+<h3>4.4 원점수 → 표준점수 / 백분위 / 등급 변환 (국어/수학 선택과목)</h3>
+<p>국어와 수학의 선택과목은 원점수로 입력 가능하며, <strong>선형 보간법</strong>을 사용하여 등급컷 사이의 점수를 추정합니다.</p>
+
+<h4>4.4.1 선형 보간법 (Linear Interpolation)</h4>
+<p>등급컷 데이터 사이의 점수는 다음 공식으로 계산합니다:</p>
+
+<div class="formula">
+<pre>y = y1 + (y2 - y1) × (x - x1) / (x2 - x1)
+
+여기서:
+- x: 입력된 원점수
+- x1, x2: 인접한 두 등급컷의 원점수
+- y1, y2: 인접한 두 등급컷의 표준점수 또는 백분위
+- y: 추정된 표준점수 또는 백분위</pre>
+</div>
+
+<h4>4.4.2 등급 결정 로직</h4>
+<p>원점수가 두 등급컷 사이에 위치하는 경우:</p>
+<ul>
+    <li><strong>더 낮은 등급 (하위 컷)을 부여</strong></li>
+    <li>예: 77점이 1등급컷(85점)과 2등급컷(73점) 사이 → <strong>2등급</strong> 부여</li>
+</ul>
+
+<h4>4.4.3 예시: 수학 미적분 77점</h4>
+<p><strong>데이터:</strong></p>
+<ul>
+    <li>1등급컷: 원점수 88점 → 표준점수 137점, 백분위 99%, 등급 1</li>
+    <li>2등급컷: 원점수 73점 → 표준점수 123점, 백분위 92%, 등급 2</li>
+</ul>
+
+<p><strong>입력:</strong> 수학 미적분 77점</p>
+
+<p><strong>계산 과정:</strong></p>
+
+<div class="info-box">
+<p><strong>1. 표준점수 계산:</strong></p>
+<div class="formula">
+<pre>표준점수 = 123 + (137 - 123) × (77 - 73) / (88 - 73)
+         = 123 + 14 × 4 / 15
+         = 123 + 3.73
+         ≈ 127</pre>
+</div>
+
+<p><strong>2. 백분위 계산:</strong></p>
+<div class="formula">
+<pre>백분위 = 92 + (99 - 92) × (77 - 73) / (88 - 73)
+       = 92 + 7 × 4 / 15
+       = 92 + 1.87
+       ≈ 94</pre>
+</div>
+
+<p><strong>3. 등급 결정:</strong></p>
+<ul>
+    <li>77점은 1등급컷(88점)보다 낮고 2등급컷(73점)보다 높음</li>
+    <li><strong>2등급 부여</strong> (하위 컷 기준)</li>
+</ul>
+</div>
+
+<p><strong>출력:</strong> 2등급 / 표준점수 127 / 백분위 94</p>
+
+<hr>
+
+<h3>4.5 영어 등급 처리 (절대평가)</h3>
+<p>영어는 <strong>절대평가</strong> 과목으로 표준점수가 존재하지 않습니다.</p>
+
+<p><strong>출력 형식:</strong></p>
+<div class="formula">
+<code>영어: X등급 / 표준점수 없음(절대평가) / 백분위 Y</code>
+</div>
+
+<hr>
+
+<h3>4.6 미입력 과목 추정</h3>
+<p>학생이 모든 과목을 입력하지 않은 경우, <strong>입력된 과목들의 평균 백분위</strong>를 사용하여 미입력 과목을 추정합니다.</p>
+
+<div class="info-box">
+<p><strong>추정 로직:</strong></p>
+<ol>
+    <li>입력된 과목들의 백분위 평균 계산</li>
+    <li>평균 백분위에 해당하는 표준점수/등급 검색</li>
+    <li>추정된 과목에 <strong>(추정)</strong> 표시</li>
+</ol>
+</div>
+
+<hr>
+
+<h2>5. 데이터 정확성 및 제한사항</h2>
+
+<h3>5.1 데이터 정확성</h3>
+<ul>
+    <li>본 시스템은 2026학년도 수능 공식 발표 데이터를 사용합니다.</li>
+    <li>표준점수 테이블은 한국교육과정평가원 자료를 기준으로 합니다.</li>
+</ul>
+
+<h3>5.2 제한사항</h3>
+<ol>
+    <li><strong>원점수 변환의 추정치:</strong> 등급컷 사이의 원점수는 선형 보간을 사용하므로, 실제 점수와 약간의 오차가 있을 수 있습니다.</li>
+    <li><strong>선택과목 미입력 시:</strong> 기본값(화법과작문, 확률과통계)이 자동 적용되므로, 실제 선택과목과 다를 수 있습니다.</li>
+    <li><strong>미입력 과목 추정:</strong> 추정된 과목은 평균 백분위 기준이므로, 실제 성적과 차이가 있을 수 있습니다.</li>
+    <li><strong>탐구 과목 특정되지 않은 경우:</strong> "탐구1", "탐구2"로만 입력된 경우, 사회문화 과목을 기준으로 추정합니다.</li>
+</ol>
+
+<h3>5.3 보수적 산출 원칙</h3>
+<ul>
+    <li>등급만 입력된 경우, 등급 범위의 <strong>중간값</strong>을 사용하여 과대평가를 방지합니다.</li>
+    <li>원점수가 등급컷 사이에 있을 때, <strong>더 낮은 등급</strong>을 부여하여 안전하게 추정합니다.</li>
+</ul>
+
+<hr>
+
+<h2>6. 사용 예시</h2>
+
+<h3>예시 1: "나 11232야"</h3>
+<p><strong>입력 해석:</strong></p>
+<ul>
+    <li>국어 1등급, 수학 1등급, 영어 2등급, 탐구1 3등급, 탐구2 2등급</li>
+</ul>
+
+<p><strong>산출 결과:</strong></p>
+<div class="formula">
+<pre>- 국어(화법과작문): 1등급 / 표준점수 138 / 백분위 98
+- 수학(확률과통계): 1등급 / 표준점수 135 / 백분위 99
+- 영어: 2등급 / 표준점수 없음(절대평가) / 백분위 82.5
+- 탐구1: 3등급 / 표준점수 57 / 백분위 83
+- 탐구2: 2등급 / 표준점수 58 / 백분위 92</pre>
+</div>
+
+<hr>
+
+<h2>7. 기술 스택</h2>
+<ul>
+    <li><strong>언어:</strong> Python 3.9+</li>
+    <li><strong>데이터 구조:</strong> Python Dictionary (dict)</li>
+    <li><strong>변환 라이브러리:</strong> 자체 구현 (<code>ScoreConverter</code> 클래스)</li>
+    <li><strong>수학 함수:</strong> 선형 보간법 (<code>_linear_interpolate</code> 메서드)</li>
+</ul>
+
+<hr>
+
+<h2>8. 문의 및 피드백</h2>
+<p>본 산출 방식에 대한 문의사항이나 개선 제안이 있으시면 UniZ 시스템 관리자에게 문의해 주시기 바랍니다.</p>
+
+<p><strong>버전 히스토리:</strong></p>
+<ul>
+    <li>v1.0 (2026.01.22): 최초 작성</li>
+</ul>
+
+<hr>
+
+<div class="footer">
+    <p><strong>© 2026 UniZ 입시 컨설팅 시스템. All Rights Reserved.</strong></p>
+    <p>본 문서는 브라우저에서 Ctrl+P (또는 Cmd+P)를 눌러 PDF로 저장할 수 있습니다.</p>
+</div>
+
+</body>
+</html>

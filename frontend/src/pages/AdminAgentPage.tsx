@@ -31,6 +31,32 @@ async function evaluateLog(log: ExecutionLog): Promise<void> {
     return
   }
   
+  // routerOutput이 문자열이면 객체로 파싱
+  let routerOutputObj = log.routerOutput
+  if (typeof routerOutputObj === 'string') {
+    try {
+      routerOutputObj = JSON.parse(routerOutputObj)
+    } catch {
+      // JSON 파싱 실패 시 function_calls 추출 시도
+      const match = routerOutputObj.match(/\{[\s\S]*"function_calls"[\s\S]*\}/)
+      if (match) {
+        try {
+          routerOutputObj = JSON.parse(match[0])
+        } catch {
+          evaluation.routerStatus = 'error'
+          evaluation.routerComment = 'Router 출력 파싱 실패'
+          updateLogEvaluation(log.id, evaluation)
+          return
+        }
+      } else {
+        evaluation.routerStatus = 'error'
+        evaluation.routerComment = 'Router 출력 형식 오류'
+        updateLogEvaluation(log.id, evaluation)
+        return
+      }
+    }
+  }
+  
   // 백엔드 Admin Agent API 호출
   try {
     const response = await fetch('/api/admin/evaluate', {
@@ -38,7 +64,7 @@ async function evaluateLog(log: ExecutionLog): Promise<void> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         user_question: log.userQuestion.replace(/^\[추가실행 \d+\] /, ''), // 추가실행 태그 제거
-        router_output: log.routerOutput
+        router_output: routerOutputObj
       })
     })
     

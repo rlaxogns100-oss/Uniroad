@@ -1,0 +1,169 @@
+import { useState, useEffect, useCallback } from 'react'
+import axios from 'axios'
+import { useAuth } from '../contexts/AuthContext'
+
+export interface ChatSession {
+  id: string
+  user_id: string
+  title: string
+  created_at: string
+  updated_at: string
+  message_count?: number
+}
+
+export interface ChatMessage {
+  id: string
+  session_id: string
+  role: 'user' | 'assistant'
+  content: string
+  sources?: string[]
+  source_urls?: string[]
+  created_at: string
+}
+
+export function useChat() {
+  const { user, isAuthenticated } = useAuth()
+  const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null)
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [loading, setLoading] = useState(false)
+
+  // 세션 목록 불러오기
+  const loadSessions = useCallback(async () => {
+    if (!isAuthenticated || !user?.id) return
+
+    try {
+      setLoading(true)
+      
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+
+      const response = await axios.get('/api/sessions/', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      setSessions(response.data || [])
+    } catch (error) {
+      console.error('세션 목록 불러오기 실패:', error)
+    } finally {
+      setLoading(false)
+    }
+  }, [isAuthenticated, user?.id])
+
+  // 메시지 불러오기
+  const loadMessages = useCallback(async (sessionId: string) => {
+    if (!isAuthenticated) return
+
+    try {
+      setLoading(true)
+      // 이전 메시지 초기화 (잘못된 메시지가 표시되는 것을 방지)
+      setMessages([])
+      
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+
+      const response = await axios.get(`/api/sessions/${sessionId}/messages`, {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      setMessages(response.data || [])
+    } catch (error) {
+      console.error('메시지 불러오기 실패:', error)
+      setMessages([])
+    } finally {
+      setLoading(false)
+    }
+  }, [isAuthenticated])
+
+  // 새 세션 생성
+  const createSession = useCallback(async (title: string): Promise<string | null> => {
+    if (!isAuthenticated || !user?.id) return null
+
+    try {
+      const token = localStorage.getItem('access_token')
+      if (!token) return null
+
+      const response = await axios.post('/api/sessions/', 
+        { title: title.substring(0, 100) },
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+
+      // 세션 목록 새로고침
+      await loadSessions()
+      
+      return response.data.id
+    } catch (error) {
+      console.error('세션 생성 실패:', error)
+      return null
+    }
+  }, [isAuthenticated, user?.id, loadSessions])
+
+  // 메시지 저장 (채팅 API에서 자동으로 저장되므로 이 함수는 deprecated)
+  // 하위 호환성을 위해 유지하지만 실제로는 아무것도 하지 않음
+  const saveMessage = useCallback(async (
+    sessionId: string,
+    role: 'user' | 'assistant',
+    content: string
+  ) => {
+    // 채팅 API(/api/chat/stream)에서 자동으로 메시지를 저장하므로
+    // 이 함수는 더 이상 필요하지 않습니다.
+    console.log('saveMessage는 deprecated되었습니다. 채팅 API에서 자동 저장됩니다.')
+  }, [])
+
+  // 세션 선택
+  const selectSession = useCallback(async (sessionId: string | null) => {
+    setCurrentSessionId(sessionId)
+    if (sessionId) {
+      await loadMessages(sessionId)
+    } else {
+      setMessages([])
+    }
+  }, [loadMessages])
+
+  // 새 채팅 시작
+  const startNewChat = useCallback(() => {
+    setCurrentSessionId(null)
+    setMessages([])
+  }, [])
+
+  // 세션 제목 업데이트
+  const updateSessionTitle = useCallback(async (sessionId: string, title: string) => {
+    if (!isAuthenticated) return
+
+    try {
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+
+      await axios.patch(`/api/sessions/${sessionId}`,
+        { title: title.substring(0, 100) },
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+
+      await loadSessions()
+    } catch (error) {
+      console.error('세션 제목 업데이트 실패:', error)
+    }
+  }, [isAuthenticated, loadSessions])
+
+  // 초기 로드
+  useEffect(() => {
+    if (isAuthenticated && user?.id) {
+      loadSessions()
+    }
+  }, [isAuthenticated, user?.id, loadSessions])
+
+  return {
+    sessions,
+    currentSessionId,
+    messages,
+    loading,
+    loadSessions,
+    loadMessages,
+    createSession,
+    saveMessage,
+    selectSession,
+    startNewChat,
+    updateSessionTitle,
+  }
+}
+

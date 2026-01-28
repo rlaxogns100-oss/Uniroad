@@ -12,6 +12,7 @@ router = APIRouter()
 class UpdateDocumentRequest(BaseModel):
     title: Optional[str] = None
     source: Optional[str] = None
+    hashtags: Optional[list] = None
 
 
 @router.get("/")
@@ -26,12 +27,13 @@ async def get_documents():
 
 @router.patch("/{document_id}")
 async def update_document(document_id: str, request: UpdateDocumentRequest):
-    """문서 제목/출처 수정"""
+    """문서 제목/출처/해시태그 수정"""
     try:
         success = await supabase_service.update_document_metadata(
             file_name=document_id,
             title=request.title,
-            source=request.source
+            source=request.source,
+            hashtags=request.hashtags
         )
         if success:
             return {"success": True, "message": "문서가 수정되었습니다."}

@@ -5,7 +5,8 @@ FastAPI 메인 애플리케이션
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from config import settings
-from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate  # agent_admin 제거
+from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate
+# agent_admin은 router_agent 테스트 중 비활성화
 
 # FastAPI 앱 생성
 app = FastAPI(
@@ -37,7 +38,7 @@ app.include_router(sessions.router, prefix="/api/sessions", tags=["세션관리"
 app.include_router(chat.router, prefix="/api/chat", tags=["채팅"])
 app.include_router(upload.router, prefix="/api/upload", tags=["업로드"])
 app.include_router(documents.router, prefix="/api/documents", tags=["문서관리"])
-# app.include_router(agent_admin.router, prefix="/api/agent", tags=["에이전트관리"])  # router_agent 테스트를 위해 비활성화
+# app.include_router(agent_admin.router, prefix="/api/agent", tags=["에이전트관리"])  # router_agent 테스트 중 비활성화
 app.include_router(announcements.router, prefix="/api/announcements", tags=["공지사항"])
 app.include_router(admin_evaluate.router, prefix="/api/admin", tags=["관리자평가"])
 
