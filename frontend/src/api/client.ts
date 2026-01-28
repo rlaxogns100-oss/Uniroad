@@ -33,6 +33,21 @@ export interface OrchestrationResult {
   }>
   notes?: string
   error?: string
+  // Router Agent 결과
+  router_result?: {
+    function_calls?: Array<{
+      function: string
+      params: Record<string, any>
+    }>
+    raw_response?: string
+    tokens?: {
+      in: number
+      out: number
+      total: number
+    }
+  }
+  // Function 실행 결과
+  function_results?: Record<string, any>
 }
 
 export interface SubAgentResult {

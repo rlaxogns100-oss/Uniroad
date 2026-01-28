@@ -36,7 +36,7 @@ async function evaluateLog(log: ExecutionLog): Promise<void> {
     ? log.routerOutput
     : JSON.stringify(log.routerOutput, null, 2)
   
-  // 백엔드 Admin Agent API 호출
+  // 1. Router 평가 API 호출
   try {
     const response = await fetch('/api/admin/evaluate', {
       method: 'POST',
@@ -61,6 +61,48 @@ async function evaluateLog(log: ExecutionLog): Promise<void> {
   } catch (error) {
     evaluation.routerStatus = 'warning'
     evaluation.routerComment = 'API 호출 오류'
+  }
+  
+  // 2. Function 결과 평가 API 호출
+  if (log.functionResult) {
+    try {
+      // routerOutput에서 function_calls 추출
+      let routerObj = log.routerOutput
+      if (typeof routerObj === 'string') {
+        try { routerObj = JSON.parse(routerObj) } catch { routerObj = {} }
+      }
+      const functionCalls = routerObj?.function_calls || []
+      
+      const response = await fetch('/api/admin/evaluate-function', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_question: log.userQuestion.replace(/^\[추가실행 \d+\] /, ''),
+          function_calls: functionCalls,
+          function_results: log.functionResult
+        })
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        evaluation.functionStatus = result.status as 'ok' | 'warning' | 'error'
+        
+        if (evaluation.functionStatus !== 'ok') {
+          evaluation.functionComment = result.comment || ''
+        } else {
+          evaluation.functionComment = `${result.total_chunks}개 청크`
+        }
+      } else {
+        evaluation.functionStatus = 'warning'
+        evaluation.functionComment = 'API 호출 실패'
+      }
+    } catch (error) {
+      evaluation.functionStatus = 'warning'
+      evaluation.functionComment = 'API 호출 오류'
+    }
+  } else {
+    evaluation.functionStatus = 'pending'
+    evaluation.functionComment = '결과 없음'
   }
   
   updateLogEvaluation(log.id, evaluation)
@@ -105,6 +147,47 @@ function cleanRouterOutput(output: any): any {
   delete cleaned.raw_response
   delete cleaned.tokens
   return cleaned
+}
+
+// functionResult 포맷팅 (청크 내용 축약)
+function formatFunctionResult(result: any): any {
+  if (!result) return null
+  
+  // 문자열이면 파싱
+  let obj = result
+  if (typeof result === 'string') {
+    try {
+      obj = JSON.parse(result)
+    } catch {
+      return result
+    }
+  }
+  
+  if (typeof obj !== 'object') return obj
+  
+  // 각 함수 결과에서 chunks 내용 축약
+  const formatted: any = {}
+  for (const [key, value] of Object.entries(obj)) {
+    if (typeof value === 'object' && value !== null && 'chunks' in (value as any)) {
+      const funcResult = value as any
+      formatted[key] = {
+        count: funcResult.count,
+        university: funcResult.university,
+        query: funcResult.query,
+        chunks: funcResult.chunks?.map((chunk: any) => ({
+          chunk_id: chunk.chunk_id,
+          page: chunk.page_number,
+          score: chunk.score?.toFixed(3),
+          // content 축약 (50자)
+          content: chunk.content?.substring(0, 50) + (chunk.content?.length > 50 ? '...' : '')
+        }))
+      }
+    } else {
+      formatted[key] = value
+    }
+  }
+  
+  return formatted
 }
 
 // 드롭다운 셀 컴포넌트 (행 단위 제어)
@@ -351,8 +434,23 @@ export default function AdminAgentPage() {
                     </td>
                     
                     {/* Function 결과 */}
-                    <td className="px-2 py-1.5 align-middle text-gray-400">
-                      <span className="text-[10px]">미구현</span>
+                    <td className={`px-2 py-1.5 align-middle ${getStatusBgColor(log.evaluation?.functionStatus || 'pending')}`}>
+                      {log.functionResult ? (
+                        <div className="flex-1 min-w-0">
+                          <ExpandableCell 
+                            content={formatFunctionResult(log.functionResult)} 
+                            maxLength={30} 
+                            isExpanded={isExpanded} 
+                          />
+                          {log.evaluation?.functionStatus !== 'ok' && log.evaluation?.functionComment && (
+                            <div className="text-[9px] text-gray-500 mt-0.5 truncate" title={log.evaluation.functionComment}>
+                              {log.evaluation.functionComment.length > 40 ? log.evaluation.functionComment.substring(0, 40) + '...' : log.evaluation.functionComment}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-[10px] text-gray-400">-</span>
+                      )}
                     </td>
                     
                     {/* 최종 답변 */}

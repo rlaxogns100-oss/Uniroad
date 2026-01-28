@@ -185,6 +185,77 @@ async def evaluate_router_output(user_question: str, router_output: str) -> Dict
     return await agent.evaluate(user_question, router_output)
 
 
+async def evaluate_function_result(
+    user_question: str, 
+    function_calls: list, 
+    function_results: dict
+) -> Dict[str, Any]:
+    """
+    Function 실행 결과 평가
+    
+    Args:
+        user_question: 사용자 질문
+        function_calls: router_agent가 생성한 function_calls 리스트
+        function_results: execute_function_calls 실행 결과
+        
+    Returns:
+        {
+            "status": "ok" | "warning" | "error",
+            "comment": str,
+            "details": {...}
+        }
+    """
+    try:
+        # 평가 로직 (LLM 호출 없이 규칙 기반)
+        total_chunks = 0
+        errors = []
+        warnings = []
+        details = {}
+        
+        for key, result in function_results.items():
+            if "error" in result:
+                errors.append(f"{key}: {result['error']}")
+                details[key] = {"status": "error", "error": result['error']}
+            elif "chunks" in result:
+                chunk_count = result.get("count", 0)
+                total_chunks += chunk_count
+                
+                if chunk_count == 0:
+                    warnings.append(f"{key}: 검색 결과 없음 (university={result.get('university')})")
+                    details[key] = {"status": "warning", "count": 0}
+                else:
+                    details[key] = {"status": "ok", "count": chunk_count}
+            elif result.get("status") == "not_implemented":
+                warnings.append(f"{key}: 미구현 함수")
+                details[key] = {"status": "warning", "reason": "not_implemented"}
+        
+        # 최종 상태 결정
+        if errors:
+            status = "error"
+            comment = f"오류 발생: {'; '.join(errors)}"
+        elif warnings:
+            status = "warning"
+            comment = f"경고: {'; '.join(warnings)}"
+        else:
+            status = "ok"
+            comment = f"총 {total_chunks}개 청크 검색 완료"
+        
+        return {
+            "status": status,
+            "comment": comment,
+            "details": details,
+            "total_chunks": total_chunks
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "comment": f"평가 오류: {str(e)}",
+            "details": {},
+            "total_chunks": 0
+        }
+
+
 # ============================================================
 # 테스트
 # ============================================================
