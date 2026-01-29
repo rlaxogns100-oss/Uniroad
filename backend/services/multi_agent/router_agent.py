@@ -288,7 +288,9 @@ class RouterAgent:
             }
     
     def _parse_response(self, text: str) -> Dict[str, Any]:
-        """JSON 파싱"""
+        """JSON 파싱 (복구 로직 포함)"""
+        original_text = text
+        
         try:
             # JSON 블록 추출
             if "```json" in text:
@@ -308,9 +310,52 @@ class RouterAgent:
             return parsed
             
         except json.JSONDecodeError as e:
+            # 복구 시도 1: 잘못된 params 구조 수정 (key 없는 값 제거)
+            try:
+                import re
+                # "query": "값1",\n"값2" 패턴을 "query": "값1" 로 수정
+                fixed_text = re.sub(
+                    r'("query"\s*:\s*"[^"]*")\s*,?\s*\n\s*"[^"]*"(?=\s*\})',
+                    r'\1',
+                    text
+                )
+                if fixed_text != text:
+                    parsed = json.loads(fixed_text)
+                    if "function_calls" not in parsed:
+                        parsed["function_calls"] = []
+                    parsed["_recovered"] = True
+                    return parsed
+            except:
+                pass
+            
+            # 복구 시도 2: function_calls 배열만 추출
+            try:
+                import re
+                match = re.search(r'"function_calls"\s*:\s*\[(.*?)\]', text, re.DOTALL)
+                if match:
+                    # 간단한 구조로 재구성
+                    func_match = re.search(
+                        r'"function"\s*:\s*"(\w+)".*?"university"\s*:\s*"([^"]*)".*?"query"\s*:\s*"([^"]*)"',
+                        match.group(1), re.DOTALL
+                    )
+                    if func_match:
+                        return {
+                            "function_calls": [{
+                                "function": func_match.group(1),
+                                "params": {
+                                    "university": func_match.group(2),
+                                    "query": func_match.group(3)
+                                }
+                            }],
+                            "_recovered": True
+                        }
+            except:
+                pass
+            
             return {
                 "function_calls": [],
-                "parse_error": str(e)
+                "parse_error": str(e),
+                "raw_text": original_text[:500]
             }
 
 

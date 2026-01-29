@@ -12,6 +12,13 @@ export interface ExecutionLog {
   finalAnswer: string            // 최종 답변
   elapsedTime: number            // 소요시간 (ms)
   
+  // 단계별 시간 측정 (ms)
+  timing?: {
+    router: number      // Router Agent 시간
+    function: number    // Function 실행 시간
+    main_agent: number  // Main Agent 시간
+  }
+  
   // Admin Agent 평가 결과
   evaluation?: {
     routerStatus: 'ok' | 'warning' | 'error' | 'pending'

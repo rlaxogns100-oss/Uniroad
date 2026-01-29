@@ -42,6 +42,47 @@ app.include_router(documents.router, prefix="/api/documents", tags=["문서관�
 app.include_router(announcements.router, prefix="/api/announcements", tags=["공지사항"])
 app.include_router(admin_evaluate.router, prefix="/api/admin", tags=["관리자평가"])
 
+@app.on_event("startup")
+async def startup_event():
+    """서버 시작 시 모델 및 DB 연결 미리 초기화"""
+    import time
+    start_time = time.time()
+    
+    print("🚀 서버 Warm-up 시작...")
+    
+    # 1. Supabase 연결 Warm-up (DB 커넥션 미리 생성)
+    print("   [1/4] Supabase 연결 중...")
+    from services.supabase_client import SupabaseService
+    try:
+        client = SupabaseService.get_client()
+        # 간단한 쿼리로 연결 활성화 (SSL 핸드셰이크 포함)
+        client.table("chat_sessions").select("id").limit(1).execute()
+        print("   ✅ Supabase 연결 Warm-up 완료")
+    except Exception as e:
+        print(f"   ⚠️ Supabase Warm-up 실패: {e}")
+    
+    # 2. RAG Functions (임베딩 모델) 초기화
+    print("   [2/4] RAGFunctions 초기화 중...")
+    from services.multi_agent.functions import RAGFunctions
+    RAGFunctions.get_instance()
+    print("   ✅ RAGFunctions 초기화 완료")
+    
+    # 3. Router Agent 초기화
+    print("   [3/4] RouterAgent 초기화 중...")
+    from services.multi_agent.router_agent import get_router
+    get_router()
+    print("   ✅ RouterAgent 초기화 완료")
+    
+    # 4. Main Agent 초기화
+    print("   [4/4] MainAgent 초기화 중...")
+    from services.multi_agent.main_agent import get_main_agent
+    get_main_agent()
+    print("   ✅ MainAgent 초기화 완료")
+    
+    elapsed = time.time() - start_time
+    print(f"🎉 서버 Warm-up 완료! (총 {elapsed:.2f}초)")
+
+
 @app.get("/")
 async def root():
     """루트 엔드포인트 - 서버 상태 확인"""

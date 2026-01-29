@@ -257,6 +257,231 @@ async def evaluate_function_result(
 
 
 # ============================================================
+# 최종 답변 평가 (LLM 기반)
+# ============================================================
+
+FINAL_RESPONSE_EVAL_PROMPT = """최종 답변 품질 평가자입니다. 엄격하게 평가하세요.
+
+## 평가 항목 (valid: true/false, comment: 20자 이내)
+
+1. source_accuracy: Function 결과 정확히 인용? 출처(<cite>) 표기?
+
+2. hallucination_check: 없는 정보 지어냄? 수치 정확?
+
+3. length_check: 100자 이상? 2000자 이하?
+
+4. context_relevance [가장 중요]: 
+   - 질문이 수치/인원/경쟁률 등을 물었으면 반드시 해당 수치가 답변에 있어야 함
+   - "몇 명?" 질문 → 답변에 숫자가 없으면 false
+   - 칭찬/격려만 있고 실질적 답변이 없으면 false
+   - Function 결과에 정보가 있는데 답변에서 언급 안 했으면 false
+
+5. format_check: 형식 깨짐 없음?
+
+## 상태
+- ok: 모두 통과
+- warning: 경미한 문제 (출처 미표기 등)
+- error: 질문에 답 안함 / 할루시네이션 / 핵심 정보 누락
+
+## 출력 (JSON만, 코멘트는 20자 이내로 짧게)
+{"status":"ok","source_accuracy":{"valid":true,"comment":""},"hallucination_check":{"valid":true,"comment":""},"length_check":{"valid":true,"comment":""},"context_relevance":{"valid":true,"comment":""},"format_check":{"valid":true,"comment":""},"overall_comment":""}
+"""
+
+
+class FinalResponseEvaluator:
+    """최종 답변 평가 클래스"""
+    
+    def __init__(self):
+        self.model = genai.GenerativeModel(
+            model_name=ADMIN_CONFIG["model"],
+            system_instruction=FINAL_RESPONSE_EVAL_PROMPT
+        )
+        # JSON 응답 강제를 위한 설정
+        self.generation_config = {
+            "temperature": ADMIN_CONFIG["temperature"],
+            "max_output_tokens": ADMIN_CONFIG["max_output_tokens"],
+            "response_mime_type": "application/json"  # JSON 출력 강제
+        }
+    
+    async def evaluate(
+        self,
+        user_question: str,
+        conversation_history: list,
+        function_results: dict,
+        final_response: str
+    ) -> Dict[str, Any]:
+        """
+        최종 답변 평가
+        
+        Args:
+            user_question: 사용자 질문
+            conversation_history: 이전 대화 내역
+            function_results: Function 실행 결과
+            final_response: Main Agent가 생성한 최종 답변
+            
+        Returns:
+            {
+                "status": "ok" | "warning" | "error",
+                "source_accuracy": {...},
+                "hallucination_check": {...},
+                "length_check": {...},
+                "context_relevance": {...},
+                "format_check": {...},
+                "overall_comment": str
+            }
+        """
+        try:
+            # Function 결과에서 핵심 데이터 추출 (청크 내용 요약)
+            function_summary = self._summarize_function_results(function_results)
+            
+            # 대화 내역 포맷팅
+            history_text = "\n".join(conversation_history[-5:]) if conversation_history else "없음"
+            
+            # 평가 프롬프트 생성
+            prompt = f"""## 사용자 질문
+{user_question}
+
+## 이전 대화 내역
+{history_text}
+
+## Function 실행 결과 (검색된 데이터)
+{function_summary}
+
+## 최종 답변
+{final_response}
+
+위 최종 답변을 평가해주세요. Function 결과에 있는 정보만 사용했는지, 할루시네이션은 없는지, 답변 길이와 형식이 적절한지 확인해주세요."""
+
+            response = await self.model.generate_content_async(
+                prompt,
+                generation_config=self.generation_config
+            )
+            
+            raw_text = response.text.strip()
+            result = self._parse_response(raw_text)
+            return result
+            
+        except Exception as e:
+            return {
+                "status": "error",
+                "source_accuracy": {"valid": False, "comment": f"평가 오류: {str(e)}"},
+                "hallucination_check": {"valid": False, "comment": "평가 실패"},
+                "length_check": {"valid": False, "comment": "평가 실패"},
+                "context_relevance": {"valid": False, "comment": "평가 실패"},
+                "format_check": {"valid": False, "comment": "평가 실패"},
+                "overall_comment": f"평가 오류: {str(e)}"
+            }
+    
+    def _summarize_function_results(self, function_results: dict) -> str:
+        """Function 결과 요약 (평가용)"""
+        if not function_results:
+            return "검색 결과 없음"
+        
+        summary_parts = []
+        for key, result in function_results.items():
+            if "error" in result:
+                summary_parts.append(f"[{key}] 오류: {result['error']}")
+            elif "chunks" in result:
+                university = result.get("university", "")
+                query = result.get("query", "")
+                chunks = result.get("chunks", [])
+                
+                summary_parts.append(f"\n[{university}] (검색어: {query})")
+                summary_parts.append(f"총 {len(chunks)}개 청크 검색됨")
+                
+                # 각 청크의 핵심 정보만 추출 (평가용)
+                for i, chunk in enumerate(chunks[:5], 1):  # 상위 5개만
+                    content = chunk.get("content", "")[:500]  # 500자로 제한
+                    page = chunk.get("page_number", "")
+                    summary_parts.append(f"  청크 {i} (p.{page}): {content}")
+        
+        return "\n".join(summary_parts)
+    
+    def _parse_response(self, text: str) -> Dict[str, Any]:
+        """JSON 파싱 - 여러 방법 시도"""
+        import re
+        
+        original_text = text
+        
+        # 방법 1: 직접 JSON 파싱 (response_mime_type이 json일 경우)
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        
+        # 방법 2: ```json...``` 블록 추출
+        match = re.search(r'```(?:json)?\s*([\s\S]*?)```', text)
+        if match:
+            try:
+                return json.loads(match.group(1).strip())
+            except json.JSONDecodeError:
+                pass
+        
+        # 방법 3: { 부터 } 까지 추출
+        first = text.find('{')
+        last = text.rfind('}')
+        
+        if first != -1 and last > first:
+            try:
+                return json.loads(text[first:last+1])
+            except json.JSONDecodeError:
+                pass
+        
+        # 방법 4: 텍스트에서 키워드 기반 분석 (fallback)
+        text_lower = original_text.lower()
+        
+        # 할루시네이션/오류 관련 키워드 탐지
+        has_error = any(kw in text_lower for kw in ['할루시네이션', 'hallucination', '지어낸', '없는 정보', '일치하지 않', '잘못된'])
+        has_warning = any(kw in text_lower for kw in ['누락', '부족', '짧', '길이', '출처 표기'])
+        
+        if has_error:
+            status = "error"
+        elif has_warning:
+            status = "warning"
+        else:
+            status = "ok"
+        
+        # 원본 텍스트를 코멘트로 사용
+        comment = original_text[:200] if len(original_text) > 200 else original_text
+        
+        return {
+            "status": status,
+            "source_accuracy": {"valid": not has_error, "comment": ""},
+            "hallucination_check": {"valid": not has_error, "comment": comment if has_error else ""},
+            "length_check": {"valid": True, "comment": ""},
+            "context_relevance": {"valid": True, "comment": ""},
+            "format_check": {"valid": True, "comment": ""},
+            "overall_comment": comment
+        }
+
+
+# 싱글톤 - 최종 답변 평가
+_final_evaluator = None
+
+def get_final_evaluator() -> FinalResponseEvaluator:
+    global _final_evaluator
+    if _final_evaluator is None:
+        _final_evaluator = FinalResponseEvaluator()
+    return _final_evaluator
+
+
+async def evaluate_final_response(
+    user_question: str,
+    conversation_history: list,
+    function_results: dict,
+    final_response: str
+) -> Dict[str, Any]:
+    """편의 함수 - 최종 답변 평가"""
+    evaluator = get_final_evaluator()
+    return await evaluator.evaluate(
+        user_question,
+        conversation_history,
+        function_results,
+        final_response
+    )
+
+
+# ============================================================
 # 테스트
 # ============================================================
 
@@ -317,6 +542,69 @@ async def _test():
     result2 = await agent.evaluate(test_question2, test_output2)
     print(f"\n평가 결과:")
     print(json.dumps(result2, ensure_ascii=False, indent=2))
+    
+    # 테스트 케이스 3: 최종 답변 평가
+    print("\n\n" + "=" * 60)
+    print("최종 답변 평가 테스트")
+    print("=" * 60)
+    
+    test_question3 = "경희대 빅데이터응용학과 수시 몇 명 뽑아?"
+    test_function_results = {
+        "univ_0": {
+            "university": "경희대학교",
+            "query": "2026학년도 경희대학교 빅데이터응용학과 수시 모집인원",
+            "count": 2,
+            "chunks": [
+                {
+                    "chunk_id": 1,
+                    "document_id": 16,
+                    "page_number": 27,
+                    "content": "빅데이터응용학과 수시 모집인원: 12명 (학생부교과 2명, 학생부종합 6명, 논술 4명)"
+                }
+            ]
+        }
+    }
+    test_final_response = """빅데이터응용학과는 데이터 사이언스 분야에 관심 있는 학생들에게 인기가 정말 많은 학과에요. 모집 인원을 정확하게 확인해서 전략을 세우는 것이 중요합니다.
+
+【2026학년도 수시 모집인원】
+경희대학교 빅데이터응용학과는 2026학년도 수시 모집으로 총 12명을 선발해요.
+• 학생부교과(지역균형전형): 2명
+• 학생부종합(네오르네상스전형): 6명
+• 논술(논술우수자전형): 4명 <cite data-source="2026학년도 수시 신입생 모집요강 27p" data-url="https://...pdf">빅데이터응용학과는 수시에서 총 12명을 모집합니다.</cite>
+
+목표를 향해 차근차근 준비하는 모습이 멋집니다. 궁금하신 점 있으면 언제든 물어보세요. 유니로드가 항상 응원할게요!"""
+    
+    print(f"\n질문: {test_question3}")
+    print("\n최종 답변 평가 중...")
+    
+    result3 = await evaluate_final_response(
+        user_question=test_question3,
+        conversation_history=[],
+        function_results=test_function_results,
+        final_response=test_final_response
+    )
+    print(f"\n평가 결과:")
+    print(json.dumps(result3, ensure_ascii=False, indent=2))
+    
+    # 테스트 케이스 4: 할루시네이션 있는 답변
+    print("\n\n" + "=" * 60)
+    print("할루시네이션 테스트 (잘못된 답변)")
+    print("=" * 60)
+    
+    bad_response = """경희대학교 빅데이터응용학과는 2026학년도에 총 50명을 모집합니다.
+수시로 30명, 정시로 20명을 선발하며, 작년 경쟁률은 15:1이었습니다."""
+    
+    print(f"\n질문: {test_question3}")
+    print("\n잘못된 답변 평가 중...")
+    
+    result4 = await evaluate_final_response(
+        user_question=test_question3,
+        conversation_history=[],
+        function_results=test_function_results,
+        final_response=bad_response
+    )
+    print(f"\n평가 결과:")
+    print(json.dumps(result4, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

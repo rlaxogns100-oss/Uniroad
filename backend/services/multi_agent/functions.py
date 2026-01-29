@@ -29,7 +29,7 @@ class RAGFunctions:
         self.supabase = SupabaseService.get_client()
         self.embeddings = GoogleGenerativeAIEmbeddings(
             model="models/gemini-embedding-001",
-            request_timeout=600,
+            request_timeout=60,
         )
     
     @classmethod
@@ -89,31 +89,48 @@ class RAGFunctions:
         
         return documents, query_embedding
     
-    def _get_summary_embeddings(self, document_ids: List[int]) -> Dict[int, List[float]]:
+    def _get_document_info(self, document_ids: List[int]) -> Dict[int, Dict]:
         """
-        Step 3: documents 테이블에서 embedding_summary 조회
+        Step 3: documents 테이블에서 embedding_summary와 summary 조회
         - 실시간 임베딩 계산 없이 DB에 저장된 벡터 사용
         - Supabase는 vector 타입을 문자열로 반환하므로 json.loads() 필요
+        
+        Returns:
+            {doc_id: {"embedding": [...], "summary": "문서 설명"}}
         """
         if not document_ids:
             return {}
         
         try:
             unique_ids = list(set(document_ids))
-            response = self.supabase.table("documents").select("id, embedding_summary").in_("id", unique_ids).execute()
+            response = self.supabase.table("documents").select("id, embedding_summary, summary, filename, file_url").in_("id", unique_ids).execute()
             
             result = {}
             for doc in response.data:
                 emb_str = doc.get("embedding_summary")
+                summary = doc.get("summary", "")
+                # filename에서 PDF 확장자 제거하여 title로 사용
+                filename = doc.get("filename", "")
+                title = filename.replace(".pdf", "").replace(".PDF", "") if filename else ""
+                file_url = doc.get("file_url", "")  # PDF 다운로드 URL
+                
+                embedding = None
                 if emb_str:
                     # vector 타입 → 문자열 → 리스트 변환
                     if isinstance(emb_str, str):
-                        result[doc["id"]] = json.loads(emb_str)
+                        embedding = json.loads(emb_str)
                     else:
-                        result[doc["id"]] = emb_str
+                        embedding = emb_str
+                
+                result[doc["id"]] = {
+                    "embedding": embedding,
+                    "summary": summary,
+                    "title": title,
+                    "file_url": file_url
+                }
             return result
         except Exception as e:
-            print(f"⚠️ Summary 임베딩 조회 실패: {e}")
+            print(f"⚠️ Document 정보 조회 실패: {e}")
             return {}
     
     @staticmethod
@@ -126,6 +143,16 @@ class RAGFunctions:
         dot_product = np.dot(vec1, vec2)
         norm1, norm2 = np.linalg.norm(vec1), np.linalg.norm(vec2)
         return float(dot_product / (norm1 * norm2)) if norm1 and norm2 else 0.0
+    
+    @staticmethod
+    def _estimate_tokens(text: str) -> int:
+        """
+        토큰 수 추정 (한글/영어 혼합 고려)
+        - 한글 1자 ≈ 2토큰
+        - 영어 1단어 ≈ 1토큰
+        - 간단한 휴리스틱: 문자 수 / 2 (한글 위주 텍스트)
+        """
+        return max(1, len(text) // 2)
     
     async def univ(
         self, 
@@ -162,9 +189,9 @@ class RAGFunctions:
         
         print(f"✅ 초기 검색: {len(documents)}개 문서")
         
-        # Step 3: document_id로 summary 임베딩 조회 (DB에서 미리 계산된 벡터)
+        # Step 3: document_id로 문서 정보 조회 (embedding + summary)
         doc_ids = [d["metadata"].get("document_id") for d in documents if d["metadata"].get("document_id")]
-        summary_embeddings = self._get_summary_embeddings(doc_ids)
+        document_info = self._get_document_info(doc_ids)
         
         # Step 4: 쿼리 임베딩은 Step 1-2에서 재사용 (중복 제거)
         
@@ -177,9 +204,10 @@ class RAGFunctions:
             # Summary 유사도 계산 (DB에서 가져온 임베딩 직접 사용)
             summary_similarity = 0.0
             doc_id = meta.get("document_id")
-            if doc_id and doc_id in summary_embeddings:
-                summary_embedding = summary_embeddings[doc_id]
-                summary_similarity = self._cosine_similarity(query_embedding, summary_embedding)
+            if doc_id and doc_id in document_info:
+                doc_info = document_info[doc_id]
+                if doc_info.get("embedding"):
+                    summary_similarity = self._cosine_similarity(query_embedding, doc_info["embedding"])
             
             # 가중 평균
             weighted = (content_similarity * content_weight) + (summary_similarity * summary_weight)
@@ -191,15 +219,28 @@ class RAGFunctions:
                 "summary_score": summary_similarity
             })
         
-        # Step 6: 정렬 후 상위 10개
+        # Step 6: 정렬 후 토큰 기반 선택 (6,000 토큰 한도)
         scored_chunks.sort(key=lambda x: x["weighted_score"], reverse=True)
-        top_10 = scored_chunks[:10]
         
-        print(f"📊 가중 평균 계산 완료: 상위 10개 선택")
+        TOKEN_LIMIT = 6000
+        selected_chunks = []
+        total_tokens = 0
+        
+        for item in scored_chunks:
+            content = item["doc"]["page_content"]
+            chunk_tokens = self._estimate_tokens(content)
+            
+            if total_tokens + chunk_tokens > TOKEN_LIMIT:
+                break
+            
+            selected_chunks.append(item)
+            total_tokens += chunk_tokens
+        
+        print(f"📊 토큰 기반 선택: {len(selected_chunks)}개 청크 ({total_tokens} 토큰)")
         
         # Step 7: 결과 포맷팅
         results = []
-        for item in top_10:
+        for item in selected_chunks:
             doc = item["doc"]
             meta = doc["metadata"]
             
@@ -217,11 +258,32 @@ class RAGFunctions:
                 "weighted_score": item["weighted_score"]
             })
         
+        # document_summaries, document_titles, document_urls 추출 (결과에 포함된 문서들만)
+        used_doc_ids = set(r["document_id"] for r in results if r.get("document_id"))
+        document_summaries = {
+            doc_id: info.get("summary", "")
+            for doc_id, info in document_info.items()
+            if doc_id in used_doc_ids and info.get("summary")
+        }
+        document_titles = {
+            doc_id: info.get("title", f"문서 {doc_id}")
+            for doc_id, info in document_info.items()
+            if doc_id in used_doc_ids
+        }
+        document_urls = {
+            doc_id: info.get("file_url", "")
+            for doc_id, info in document_info.items()
+            if doc_id in used_doc_ids
+        }
+        
         return {
             "chunks": results,
             "count": len(results),
             "university": university,
-            "query": query
+            "query": query,
+            "document_summaries": document_summaries,
+            "document_titles": document_titles,
+            "document_urls": document_urls
         }
 
 

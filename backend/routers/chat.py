@@ -12,6 +12,7 @@ import json
 from services.supabase_client import supabase_service
 from services.multi_agent import (
     run_orchestration_agent,
+    run_orchestration_agent_stream,
     execute_sub_agents,
     generate_final_answer,
     AVAILABLE_AGENTS
@@ -81,11 +82,8 @@ async def chat(request: ChatRequest):
         log_and_emit(f"# Request ID: {request_id}")
         log_and_emit(f"{'#'*80}")
 
-        # 세션 히스토리 초기화
-        if session_id not in conversation_sessions:
-            conversation_sessions[session_id] = []
-
-        history = conversation_sessions[session_id]
+        # 히스토리 비활성화 - 매번 새로운 답변 생성 (variation 확보)
+        history = []
 
         # ========================================
         # 1단계: Orchestration Agent
@@ -155,13 +153,9 @@ async def chat(request: ChatRequest):
             log_and_emit("="*80)
             log_and_emit(f"   응답 길이: {len(direct_response)}자")
             
-            # 대화 이력에 추가
-            history.append({"role": "user", "content": message})
-            history.append({"role": "assistant", "content": direct_response})
-
-            # 최근 10턴만 유지
-            if len(history) > 20:
-                conversation_sessions[session_id] = history[-20:]
+            # 히스토리 저장 비활성화 (매번 새로운 답변 생성)
+            # history.append({"role": "user", "content": message})
+            # history.append({"role": "assistant", "content": direct_response})
 
             # 채팅 로그 저장
             await supabase_service.insert_chat_log(
@@ -198,9 +192,7 @@ async def chat(request: ChatRequest):
                     user_msg = supabase_service.client.table("chat_messages").insert({
                         "session_id": session_id,
                         "role": "user",
-                        "content": message,
-                        "sources": [],
-                        "source_urls": []
+                        "content": message
                     }).execute()
                     print(f"   ✓ 사용자 메시지 저장: {user_msg.data}")
                     
@@ -208,9 +200,7 @@ async def chat(request: ChatRequest):
                     ai_msg = supabase_service.client.table("chat_messages").insert({
                         "session_id": session_id,
                         "role": "assistant",
-                        "content": direct_response,
-                        "sources": [],
-                        "source_urls": []
+                        "content": direct_response
                     }).execute()
                     print(f"   ✓ AI 응답 메시지 저장: {ai_msg.data}")
                     
@@ -238,7 +228,11 @@ async def chat(request: ChatRequest):
                 function_results=orchestration_result.get("function_results"),
                 orchestration_result=orchestration_result,
                 sub_agent_results=None,
-                metadata={"immediate_response": True, "pipeline_time": pipeline_time}
+                metadata={
+                    "immediate_response": True, 
+                    "pipeline_time": pipeline_time,
+                    "timing": orchestration_result.get("timing", {})
+                }
             )
 
         # ========================================
@@ -300,13 +294,9 @@ async def chat(request: ChatRequest):
         log_and_emit(f"   ⏱️ 처리 시간: {final_time:.2f}초")
         log_and_emit("="*80)
 
-        # 대화 이력에 추가
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": final_answer})
-
-        # 최근 10턴만 유지
-        if len(history) > 20:
-            conversation_sessions[session_id] = history[-20:]
+        # 히스토리 저장 비활성화 (매번 새로운 답변 생성)
+        # history.append({"role": "user", "content": message})
+        # history.append({"role": "assistant", "content": final_answer})
 
         # 채팅 로그 저장
         await supabase_service.insert_chat_log(
@@ -352,9 +342,7 @@ async def chat(request: ChatRequest):
                 user_msg = supabase_service.client.table("chat_messages").insert({
                     "session_id": session_id,
                     "role": "user",
-                    "content": message,
-                    "sources": [],
-                    "source_urls": []
+                    "content": message
                 }).execute()
                 print(f"   ✓ 사용자 메시지 저장: {user_msg.data}")
                 
@@ -362,9 +350,7 @@ async def chat(request: ChatRequest):
                 ai_msg = supabase_service.client.table("chat_messages").insert({
                     "session_id": session_id,
                     "role": "assistant",
-                    "content": final_answer,
-                    "sources": sources,
-                    "source_urls": source_urls
+                    "content": final_answer
                 }).execute()
                 print(f"   ✓ AI 응답 메시지 저장: {ai_msg.data}")
                 
@@ -402,6 +388,142 @@ async def chat(request: ChatRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(500, f"채팅 처리 중 오류가 발생했습니다: {str(e)}")
+
+
+@router.post("/v2/stream")
+async def chat_stream_v2(request: ChatRequest):
+    """
+    스트리밍 채팅 v2 - Main Agent 응답을 실시간 스트리밍
+    
+    SSE (Server-Sent Events) 형식:
+    - {"type": "status", "step": "router", "message": "..."}
+    - {"type": "chunk", "text": "응답 텍스트 조각"}
+    - {"type": "done", "timing": {...}, "response": "전체 응답"}
+    """
+    import time
+    
+    def generate():
+        session_id = request.session_id
+        message = request.message
+        
+        pipeline_start = time.time()
+        print(f"\n🔵 [STREAM_V2_START] {session_id}:{message[:30]}")
+        
+        # 히스토리 비활성화 - 매번 새로운 답변 생성
+        history = []
+        
+        full_response = ""
+        timing = {}
+        function_results = {}
+        router_output = {}
+        sources = []
+        source_urls = []
+        used_chunks = []
+        
+        try:
+            # 스트리밍 파이프라인 실행
+            for event in run_orchestration_agent_stream(message, history):
+                event_type = event.get("type")
+                
+                if event_type == "status":
+                    # 상태 업데이트 전송
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                
+                elif event_type == "chunk":
+                    # Main Agent 응답 청크 전송
+                    full_response += event.get("text", "")
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                
+                elif event_type == "done":
+                    timing = event.get("timing", {})
+                    function_results = event.get("function_results", {})
+                    router_output = event.get("router_output", {})
+                    full_response = event.get("response", full_response)
+                    # 출처 정보 추출
+                    sources = event.get("sources", [])
+                    source_urls = event.get("source_urls", [])
+                    used_chunks = event.get("used_chunks", [])
+                
+                elif event_type == "error":
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    return
+            
+            # 대화 이력에 추가
+            # 히스토리 저장 비활성화 (매번 새로운 답변 생성)
+            # history.append({"role": "user", "content": message})
+            # history.append({"role": "assistant", "content": full_response})
+            
+            pipeline_time = time.time() - pipeline_start
+            
+            # 메시지 저장 (세션 기반 채팅 내역)
+            try:
+                # 세션 존재 여부 확인
+                session_check = supabase_service.client.table("chat_sessions")\
+                    .select("id")\
+                    .eq("id", session_id)\
+                    .execute()
+                
+                if session_check.data:
+                    print(f"✅ 세션 존재 확인, 메시지 저장 중... ({session_id})")
+                    
+                    # 사용자 메시지 저장
+                    user_msg = supabase_service.client.table("chat_messages").insert({
+                        "session_id": session_id,
+                        "role": "user",
+                        "content": message
+                    }).execute()
+                    
+                    # AI 응답 메시지 저장
+                    ai_msg = supabase_service.client.table("chat_messages").insert({
+                        "session_id": session_id,
+                        "role": "assistant",
+                        "content": full_response
+                    }).execute()
+                    
+                    # 세션 updated_at 갱신
+                    supabase_service.client.table("chat_sessions")\
+                        .update({"updated_at": "now()"})\
+                        .eq("id", session_id)\
+                        .execute()
+                    
+                    print(f"💾 메시지 저장 완료: {session_id}")
+                else:
+                    print(f"⚠️ 세션 없음, 메시지 저장 건너뜀: {session_id}")
+            except Exception as e:
+                print(f"❌ 메시지 저장 실패: {e}")
+                # 저장 실패해도 응답은 전송
+            
+            # 완료 이벤트 전송 (출처 정보 포함)
+            done_event = {
+                "type": "done",
+                "response": full_response,
+                "timing": timing,
+                "pipeline_time": round(pipeline_time * 1000),
+                "router_output": router_output,
+                "function_results": function_results,
+                "sources": sources,
+                "source_urls": source_urls,
+                "used_chunks": used_chunks
+            }
+            yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
+            
+            print(f"🟢 [STREAM_V2_END] 총 {pipeline_time:.2f}초, {len(full_response)}자")
+            
+        except Exception as e:
+            print(f"❌ 스트리밍 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # Nginx 버퍼링 비활성화
+        }
+    )
 
 
 @router.post("/stream")
@@ -450,11 +572,8 @@ async def chat_stream(request: ChatRequest):
             yield send_log(f"# 질문: {message}")
             yield send_log(f"{'#'*80}")
 
-            # 세션 히스토리 초기화
-            if session_id not in conversation_sessions:
-                conversation_sessions[session_id] = []
-
-            history = conversation_sessions[session_id]
+            # 히스토리 비활성화 - 매번 새로운 답변 생성
+            history = []
             timing_logger.mark("history_loaded")
 
             # ========================================
@@ -551,13 +670,9 @@ async def chat_stream(request: ChatRequest):
                 yield send_log("="*80)
                 yield send_log(f"   응답 길이: {len(direct_response)}자")
                 
-                # 대화 이력에 추가
-                history.append({"role": "user", "content": message})
-                history.append({"role": "assistant", "content": direct_response})
-
-                # 최근 10턴만 유지
-                if len(history) > 20:
-                    conversation_sessions[session_id] = history[-20:]
+                # 히스토리 저장 비활성화 (매번 새로운 답변 생성)
+                # history.append({"role": "user", "content": message})
+                # history.append({"role": "assistant", "content": direct_response})
 
                 # 채팅 로그 저장
                 await supabase_service.insert_chat_log(
@@ -589,7 +704,11 @@ async def chat_stream(request: ChatRequest):
                     function_results=orchestration_result.get("function_results"),
                     orchestration_result=orchestration_result,
                     sub_agent_results=None,
-                    metadata={"immediate_response": True, "pipeline_time": pipeline_time},
+                    metadata={
+                        "immediate_response": True, 
+                        "pipeline_time": pipeline_time,
+                        "timing": orchestration_result.get("timing", {})
+                    },
                     logs=logs
                 )
                 yield f"data: {json.dumps({'type': 'result', 'data': result.dict()})}\n\n"
@@ -716,13 +835,9 @@ async def chat_stream(request: ChatRequest):
             yield send_log(f"   ⏱️ 처리 시간: {final_time:.2f}초")
             yield send_log("="*80)
 
-            # 대화 이력에 추가
-            history.append({"role": "user", "content": message})
-            history.append({"role": "assistant", "content": final_answer})
-
-            # 최근 10턴만 유지
-            if len(history) > 20:
-                conversation_sessions[session_id] = history[-20:]
+            # 히스토리 저장 비활성화 (매번 새로운 답변 생성)
+            # history.append({"role": "user", "content": message})
+            # history.append({"role": "assistant", "content": final_answer})
             
             timing_logger.mark("history_saved")
 

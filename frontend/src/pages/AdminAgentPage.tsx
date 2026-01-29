@@ -11,13 +11,13 @@ async function evaluateLog(log: ExecutionLog): Promise<void> {
     timeStatus: 'ok',
   }
   
-  // 소요시간 평가 (프론트엔드에서 처리)
-  if (log.elapsedTime > 6000) {
+  // 소요시간 평가 (프론트엔드에서 처리) - 5초/10초 기준
+  if (log.elapsedTime > 10000) {
     evaluation.timeStatus = 'error'
-    evaluation.timeComment = '6초 초과'
-  } else if (log.elapsedTime > 3000) {
+    evaluation.timeComment = '10초 초과'
+  } else if (log.elapsedTime > 5000) {
     evaluation.timeStatus = 'warning'
-    evaluation.timeComment = '3초 초과'
+    evaluation.timeComment = '5초 초과'
   } else {
     evaluation.timeStatus = 'ok'
     // ok 상태에서는 코멘트 없음
@@ -105,6 +105,50 @@ async function evaluateLog(log: ExecutionLog): Promise<void> {
     evaluation.functionComment = '결과 없음'
   }
   
+  // 3. 최종 답변 평가 API 호출 (LLM 기반)
+  if (log.finalAnswer && log.functionResult) {
+    try {
+      const response = await fetch('/api/admin/evaluate-final', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_question: log.userQuestion.replace(/^\[추가실행 \d+\] /, ''),
+          conversation_history: log.conversationHistory || [],
+          function_results: log.functionResult,
+          final_response: log.finalAnswer
+        })
+      })
+      
+      if (response.ok) {
+        const result = await response.json()
+        evaluation.answerStatus = result.status as 'ok' | 'warning' | 'error'
+        
+        // 문제가 있는 항목들 코멘트로 수집
+        const issues: string[] = []
+        if (!result.source_accuracy?.valid) issues.push('출처')
+        if (!result.hallucination_check?.valid) issues.push('할루시네이션')
+        if (!result.length_check?.valid) issues.push('길이')
+        if (!result.context_relevance?.valid) issues.push('맥락')
+        if (!result.format_check?.valid) issues.push('형식')
+        
+        if (issues.length > 0) {
+          evaluation.answerComment = `문제: ${issues.join(', ')}`
+        } else if (result.overall_comment) {
+          evaluation.answerComment = result.overall_comment.substring(0, 50)
+        }
+      } else {
+        evaluation.answerStatus = 'warning'
+        evaluation.answerComment = 'API 호출 실패'
+      }
+    } catch (error) {
+      evaluation.answerStatus = 'warning'
+      evaluation.answerComment = 'API 호출 오류'
+    }
+  } else {
+    evaluation.answerStatus = 'pending'
+    evaluation.answerComment = log.finalAnswer ? 'Function 결과 없음' : '답변 없음'
+  }
+  
   updateLogEvaluation(log.id, evaluation)
 }
 
@@ -149,7 +193,7 @@ function cleanRouterOutput(output: any): any {
   return cleaned
 }
 
-// functionResult 포맷팅 (청크 내용 축약)
+// functionResult 포맷팅 (청크 내용 전체 표시)
 function formatFunctionResult(result: any): any {
   if (!result) return null
   
@@ -165,7 +209,7 @@ function formatFunctionResult(result: any): any {
   
   if (typeof obj !== 'object') return obj
   
-  // 각 함수 결과에서 chunks 내용 축약
+  // 각 함수 결과에서 chunks 정보 포맷팅 (내용 전체 표시)
   const formatted: any = {}
   for (const [key, value] of Object.entries(obj)) {
     if (typeof value === 'object' && value !== null && 'chunks' in (value as any)) {
@@ -178,9 +222,9 @@ function formatFunctionResult(result: any): any {
           chunk_id: chunk.chunk_id,
           document_id: chunk.document_id,
           page: chunk.page_number,
-          score: chunk.score?.toFixed(3),
-          // content 축약 (50자)
-          content: chunk.content?.substring(0, 50) + (chunk.content?.length > 50 ? '...' : '')
+          score: chunk.weighted_score?.toFixed(3) || chunk.score?.toFixed(3),
+          // 청크 내용 전체 표시
+          content: chunk.content
         }))
       }
     } else {
@@ -217,7 +261,7 @@ function ExpandableCell({ content, maxLength = 30, cleanRouter = false, isExpand
   return (
     <div className="relative">
       {isExpanded ? (
-        <pre className="text-xs whitespace-pre-wrap font-mono max-h-64 overflow-y-auto">
+        <pre className="text-xs whitespace-pre-wrap font-mono max-h-[500px] overflow-y-auto bg-gray-50 p-2 rounded">
           {stringContent}
         </pre>
       ) : (
@@ -361,17 +405,17 @@ export default function AdminAgentPage() {
             <p className="text-sm text-gray-400 mt-1">채팅 페이지에서 질문을 하면 여기에 로그가 기록됩니다</p>
           </div>
         ) : (
-          <table className="w-full bg-white rounded-lg shadow-sm border border-gray-200">
+          <table className="w-full bg-white rounded-lg shadow-sm border border-gray-200 table-fixed">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-12">ID</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-24">이전 대화</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-32">사용자 질문</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-48">Router 출력</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-72">Function 결과</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-40">최종 답변</th>
-                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600 w-12">시간</th>
-                <th className="px-2 py-2 text-center text-xs font-semibold text-gray-600 w-10">액션</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{width: '60px'}}>ID</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{width: '80px'}}>이전 대화</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{width: '120px'}}>사용자 질문</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{width: '140px'}}>Router 출력</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{width: '40%'}}>Function 결과</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{width: '20%'}}>최종 답변</th>
+                <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{width: '70px'}}>시간</th>
+                <th className="px-2 py-2 text-center text-xs font-semibold text-gray-600" style={{width: '50px'}}>액션</th>
               </tr>
             </thead>
             <tbody>
@@ -455,20 +499,27 @@ export default function AdminAgentPage() {
                     </td>
                     
                     {/* 최종 답변 */}
-                    <td className="px-2 py-1.5 align-middle text-gray-400">
+                    <td className={`px-2 py-1.5 align-middle ${getStatusBgColor(log.evaluation?.answerStatus || 'pending')}`}>
                       <ExpandableCell content={log.finalAnswer || '-'} maxLength={25} isExpanded={isExpanded} />
+                      {log.evaluation?.answerComment && (
+                        <div className={`text-[9px] mt-0.5 truncate ${log.evaluation?.answerStatus === 'ok' ? 'text-green-600' : 'text-gray-500'}`} title={log.evaluation.answerComment}>
+                          {log.evaluation.answerComment.length > 40 ? log.evaluation.answerComment.substring(0, 40) + '...' : log.evaluation.answerComment}
+                        </div>
+                      )}
                     </td>
                     
-                    {/* 소요시간 */}
+                    {/* 소요시간 - 3등분 (Router/Function/Main Agent) */}
                     <td className={`px-2 py-1.5 align-middle ${timeBg}`}>
-                      <div className="flex items-center gap-1">
-                        <span className="text-xs font-mono">{(log.elapsedTime / 1000).toFixed(2)}s</span>
-                        {log.evaluation?.timeStatus && log.evaluation?.timeStatus !== 'ok' && (
-                          <span className="text-[9px] text-gray-500">
-                            ({log.evaluation.timeComment})
-                          </span>
-                        )}
+                      <div className="flex flex-col text-[10px] font-mono leading-tight">
+                        <span className="text-blue-600">R: {((log.timing?.router || 0) / 1000).toFixed(2)}s</span>
+                        <span className="text-green-600">F: {((log.timing?.function || 0) / 1000).toFixed(2)}s</span>
+                        <span className="text-purple-600">M: {((log.timing?.main_agent || 0) / 1000).toFixed(2)}s</span>
                       </div>
+                      {log.evaluation?.timeStatus && log.evaluation?.timeStatus !== 'ok' && (
+                        <div className="text-[9px] text-gray-500 mt-0.5">
+                          ({log.evaluation.timeComment})
+                        </div>
+                      )}
                     </td>
                     
                     {/* 재평가 */}

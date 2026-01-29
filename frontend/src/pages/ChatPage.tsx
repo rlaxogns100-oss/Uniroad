@@ -178,15 +178,17 @@ export default function ChatPage() {
       }))
       console.log('✅ [ChatPage] 메시지 변환 완료:', convertedMessages.length, '개')
       setMessages(convertedMessages)
-    } else if (savedMessages && savedMessages.length === 0 && currentSessionId) {
+    } else if (savedMessages && savedMessages.length === 0 && currentSessionId && !isStreamingRef.current) {
       // 세션이 선택되었지만 메시지가 없는 경우 (새 세션)
+      // 단, 스트리밍 중이 아닐 때만 (메시지 전송 중에는 로컬 메시지 유지)
       console.log('🆕 [ChatPage] 빈 세션으로 설정')
       setMessages([])
     } else {
       console.log('⚠️ [ChatPage] 조건 불일치:', { 
         hasSavedMessages: !!savedMessages, 
         length: savedMessages?.length, 
-        hasSessionId: !!currentSessionId 
+        hasSessionId: !!currentSessionId,
+        isStreaming: isStreamingRef.current
       })
     }
   }, [savedMessages, currentSessionId])
@@ -427,7 +429,8 @@ export default function ChatPage() {
       if (newSessionId) {
         currentSessionIdToUse = newSessionId
         setSessionId(newSessionId)
-        // selectSession을 호출하지 않음 - 메시지는 로컬에서 관리하고 서버에서 자동 저장됨
+        // currentSessionId 업데이트 (중복 세션 생성 방지)
+        selectSession(newSessionId)
       }
     }
 
@@ -437,7 +440,10 @@ export default function ChatPage() {
       isUser: true,
     }
 
-    // 사용자 메시지를 먼저 UI에 추가
+    // 스트리밍 봇 메시지 ID (실시간 업데이트용)
+    const streamingBotMessageId = (Date.now() + 1).toString()
+
+    // 사용자 메시지를 먼저 UI에 추가 + 빈 봇 메시지도 함께 추가 (스트리밍용)
     setMessages((prev) => {
       // 중복 방지: 같은 내용의 메시지가 이미 있으면 추가하지 않음
       const isDuplicate = prev.some(
@@ -448,7 +454,13 @@ export default function ChatPage() {
         console.log('🚫 중복 메시지 차단:', userInput)
         return prev
       }
-      return [...prev, userMessage]
+      // 사용자 메시지 + 빈 봇 메시지 (스트리밍 시작)
+      const streamingBotMessage: Message = {
+        id: streamingBotMessageId,
+        text: '',  // 빈 상태로 시작, 청크가 도착하면 업데이트
+        isUser: false,
+      }
+      return [...prev, userMessage, streamingBotMessage]
     })
 
     // 로그 초기화
@@ -505,32 +517,23 @@ export default function ChatPage() {
           
           // 타이밍: 결과 수신
           timingLogger.mark('result_received')
-          
-          const botMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            text: response.response,
-            isUser: false,
-            sources: response.sources,
-            source_urls: response.source_urls,
-            used_chunks: response.used_chunks,
-          }
 
           // 타이밍: 파싱 완료
           timingLogger.mark('parse_complete')
 
-          // 중복 방지: 같은 내용의 메시지가 이미 있으면 추가하지 않음
-          setMessages((prev) => {
-            const isDuplicate = prev.some(
-              (msg) => !msg.isUser && msg.text === response.response && 
-              Date.now() - parseInt(msg.id) < 2000 // 2초 이내에 같은 메시지가 있으면 중복으로 간주
-            )
-            if (isDuplicate) {
-              console.log('🚫 중복 답변 차단:', response.response.substring(0, 50))
-              return prev
-            }
-            console.log('✅ 답변 추가:', response.response.substring(0, 50))
-            return [...prev, botMessage]
-          })
+          // 스트리밍 봇 메시지를 최종 메시지로 업데이트 (sources, used_chunks 등 추가)
+          setMessages((prev) => prev.map(msg => 
+            msg.id === streamingBotMessageId
+              ? {
+                  ...msg,
+                  text: response.response || msg.text,  // 최종 응답으로 교체 (또는 스트리밍된 텍스트 유지)
+                  sources: response.sources,
+                  source_urls: response.source_urls,
+                  used_chunks: response.used_chunks,
+                }
+              : msg
+          ))
+          console.log('✅ 스트리밍 완료:', response.response?.substring(0, 50) || '(스트리밍 텍스트)')
 
           // 타이밍: 렌더링 완료
           timingLogger.mark('render_complete')
@@ -582,6 +585,7 @@ export default function ChatPage() {
               functionResult: response.function_results || null,
               finalAnswer: response.response,
               elapsedTime: elapsedMs,
+              timing: response.metadata?.timing || undefined,
             })
           }
         },
@@ -590,14 +594,29 @@ export default function ChatPage() {
           // 취소된 경우 에러 메시지 표시 안 함
           if (abortController.signal.aborted) return
           
-          const errorMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            text: error,
-            isUser: false,
-          }
-          setMessages((prev) => [...prev, errorMessage])
+          // 스트리밍 봇 메시지를 에러 메시지로 교체
+          setMessages((prev) => prev.map(msg => 
+            msg.id === streamingBotMessageId
+              ? { ...msg, text: error }
+              : msg
+          ))
         },
-        abortController.signal
+        abortController.signal,
+        // onChunk 콜백 - 실시간 텍스트 스트리밍
+        (chunk: string) => {
+          // 취소된 경우 콜백 실행 안 함
+          if (abortController.signal.aborted) return
+          
+          // 스트리밍 봇 메시지에 청크 추가
+          setMessages((prev) => prev.map(msg => 
+            msg.id === streamingBotMessageId
+              ? { ...msg, text: msg.text + chunk }
+              : msg
+          ))
+          
+          // 자동 스크롤
+          scrollToBottom()
+        }
       )
     } catch (error: any) {
       // AbortError는 무시 (사용자가 새 채팅을 시작한 경우)
@@ -655,6 +674,7 @@ export default function ChatPage() {
               functionResult: response.function_results || null,
               finalAnswer: response.response,
               elapsedTime: elapsedMs,
+              timing: response.metadata?.timing || undefined,
             })
             
             console.log(`✅ 추가 테스트 ${runIndex + 2} 완료: ${elapsedMs}ms`)

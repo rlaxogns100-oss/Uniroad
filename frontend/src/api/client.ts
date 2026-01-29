@@ -119,19 +119,21 @@ export interface Agent {
   description: string
 }
 
-// 채팅 API (Router Agent)
+// 채팅 API (Router Agent) - 비스트리밍 폴백
 export const sendMessageStream = async (
   message: string,
   sessionId: string,
   onLog: (log: string) => void,
   onResult: (result: ChatResponse) => void,
   onError?: (error: string) => void,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  onChunk?: (chunk: string) => void  // 실시간 텍스트 청크 콜백
 ): Promise<void> => {
   try {
     onLog('🔍 질문을 분석하는 중...')
     
-    const response = await fetch('/api/chat/', {
+    // 실시간 스트리밍 엔드포인트 사용
+    const response = await fetch('/api/chat/v2/stream', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -150,22 +152,72 @@ export const sendMessageStream = async (
       return
     }
 
-    const data = await response.json()
-    
-    onLog('✨ 분석 완료!')
-    
-    // 백엔드 응답을 그대로 전달
+    // SSE 스트리밍 처리
+    const reader = response.body?.getReader()
+    if (!reader) {
+      onError?.('스트리밍을 지원하지 않습니다')
+      return
+    }
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let fullResponse = ''
+    let finalData: any = null
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      
+      // SSE 메시지 파싱 (data: {...}\n\n 형식)
+      const lines = buffer.split('\n\n')
+      buffer = lines.pop() || ''  // 마지막 불완전한 청크는 버퍼에 유지
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        
+        try {
+          const jsonStr = line.slice(6)  // 'data: ' 제거
+          const event = JSON.parse(jsonStr)
+          
+          if (event.type === 'status') {
+            // 상태 업데이트
+            onLog(event.message || '')
+          } else if (event.type === 'chunk') {
+            // 텍스트 청크 - 실시간으로 화면에 표시
+            const chunkText = event.text || ''
+            fullResponse += chunkText
+            onChunk?.(chunkText)
+          } else if (event.type === 'done') {
+            // 완료
+            finalData = event
+            onLog('✨ 답변 완료!')
+          } else if (event.type === 'error') {
+            onError?.(event.message || '알 수 없는 오류')
+            return
+          }
+        } catch (e) {
+          console.warn('SSE 파싱 오류:', e, line)
+        }
+      }
+    }
+
+    // 최종 결과 전달 (출처 정보 포함)
     const chatResponse: ChatResponse = {
-      response: data.response,  // 청크 텍스트 그대로
-      raw_answer: data.raw_answer || data.response,
-      sources: data.sources || [],
-      source_urls: data.source_urls || [],
-      used_chunks: data.used_chunks,
-      router_output: data.router_output,  // Router 출력
-      function_results: data.function_results,  // Function 결과
-      orchestration_result: data.orchestration_result,
-      sub_agent_results: data.sub_agent_results,
-      metadata: data.metadata
+      response: finalData?.response || fullResponse,
+      raw_answer: finalData?.response || fullResponse,
+      sources: finalData?.sources || [],
+      source_urls: finalData?.source_urls || [],
+      used_chunks: finalData?.used_chunks || [],
+      router_output: finalData?.router_output,
+      function_results: finalData?.function_results,
+      orchestration_result: null,
+      sub_agent_results: null,
+      metadata: {
+        timing: finalData?.timing,
+        pipeline_time: finalData?.pipeline_time
+      }
     }
     
     onResult(chatResponse)

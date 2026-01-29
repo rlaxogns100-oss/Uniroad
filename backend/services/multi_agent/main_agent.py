@@ -1,10 +1,11 @@
 """
 Main Agent
 - 사용자 질문 + 검색된 자료를 토대로 최종 답변 생성
-- Model: gemini-2.0-flash
+- Model: gemini-3-flash-preview
 """
 
 import google.generativeai as genai
+from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from typing import Dict, Any, List
 import json
 import os
@@ -22,9 +23,11 @@ if GEMINI_API_KEY:
 # ============================================================
 
 MAIN_CONFIG = {
-    "model": "gemini-2.0-flash",
-    "temperature": 0.7,  # 답변 생성에는 약간의 창의성 허용
-    "max_output_tokens": 4096
+    "model": "gemini-3-flash-preview",  # 표 해석 능력 향상을 위해 3-flash-preview 사용
+    "temperature": 0.7,  # 입시 정보는 정확성 최우선 - 완전히 결정적 답변
+    "max_output_tokens": 4096,  # 40960 → 4096으로 축소 (속도 개선)
+    "top_p": 1.0,  # temperature 0이면 무시됨
+    "top_k": 1  # 가장 확률 높은 토큰만 선택 (캐싱 영향 제거)
 }
 
 
@@ -32,8 +35,13 @@ MAIN_CONFIG = {
 # 시스템 프롬프트
 # ============================================================
 
-MAIN_SYSTEM_PROMPT = """당신은 대한민국 최고의 입시 데이터 기반 AI 컨설턴트 [유니로드(UniRoad)]입니다.
+MAIN_SYSTEM_PROMPT = """[CRITICAL] 생각, 서론, 인사말 절대 금지. 바로 ===SECTION_START:===로 시작할 것.
+Do NOT output any thinking process, introduction, or pleasantries. Start DIRECTLY with ===SECTION_START:===.
+
+당신은 대한민국 최고의 입시 데이터 기반 AI 컨설턴트 [유니로드(UniRoad)]입니다.
 사용자의 질문과 제공된 데이터를 분석하여, **스스로 가장 적절한 답변 구조를 설계하고** 모바일 가독성에 최적화된 답변을 작성하십시오.
+
+## 최상위 규칙: 모든 데이터는 반드시 주어지는 자료에 기반해서 정확하게 쓰세요. 없는 정보는 쓰지 마세요.
 
 ## 1. 기본 원칙
 - **시점:** 2026년 1월 (2026학년도 입시 진행 중)
@@ -41,7 +49,9 @@ MAIN_SYSTEM_PROMPT = """당신은 대한민국 최고의 입시 데이터 기반
 - **서식:**
   - **Markdown 강조(**, ##, > 등) 사용 금지.** 평문(Plain Text)만 사용.
   - 한 섹션 안에 4줄을 넘지 않을 것. 여러 가지 정보를 제시하는 경우 글머리 기호(•) 사용.
-- **데이터 인용:** 근거 자료 활용 시 문장 끝에 `<cite data-source="자료명" data-url="URL">내용</cite>` 태그 필수.
+- **데이터 인용:** 근거 자료 활용 시 문장 끝에 `<cite data-source="문서제목 페이지p" data-url="PDF_URL">내용</cite>` 형태 필수.
+  - 청크 정보에 포함된 URL을 `data-url` 속성에 그대로 삽입하세요.
+  - 예: `<cite data-source="2026학년도 서울대학교 정시모집 요강 23p" data-url="https://...pdf">정시 모집인원은 1,000명입니다.</cite>`
 
 ## 2. 답변 구조 설계 가이드 (Planner Logic)
 질문의 성격에 따라 아래 **[가용 섹션]** 중 1~5개를 선택하여 논리적인 흐름을 구성하십시오.
@@ -65,17 +75,14 @@ MAIN_SYSTEM_PROMPT = """당신은 대한민국 최고의 입시 데이터 기반
 
 **(1) 분석형 (fact_check, analysis, recommendation, warning)**
 - **형식:** 반드시 첫 줄에 `【제목】`을 적고 줄바꿈 후 본문 작성.
-- **내용:** "유리하다" 같은 모호한 표현 대신, "작년 컷(392점)보다 3점 높아 안정적입니다"처럼 **수치 중심**으로 설명.
+- **내용:** "유리하다" 같은 모호한 표현 대신, "작년 컷(392점)보다 3점 높아 안정적입니다", "해당 대학에서 가장 낮은 컷(심리학과, 395점)보다 2점 낮아 어렵습니다."처럼 **수치 중심**으로 설명.
 
 **(2) 소통형 (empathy, encouragement, next_step)**
 - **형식:** `【제목】` 절대 금지. 본문만 작성.
 - **내용:** 따뜻하고 진정성 있는 멘토의 말투 유지.
 
-## 4. 자료 선별 규칙
-- 제공된 functions 결과에서 **질문과 직접 관련된 정보만** 선별하여 사용하세요.
-- 여러 청크가 제공되더라도, 핵심적인 내용만 추출하여 간결하게 전달하세요.
-- 불필요한 정보를 나열하지 마세요. 학생이 원하는 답에 집중하세요.
-- 정보가 부족하거나 없는 경우, 솔직하게 안내하고 추가 질문을 유도하세요.
+
+- ** 종합적인 검증이 필요한 질문은 여러 청크를 모두 참고하세요
 
 ## 5. 출력 프로토콜 (SYSTEM CRITICAL)
 시스템 파싱을 위해 아래 형식을 기계적으로 준수하십시오.
@@ -113,7 +120,16 @@ class MainAgent:
         )
         self.generation_config = {
             "temperature": MAIN_CONFIG["temperature"],
-            "max_output_tokens": MAIN_CONFIG["max_output_tokens"]
+            "max_output_tokens": MAIN_CONFIG["max_output_tokens"],
+            "top_p": MAIN_CONFIG.get("top_p", 1.0),
+            "top_k": MAIN_CONFIG.get("top_k", 1)
+        }
+        # Safety Settings - BLOCK_NONE으로 설정하여 필터 지연 방지
+        self.safety_settings = {
+            HarmCategory.HARM_CATEGORY_HARASSMENT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_HATE_SPEECH: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT: HarmBlockThreshold.BLOCK_NONE,
+            HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
         }
     
     def _format_function_results(self, function_results: Dict[str, Any]) -> str:
@@ -141,10 +157,20 @@ class MainAgent:
                 if not chunks:
                     formatted_parts.append("  - 관련 자료 없음")
                 else:
-                    for i, chunk in enumerate(chunks[:5], 1):  # 상위 5개만
-                        content = chunk.get("content", "")[:500]  # 500자 제한
-                        score = chunk.get("weighted_score", 0)
-                        formatted_parts.append(f"\n[청크 {i}] (관련도: {score:.3f})")
+                    # document_titles 및 document_urls 가져오기
+                    doc_titles = result.get("document_titles", {})
+                    doc_urls = result.get("document_urls", {})
+                    
+                    for i, chunk in enumerate(chunks, 1):  # 토큰 기반으로 이미 필터링됨
+                        doc_id = chunk.get("document_id")
+                        title = doc_titles.get(doc_id, f"문서 {doc_id}")
+                        url = doc_urls.get(doc_id, "")
+                        page = chunk.get("page_number", "")
+                        content = chunk.get("content", "")  # 전체 내용 전달
+                        
+                        # 출처 정보 포함 (URL도 추가)
+                        source_info = f"{title} {page}p" if page else title
+                        formatted_parts.append(f"\n[청크 {i}] 출처: {source_info} | URL: {url}")
                         formatted_parts.append(content)
             
             elif key.startswith("consult_"):
@@ -156,7 +182,7 @@ class MainAgent:
     
     def _extract_citations(self, function_results: Dict[str, Any]) -> List[Dict]:
         """
-        function_results에서 인용 가능한 출처 정보 추출
+        function_results에서 인용 가능한 출처 정보 추출 (URL 포함)
         """
         citations = []
         
@@ -164,20 +190,86 @@ class MainAgent:
             if key.startswith("univ_"):
                 university = result.get("university", "")
                 chunks = result.get("chunks", [])
+                doc_titles = result.get("document_titles", {})
+                doc_urls = result.get("document_urls", {})
                 
                 for chunk in chunks:
                     section_id = chunk.get("section_id")
                     document_id = chunk.get("document_id")
+                    page_number = chunk.get("page_number", "")
                     
                     if section_id or document_id:
+                        title = doc_titles.get(document_id, f"문서 {document_id}")
+                        url = doc_urls.get(document_id, "")
+                        source_info = f"{title} {page_number}p" if page_number else title
+                        
                         citations.append({
                             "university": university,
                             "section_id": section_id,
                             "document_id": document_id,
-                            "page_number": chunk.get("page_number")
+                            "page_number": page_number,
+                            "title": title,
+                            "url": url,
+                            "source": source_info
                         })
         
         return citations
+    
+    def _format_document_summaries(self, function_results: Dict[str, Any]) -> str:
+        """
+        function_results에서 document_summaries 추출하여 텍스트 생성
+        Main Agent가 올바른 출처인지 판단할 수 있도록 문서 설명 제공
+        """
+        summaries = []
+        seen_docs = set()
+        
+        for key, result in function_results.items():
+            if key.startswith("univ_"):
+                university = result.get("university", "")
+                doc_summaries = result.get("document_summaries", {})
+                
+                for doc_id, summary in doc_summaries.items():
+                    if doc_id not in seen_docs and summary:
+                        # summary에서 첫 200자만 사용 (프롬프트 토큰 절약)
+                        short_summary = summary[:200] + "..." if len(summary) > 200 else summary
+                        summaries.append(f"• [{university}] 문서 {doc_id}: {short_summary}")
+                        seen_docs.add(doc_id)
+        
+        return "\n".join(summaries) if summaries else "문서 설명 없음"
+    
+    def _post_process_sections(self, text: str) -> str:
+        """
+        섹션 마커 제거 및 cite 태그 정리
+        원본: final_agent.py의 _post_process_sections 메서드
+        """
+        import re
+        
+        # 1. 섹션 마커 추출 및 처리
+        section_pattern = r'===SECTION_START(?::\w+)?===\s*(.*?)\s*===SECTION_END==='
+        sections = re.findall(section_pattern, text, re.DOTALL)
+        
+        if not sections:
+            # 섹션 마커가 없으면 마커 패턴만 제거하고 반환
+            cleaned = re.sub(r'===SECTION_(START|END)(:\w+)?===\s*', '', text)
+            return cleaned.strip()
+        
+        # 2. 각 섹션 정리
+        cleaned_sections = []
+        for section in sections:
+            # 연속된 줄바꿈 정리 (3개 이상 -> 2개)
+            section = re.sub(r'\n{3,}', '\n\n', section)
+            # 앞뒤 공백 제거
+            section = section.strip()
+            if section:
+                cleaned_sections.append(section)
+        
+        # 3. 섹션들을 두 줄 간격으로 연결
+        result = '\n\n'.join(cleaned_sections)
+        
+        # 4. 최종 정리 - 연속 공백 제거
+        result = re.sub(r' {2,}', ' ', result)
+        
+        return result.strip()
     
     async def generate(
         self, 
@@ -212,11 +304,15 @@ class MainAgent:
         # 함수 결과 포맷팅
         results_text = self._format_function_results(function_results or {})
         citations = self._extract_citations(function_results or {})
+        document_summary = self._format_document_summaries(function_results or {})
         
         # 최종 프롬프트 구성
         final_prompt = f"""
 [사용자 질문]
 {message}
+
+[언급된 문서 설명]
+{document_summary}
 
 [functions 결과 (Raw Data)]
 {results_text}
@@ -232,12 +328,16 @@ class MainAgent:
         try:
             response = chat.send_message(
                 final_prompt,
-                generation_config=self.generation_config
+                generation_config=self.generation_config,
+                safety_settings=self.safety_settings  # Safety Filter 비활성화
             )
             raw_response = response.text.strip()
             
+            # 섹션 마커 제거 및 정리
+            processed_response = self._post_process_sections(raw_response)
+            
             result = {
-                "response": raw_response,
+                "response": processed_response,
                 "citations": citations
             }
             
@@ -258,6 +358,87 @@ class MainAgent:
                 "error": str(e),
                 "citations": []
             }
+    
+    def generate_stream(
+        self, 
+        message: str, 
+        history: List[Dict] = None,
+        function_results: Dict[str, Any] = None
+    ):
+        """
+        스트리밍 답변 생성 (동기 Generator)
+        
+        Args:
+            message: 사용자 질문
+            history: 기존 대화 내역
+            function_results: functions.py 실행 결과
+        
+        Yields:
+            str: 청크 단위 텍스트
+        """
+        import time
+        
+        # 히스토리 구성
+        gemini_history = []
+        if history:
+            for msg in history[-10:]:  # 최근 10개
+                role = "user" if msg.get("role") == "user" else "model"
+                content = msg.get("content", "")
+                if content:
+                    gemini_history.append({"role": role, "parts": [content]})
+        
+        # 함수 결과 포맷팅
+        results_text = self._format_function_results(function_results or {})
+        document_summary = self._format_document_summaries(function_results or {})
+        citations = self._extract_citations(function_results or {})
+        
+        # 최종 프롬프트 구성
+        final_prompt = f"""
+[사용자 질문]
+{message}
+
+[언급된 문서 설명]
+{document_summary}
+
+[functions 결과 (Raw Data)]
+{results_text}
+
+[참고 문헌 목록]
+{json.dumps(citations, ensure_ascii=False, indent=2)[:2000]}
+
+위 자료를 바탕으로 사용자에게 최적의 답변을 생성해주세요.
+"""
+        
+        chat = self.model.start_chat(history=gemini_history)
+        
+        try:
+            # 스트리밍 모드로 호출
+            start_time = time.time()
+            first_chunk_time = None
+            
+            response = chat.send_message(
+                final_prompt,
+                generation_config=self.generation_config,
+                safety_settings=self.safety_settings,  # Safety Filter 비활성화
+                stream=True  # 스트리밍 활성화
+            )
+            
+            full_response = ""
+            for chunk in response:
+                if chunk.text:
+                    if first_chunk_time is None:
+                        first_chunk_time = time.time()
+                        print(f"⚡ 첫 청크 도착: {(first_chunk_time - start_time):.3f}초")
+                    
+                    full_response += chunk.text
+                    yield chunk.text
+            
+            total_time = time.time() - start_time
+            print(f"✅ 스트리밍 완료: 총 {total_time:.3f}초, 응답 {len(full_response)}자")
+            
+        except Exception as e:
+            print(f"❌ 스트리밍 오류: {e}")
+            yield f"오류가 발생했습니다: {str(e)}"
 
 
 # ============================================================
@@ -281,6 +462,17 @@ async def generate_response(
     """편의 함수"""
     agent = get_main_agent()
     return await agent.generate(message, history, function_results)
+
+
+def generate_response_stream(
+    message: str, 
+    history: List[Dict] = None,
+    function_results: Dict[str, Any] = None
+):
+    """스트리밍 편의 함수 (동기 Generator)"""
+    agent = get_main_agent()
+    for chunk in agent.generate_stream(message, history, function_results):
+        yield chunk
 
 
 # ============================================================
