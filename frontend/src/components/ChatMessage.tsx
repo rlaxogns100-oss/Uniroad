@@ -6,6 +6,88 @@ interface ChatMessageProps {
 }
 
 export default function ChatMessage({ message, isUser, sources, source_urls }: ChatMessageProps) {
+  // **텍스트** 형식을 볼드체로 파싱하는 헬퍼 함수
+  const parseBold = (text: string | React.ReactNode): React.ReactNode => {
+    if (typeof text !== 'string') return text
+
+    const parts: React.ReactNode[] = []
+    const boldRegex = /\*\*([^*]+)\*\*/g
+    let lastIndex = 0
+    let match
+    let keyIndex = 0
+
+    while ((match = boldRegex.exec(text)) !== null) {
+      // 볼드 이전 텍스트
+      if (match.index > lastIndex) {
+        parts.push(
+          <span key={`text-${keyIndex++}`}>
+            {text.substring(lastIndex, match.index)}
+          </span>
+        )
+      }
+
+      // 볼드 부분
+      parts.push(
+        <strong key={`bold-${keyIndex++}`} className="font-semibold">
+          {match[1]}
+        </strong>
+      )
+
+      lastIndex = boldRegex.lastIndex
+    }
+
+    // 마지막 남은 텍스트
+    if (lastIndex < text.length) {
+      parts.push(
+        <span key={`text-${keyIndex++}`}>
+          {text.substring(lastIndex)}
+        </span>
+      )
+    }
+
+    return parts.length > 0 ? parts : text
+  }
+
+  // 【】로 감싸진 타이틀을 파싱하는 헬퍼 함수
+  const parseTitles = (text: string) => {
+    const parts: React.ReactNode[] = []
+    const titleRegex = /【([^】]+)】/g
+    let lastIndex = 0
+    let match
+    let keyIndex = 0
+
+    while ((match = titleRegex.exec(text)) !== null) {
+      // 타이틀 이전 텍스트 (볼드 파싱 적용)
+      if (match.index > lastIndex) {
+        parts.push(
+          <span key={`text-${keyIndex++}`}>
+            {parseBold(text.substring(lastIndex, match.index))}
+          </span>
+        )
+      }
+
+      // 타이틀 부분 (18.5px, 볼드, 대괄호 제거)
+      parts.push(
+        <span key={`title-${keyIndex++}`} className="text-[18.5px] font-bold">
+          {match[1]}
+        </span>
+      )
+
+      lastIndex = titleRegex.lastIndex
+    }
+
+    // 마지막 남은 텍스트 (볼드 파싱 적용)
+    if (lastIndex < text.length) {
+      parts.push(
+        <span key={`text-${keyIndex++}`}>
+          {parseBold(text.substring(lastIndex))}
+        </span>
+      )
+    }
+
+    return parts.length > 0 ? parts : parseBold(text)
+  }
+
   // <cite> 태그를 파싱해서 희미한 밑줄 + 출처 표시
   const renderMessage = () => {
     if (isUser) {
@@ -55,9 +137,10 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
       while ((match = newCiteRegex.exec(cleanedMessage)) !== null) {
         // cite 이전 텍스트
         if (match.index > lastIndex) {
+          const textBefore = cleanedMessage.substring(lastIndex, match.index)
           parts.push(
             <span key={`text-${lastIndex}`}>
-              {cleanedMessage.substring(lastIndex, match.index)}
+              {parseTitles(textBefore)}
             </span>
           )
         }
@@ -69,7 +152,7 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
         parts.push(
           <span key={`cite-${match.index}`} className="inline-flex items-baseline gap-1 flex-wrap">
             <span className="underline decoration-blue-300/40 decoration-1 underline-offset-2">
-              {citedContent}
+              {parseBold(citedContent)}
             </span>
             {sourceUrl && sourceUrl.length > 0 ? (
               <a
@@ -95,14 +178,15 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
 
       // 마지막 남은 텍스트
       if (lastIndex < cleanedMessage.length) {
+        const remainingText = cleanedMessage.substring(lastIndex)
         parts.push(
           <span key={`text-${lastIndex}`}>
-            {cleanedMessage.substring(lastIndex)}
+            {parseTitles(remainingText)}
           </span>
         )
       }
 
-      return <div className="whitespace-pre-wrap leading-relaxed">{parts.length > 0 ? parts : cleanedMessage}</div>
+      return <div className="whitespace-pre-wrap">{parts.length > 0 ? parts : parseTitles(cleanedMessage)}</div>
     }
 
     // 기존 형식 처리 (하위 호환성)
@@ -114,7 +198,7 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
     if (citeCount > 0 && sourcesCount === 0) {
       // cite 태그 제거하고 일반 텍스트로
       const finalClean = cleanedMessage.replace(/<\/?cite>/g, '')
-      return <div className="whitespace-pre-wrap leading-relaxed">{finalClean}</div>
+      return <div className="whitespace-pre-wrap">{parseTitles(finalClean)}</div>
     }
 
     // 기존 <cite>...</cite> 패턴 찾기
@@ -124,9 +208,10 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
     while ((match = oldCiteRegex.exec(cleanedMessage)) !== null) {
       // <cite> 이전 텍스트
       if (match.index > lastIndex) {
+        const textBefore = cleanedMessage.substring(lastIndex, match.index)
         parts.push(
           <span key={`text-${lastIndex}`}>
-            {cleanedMessage.substring(lastIndex, match.index)}
+            {parseTitles(textBefore)}
           </span>
         )
       }
@@ -140,7 +225,7 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
         parts.push(
           <span key={`cite-${match.index}`} className="inline-flex items-baseline gap-1">
             <span className="underline decoration-blue-300/40 decoration-1 underline-offset-2">
-              {match[1]}
+              {parseBold(match[1])}
             </span>
             {sourceUrl ? (
               <a
@@ -164,7 +249,7 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
         // 출처가 없으면 일반 텍스트로
         parts.push(
           <span key={`cite-${match.index}`}>
-            {match[1]}
+            {parseTitles(match[1])}
           </span>
         )
       }
@@ -175,27 +260,30 @@ export default function ChatMessage({ message, isUser, sources, source_urls }: C
 
     // 마지막 남은 텍스트
     if (lastIndex < cleanedMessage.length) {
+      const remainingText = cleanedMessage.substring(lastIndex)
       parts.push(
         <span key={`text-${lastIndex}`}>
-          {cleanedMessage.substring(lastIndex)}
+          {parseTitles(remainingText)}
         </span>
       )
     }
 
-    return <div className="whitespace-pre-wrap leading-relaxed">{parts.length > 0 ? parts : cleanedMessage}</div>
+    return <div className="whitespace-pre-wrap">{parts.length > 0 ? parts : parseTitles(cleanedMessage)}</div>
   }
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
-      <div
-        className={`max-w-[70%] rounded-2xl px-4 py-3 ${
-          isUser
-            ? 'bg-blue-600 text-white'
-            : 'bg-gray-100 text-gray-900'
-        }`}
-      >
-        {renderMessage()}
-      </div>
+      {isUser ? (
+        // 사용자 메시지: 말풍선 스타일 유지
+        <div className="max-w-[70%] rounded-2xl px-4 py-3 bg-blue-600 text-white">
+          {renderMessage()}
+        </div>
+      ) : (
+        // AI 답변: Gemini 스타일 (말풍선 없이, 폰트/간격 조정)
+        <div className="w-full text-gray-900 ai-response">
+          {renderMessage()}
+        </div>
+      )}
     </div>
   )
 }

@@ -1273,7 +1273,7 @@ export default function ChatPage() {
 
         {/* 채팅 영역 */}
         <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 sm:py-8 pb-safe">
-          <div className="max-w-3xl mx-auto">
+          <div className="max-w-[653px] mx-auto">
             {messages.length === 0 && (
               <div className="text-center py-12 sm:py-16">
                 <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3 sm:mb-4">
@@ -1367,7 +1367,7 @@ export default function ChatPage() {
         {/* 입력 영역 - 고정 */}
         <div className="bg-white pb-safe safe-area-bottom sticky bottom-0">
           <div className="px-4 sm:px-6 py-3 sm:py-4">
-            <div className="max-w-3xl mx-auto flex items-end gap-2">
+            <div className="max-w-[653px] mx-auto flex items-end gap-2">
               {/* 입력 필드 */}
               <div className="flex-1 relative">
             <input
