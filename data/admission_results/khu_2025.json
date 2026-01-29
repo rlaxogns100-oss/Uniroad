@@ -1,0 +1,812 @@
+[
+  {
+    "univ": "경희대학교",
+    "major": "자율전공학부",
+    "recruit_count": 88,
+    "competition_rate": 3.7,
+    "cut_70_score": 545.9,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "자유전공학부",
+    "recruit_count": 56,
+    "competition_rate": 4.2,
+    "cut_70_score": 550.64,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "국어국문학과",
+    "recruit_count": 17,
+    "competition_rate": 3.3,
+    "cut_70_score": 559.12,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "영어영문학과",
+    "recruit_count": 19,
+    "competition_rate": 4.9,
+    "cut_70_score": 561.35,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "응용영어통번역학과",
+    "recruit_count": 17,
+    "competition_rate": 5.1,
+    "cut_70_score": 560.12,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "사학과",
+    "recruit_count": 12,
+    "competition_rate": 4.0,
+    "cut_70_score": 560.14,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "철학과",
+    "recruit_count": 14,
+    "competition_rate": 4.4,
+    "cut_70_score": 560.94,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "프랑스어학과",
+    "recruit_count": 18,
+    "competition_rate": 7.1,
+    "cut_70_score": 550.57,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "스페인어학과",
+    "recruit_count": 18,
+    "competition_rate": 5.5,
+    "cut_70_score": 552.4,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "러시아어학과",
+    "recruit_count": 20,
+    "competition_rate": 3.5,
+    "cut_70_score": 550.57,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "중국어학과",
+    "recruit_count": 22,
+    "competition_rate": 6.5,
+    "cut_70_score": 551.04,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "일본어학과",
+    "recruit_count": 21,
+    "competition_rate": 3.9,
+    "cut_70_score": 552.55,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "한국어학과",
+    "recruit_count": 13,
+    "competition_rate": 3.0,
+    "cut_70_score": 550.82,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "글로벌커뮤니케이션학부",
+    "recruit_count": 34,
+    "competition_rate": 3.5,
+    "cut_70_score": 554.57,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "정치외교학과",
+    "recruit_count": 16,
+    "competition_rate": 3.1,
+    "cut_70_score": 547.93,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "행정학과",
+    "recruit_count": 29,
+    "competition_rate": 2.9,
+    "cut_70_score": 546.93,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "사회학과",
+    "recruit_count": 12,
+    "competition_rate": 4.9,
+    "cut_70_score": 546.53,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "경제학과",
+    "recruit_count": 45,
+    "competition_rate": 3.4,
+    "cut_70_score": 548.61,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "무역학과",
+    "recruit_count": 30,
+    "competition_rate": 3.4,
+    "cut_70_score": 547.29,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "미디어학과",
+    "recruit_count": 22,
+    "competition_rate": 4.0,
+    "cut_70_score": 548.02,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "경영학과",
+    "recruit_count": 79,
+    "competition_rate": 3.0,
+    "cut_70_score": 547.5,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "회계·세무학과",
+    "recruit_count": 30,
+    "competition_rate": 3.1,
+    "cut_70_score": 548.67,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "빅데이터응용학과",
+    "recruit_count": 12,
+    "competition_rate": 4.8,
+    "cut_70_score": 551.17,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "Hospitality경영학과",
+    "recruit_count": 43,
+    "competition_rate": 3.5,
+    "cut_70_score": 546.75,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "조리&푸드디자인학과",
+    "recruit_count": 5,
+    "competition_rate": 9.2,
+    "cut_70_score": 545.97,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "관광·엔터테인먼트학부",
+    "recruit_count": 26,
+    "competition_rate": 2.9,
+    "cut_70_score": 546.45,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "글로벌Hospitality·관광학과",
+    "recruit_count": 5,
+    "competition_rate": 11.2,
+    "cut_70_score": 545.52,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "아동가족학과",
+    "recruit_count": 11,
+    "competition_rate": 4.4,
+    "cut_70_score": 559.42,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "주거환경학과",
+    "recruit_count": 16,
+    "competition_rate": 4.6,
+    "cut_70_score": 560.06,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "의상학과",
+    "recruit_count": 16,
+    "competition_rate": 2.9,
+    "cut_70_score": 559.33,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "지리학과(인문)",
+    "recruit_count": 12,
+    "competition_rate": 4.7,
+    "cut_70_score": 546.8,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "식품영양학과",
+    "recruit_count": 16,
+    "competition_rate": 7.7,
+    "cut_70_score": 555.4,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "수학과",
+    "recruit_count": 19,
+    "competition_rate": 4.2,
+    "cut_70_score": 558.28,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "물리학과",
+    "recruit_count": 20,
+    "competition_rate": 4.8,
+    "cut_70_score": 557.21,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "화학과",
+    "recruit_count": 19,
+    "competition_rate": 4.2,
+    "cut_70_score": 559.8,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "생물학과",
+    "recruit_count": 19,
+    "competition_rate": 4.9,
+    "cut_70_score": 558.87,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "지리학과(자연)",
+    "recruit_count": 12,
+    "competition_rate": 5.3,
+    "cut_70_score": 555.91,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "미래정보디스플레이학부",
+    "recruit_count": 36,
+    "competition_rate": 3.8,
+    "cut_70_score": 561.03,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "전자공학과",
+    "recruit_count": 64,
+    "competition_rate": 3.8,
+    "cut_70_score": 559.64,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "반도체공학과",
+    "recruit_count": 16,
+    "competition_rate": 4.0,
+    "cut_70_score": 559.33,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "생체의공학과",
+    "recruit_count": 29,
+    "competition_rate": 5.0,
+    "cut_70_score": 555.84,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "컴퓨터공학과",
+    "recruit_count": 46,
+    "competition_rate": 3.7,
+    "cut_70_score": 558.62,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "인공지능학과",
+    "recruit_count": 20,
+    "competition_rate": 4.9,
+    "cut_70_score": 558.54,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "소프트웨어융합학과",
+    "recruit_count": 30,
+    "competition_rate": 4.7,
+    "cut_70_score": 558.9,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "한약학과",
+    "recruit_count": 19,
+    "competition_rate": 8.1,
+    "cut_70_score": 568.75,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "약과학과",
+    "recruit_count": 9,
+    "competition_rate": 6.7,
+    "cut_70_score": 561.1,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "간호학과",
+    "recruit_count": 38,
+    "competition_rate": 5.1,
+    "cut_70_score": 555.26,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "국제학과",
+    "recruit_count": 63,
+    "competition_rate": 3.5,
+    "cut_70_score": 543.56,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "한의예과(인문)",
+    "recruit_count": 14,
+    "competition_rate": 5.5,
+    "cut_70_score": 589.93,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "기계공학과",
+    "recruit_count": 69,
+    "competition_rate": 4.2,
+    "cut_70_score": 556.44,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "산업경영공학과",
+    "recruit_count": 35,
+    "competition_rate": 4.2,
+    "cut_70_score": 556.61,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "원자력공학과",
+    "recruit_count": 28,
+    "competition_rate": 4.4,
+    "cut_70_score": 555.24,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "화학공학과",
+    "recruit_count": 31,
+    "competition_rate": 3.8,
+    "cut_70_score": 556.64,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "신소재공학과",
+    "recruit_count": 36,
+    "competition_rate": 4.2,
+    "cut_70_score": 558.02,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "사회기반시스템공학과",
+    "recruit_count": 36,
+    "competition_rate": 5.5,
+    "cut_70_score": 553.7,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "건축공학과",
+    "recruit_count": 37,
+    "competition_rate": 4.1,
+    "cut_70_score": 554.1,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "환경학및환경공학과",
+    "recruit_count": 23,
+    "competition_rate": 5.5,
+    "cut_70_score": 554.71,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "건축학과(5년제)",
+    "recruit_count": 25,
+    "competition_rate": 5.3,
+    "cut_70_score": 552.88,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "응용수학과",
+    "recruit_count": 17,
+    "competition_rate": 4.1,
+    "cut_70_score": 555.71,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "응용물리학과",
+    "recruit_count": 19,
+    "competition_rate": 4.6,
+    "cut_70_score": 555.55,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "응용화학과",
+    "recruit_count": 26,
+    "competition_rate": 3.7,
+    "cut_70_score": 554.53,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "우주과학과",
+    "recruit_count": 20,
+    "competition_rate": 4.9,
+    "cut_70_score": 554.24,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "유전생명공학과",
+    "recruit_count": 12,
+    "competition_rate": 6.2,
+    "cut_70_score": 558.12,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "식품생명공학과",
+    "recruit_count": 7,
+    "competition_rate": 6.7,
+    "cut_70_score": 555.8,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "융합바이오·신소재공학과",
+    "recruit_count": 12,
+    "competition_rate": 3.8,
+    "cut_70_score": 550.61,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "스마트팜과학과",
+    "recruit_count": 8,
+    "competition_rate": 6.4,
+    "cut_70_score": 554.44,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "의예과",
+    "recruit_count": 45,
+    "competition_rate": 8.2,
+    "cut_70_score": 595.35,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "한의예과(자연)",
+    "recruit_count": 32,
+    "competition_rate": 5.2,
+    "cut_70_score": 586.53,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "치의예과",
+    "recruit_count": 33,
+    "competition_rate": 4.6,
+    "cut_70_score": 588.95,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "약학과",
+    "recruit_count": 15,
+    "competition_rate": 7.1,
+    "cut_70_score": 584.7,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "산업디자인학과",
+    "recruit_count": 2,
+    "competition_rate": 6.5,
+    "cut_70_score": 625.83,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "환경조경디자인학과",
+    "recruit_count": 6,
+    "competition_rate": 6.5,
+    "cut_70_score": 620.08,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "의류디자인학과",
+    "recruit_count": 9,
+    "competition_rate": 5.1,
+    "cut_70_score": 619.63,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "디지털콘텐츠학과",
+    "recruit_count": 2,
+    "competition_rate": 10.0,
+    "cut_70_score": 631.63,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "Post Modern 음악학과",
+    "recruit_count": 2,
+    "competition_rate": 43.0,
+    "cut_70_score": 614.88,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "연극영화학과-영화연출 및 제작",
+    "recruit_count": 9,
+    "competition_rate": 4.6,
+    "cut_70_score": 621.63,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "체육학과",
+    "recruit_count": 34,
+    "competition_rate": 3.4,
+    "cut_70_score": 613.3,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "스포츠의학과",
+    "recruit_count": 20,
+    "competition_rate": 3.0,
+    "cut_70_score": 617.72,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "골프산업학과",
+    "recruit_count": 24,
+    "competition_rate": 2.9,
+    "cut_70_score": 613.23,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "스포츠지도학과",
+    "recruit_count": 3,
+    "competition_rate": 7.0,
+    "cut_70_score": 635.25,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "경희대학교",
+    "major": "태권도학과",
+    "recruit_count": 21,
+    "competition_rate": 2.7,
+    "cut_70_score": 677.35,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "인문"
+  }
+]
