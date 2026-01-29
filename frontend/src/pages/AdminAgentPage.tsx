@@ -176,6 +176,7 @@ function formatFunctionResult(result: any): any {
         query: funcResult.query,
         chunks: funcResult.chunks?.map((chunk: any) => ({
           chunk_id: chunk.chunk_id,
+          document_id: chunk.document_id,
           page: chunk.page_number,
           score: chunk.score?.toFixed(3),
           // content 축약 (50자)

@@ -10,6 +10,7 @@ from typing import Dict, Any, List
 from .router_agent import RouterAgent, route_query
 from .admin_agent import AdminAgent, evaluate_router_output, evaluate_function_result
 from .functions import execute_function_calls, RAGFunctions
+from .main_agent import MainAgent, generate_response as main_agent_generate
 
 # 기존 chat.py 호환용
 AVAILABLE_AGENTS = [
@@ -21,35 +22,58 @@ async def run_orchestration_agent(message: str, history: List[Dict] = None, timi
     """
     Orchestration Agent 실행 (router_agent 래퍼)
     - 기존 chat.py 호환 유지
-    - function_calls 실행 후 청크 데이터를 direct_response로 반환
+    - Router → Functions → Main Agent 파이프라인 실행
     """
     try:
         # 1. router_agent 호출
+        print("🔄 [1/3] Router Agent 호출 중...")
         result = await route_query(message, history)
         
         # function_calls 추출
         function_calls = result.get("function_calls", [])
+        print(f"   ✅ Router 완료: {len(function_calls)}개 함수 호출")
         
         # 2. function_calls 실행 (RAG 검색)
+        print("🔄 [2/3] Functions 실행 중...")
         function_results = {}
         if function_calls:
             try:
                 function_results = await execute_function_calls(function_calls)
+                print(f"   ✅ Functions 완료: {len(function_results)}개 결과")
             except Exception as func_error:
-                print(f"⚠️ Function 실행 오류: {func_error}")
+                print(f"   ⚠️ Function 실행 오류: {func_error}")
                 function_results = {"error": str(func_error)}
+        else:
+            print("   ℹ️ 함수 호출 없음")
         
-        # 3. 청크 데이터를 direct_response로 포맷팅
-        chunks_text = _format_chunks_response(function_results)
+        # 3. main_agent 호출 (NEW!)
+        print("🔄 [3/3] Main Agent 호출 중...")
+        main_response = ""
+        main_result = {}
+        
+        if function_results and "error" not in function_results:
+            try:
+                main_result = await main_agent_generate(message, history, function_results)
+                main_response = main_result.get("response", "")
+                print(f"   ✅ Main Agent 완료: {len(main_response)}자")
+            except Exception as main_error:
+                print(f"   ⚠️ Main Agent 오류: {main_error}")
+                # 폴백: 청크 텍스트 사용
+                main_response = _format_chunks_response(function_results)
+        else:
+            # 함수 결과 없거나 에러 시 폴백
+            main_response = _format_chunks_response(function_results)
+            print(f"   ℹ️ 폴백 사용 (청크 텍스트)")
         
         # 에러가 있으면 추가
         if "error" in result:
-            chunks_text = f"오류: {result['error']}\n\n{chunks_text}"
+            main_response = f"오류: {result['error']}\n\n{main_response}"
         
         return {
             "router_output": result,  # Router 출력 (function_calls, raw_response, tokens)
             "function_results": function_results,  # 함수 실행 결과
-            "direct_response": chunks_text,  # 청크 텍스트 (채팅창 표시용)
+            "main_agent_result": main_result,  # Main Agent 결과 (tokens, citations)
+            "direct_response": main_response,  # Main Agent 응답 (채팅창 표시용)
             # 하위 호환용 레거시 필드
             "user_intent": "router_agent",
             "execution_plan": [],
@@ -58,11 +82,13 @@ async def run_orchestration_agent(message: str, history: List[Dict] = None, timi
         }
         
     except Exception as e:
+        print(f"❌ 파이프라인 오류: {e}")
         return {
             "error": str(e),
             "router_output": {"error": str(e)},
             "function_results": {},
-            "direct_response": f"Router Agent 오류: {str(e)}",
+            "main_agent_result": {},
+            "direct_response": f"파이프라인 오류: {str(e)}",
             # 하위 호환용
             "user_intent": "오류 발생",
             "execution_plan": [],
@@ -161,6 +187,8 @@ __all__ = [
     "AdminAgent",
     "evaluate_router_output",
     "evaluate_function_result",
+    "MainAgent",
+    "main_agent_generate",
     "AVAILABLE_AGENTS",
     "run_orchestration_agent",
     "execute_sub_agents",

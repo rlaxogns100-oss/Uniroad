@@ -5,8 +5,9 @@ RAG Functions
 """
 
 import os
+import json
 import numpy as np
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -43,12 +44,15 @@ class RAGFunctions:
         query: str, 
         school_name: str, 
         top_k: int = 30
-    ) -> List[Dict]:
+    ) -> Tuple[List[Dict], List[float]]:
         """
         Step 1-2: Supabase RPC로 벡터 검색
         원본: uniroad_recommed_1/core/searcher.py (72-168줄)
+        
+        Returns:
+            Tuple[documents, query_embedding] - 문서 리스트와 쿼리 임베딩 (재사용 위해)
         """
-        # 쿼리 임베딩 생성
+        # 쿼리 임베딩 생성 (재사용을 위해 반환)
         query_embedding = self.embeddings.embed_query(query)
         
         # RPC 호출
@@ -63,7 +67,7 @@ class RAGFunctions:
         response = self.supabase.rpc("match_document_chunks", rpc_params).execute()
         
         if not response.data:
-            return []
+            return [], query_embedding
         
         # Document 형태로 변환
         documents = []
@@ -83,22 +87,33 @@ class RAGFunctions:
                 }
             })
         
-        return documents
+        return documents, query_embedding
     
-    def _get_document_summaries(self, document_ids: List[int]) -> Dict[int, str]:
+    def _get_summary_embeddings(self, document_ids: List[int]) -> Dict[int, List[float]]:
         """
-        Step 3: documents 테이블에서 summary 조회
-        원본: uniroad_recommed_1/core/rag_system.py (302-311줄)
+        Step 3: documents 테이블에서 embedding_summary 조회
+        - 실시간 임베딩 계산 없이 DB에 저장된 벡터 사용
+        - Supabase는 vector 타입을 문자열로 반환하므로 json.loads() 필요
         """
         if not document_ids:
             return {}
         
         try:
             unique_ids = list(set(document_ids))
-            response = self.supabase.table("documents").select("id, summary").in_("id", unique_ids).execute()
-            return {doc["id"]: doc.get("summary") for doc in response.data}
+            response = self.supabase.table("documents").select("id, embedding_summary").in_("id", unique_ids).execute()
+            
+            result = {}
+            for doc in response.data:
+                emb_str = doc.get("embedding_summary")
+                if emb_str:
+                    # vector 타입 → 문자열 → 리스트 변환
+                    if isinstance(emb_str, str):
+                        result[doc["id"]] = json.loads(emb_str)
+                    else:
+                        result[doc["id"]] = emb_str
+            return result
         except Exception as e:
-            print(f"⚠️ Summary 조회 실패: {e}")
+            print(f"⚠️ Summary 임베딩 조회 실패: {e}")
             return {}
     
     @staticmethod
@@ -138,8 +153,8 @@ class RAGFunctions:
         """
         print(f"🔍 전역 검색: '{query}' (학교: {university})")
         
-        # Step 1-2: Supabase 벡터 검색 (30개)
-        documents = self._supabase_search(query, university, top_k)
+        # Step 1-2: Supabase 벡터 검색 (30개) + 쿼리 임베딩 재사용
+        documents, query_embedding = self._supabase_search(query, university, top_k)
         
         if not documents:
             print("⚠️ 검색 결과 없음")
@@ -147,12 +162,11 @@ class RAGFunctions:
         
         print(f"✅ 초기 검색: {len(documents)}개 문서")
         
-        # Step 3: document_id로 summary 조회
+        # Step 3: document_id로 summary 임베딩 조회 (DB에서 미리 계산된 벡터)
         doc_ids = [d["metadata"].get("document_id") for d in documents if d["metadata"].get("document_id")]
-        summaries = self._get_document_summaries(doc_ids)
+        summary_embeddings = self._get_summary_embeddings(doc_ids)
         
-        # Step 4: 쿼리 임베딩 생성
-        query_embedding = self.embeddings.embed_query(query)
+        # Step 4: 쿼리 임베딩은 Step 1-2에서 재사용 (중복 제거)
         
         # Step 5: 가중 평균 유사도 계산
         scored_chunks = []
@@ -160,15 +174,12 @@ class RAGFunctions:
             meta = doc["metadata"]
             content_similarity = meta.get("score", 0.0)
             
-            # Summary 유사도 계산
+            # Summary 유사도 계산 (DB에서 가져온 임베딩 직접 사용)
             summary_similarity = 0.0
             doc_id = meta.get("document_id")
-            if doc_id and doc_id in summaries and summaries[doc_id]:
-                try:
-                    summary_embedding = self.embeddings.embed_query(summaries[doc_id])
-                    summary_similarity = self._cosine_similarity(query_embedding, summary_embedding)
-                except Exception as e:
-                    print(f"⚠️ Summary 임베딩 실패: {e}")
+            if doc_id and doc_id in summary_embeddings:
+                summary_embedding = summary_embeddings[doc_id]
+                summary_similarity = self._cosine_similarity(query_embedding, summary_embedding)
             
             # 가중 평균
             weighted = (content_similarity * content_weight) + (summary_similarity * summary_weight)
