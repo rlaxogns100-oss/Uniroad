@@ -117,7 +117,7 @@ def run_orchestration_agent_stream(message: str, history: List[Dict] = None, tim
     - Generator를 반환 (각 청크는 dict 형태)
     
     Yields:
-        {"type": "status", "step": str, "message": str}  # 상태 업데이트
+        {"type": "status", "step": str, "message": str, "detail": dict}  # 상태 업데이트
         {"type": "chunk", "text": str}  # Main Agent 응답 청크
         {"type": "done", "timing": dict, "function_results": dict}  # 완료
     """
@@ -141,7 +141,34 @@ def run_orchestration_agent_stream(message: str, history: List[Dict] = None, tim
         timing["router"] = round((time.time() - router_start) * 1000)
         
         function_calls = result.get("function_calls", [])
-        yield {"type": "status", "step": "router", "message": f"✅ Router 완료: {len(function_calls)}개 함수 호출 ({timing['router']}ms)"}
+        
+        # Router 완료 시 검색 쿼리 상세 정보 포함
+        queries_detail = []
+        for call in function_calls:
+            func_name = call.get("function", "")
+            params = call.get("params", {})
+            if func_name == "univ":
+                queries_detail.append({
+                    "type": "univ",
+                    "university": params.get("university", ""),
+                    "query": params.get("query", "")
+                })
+            elif func_name == "consult":
+                queries_detail.append({
+                    "type": "consult",
+                    "target_univ": params.get("target_univ", []),
+                    "query": "성적 분석"
+                })
+        
+        yield {
+            "type": "status", 
+            "step": "router_complete", 
+            "message": f"✅ Router 완료: {len(function_calls)}개 함수 호출 ({timing['router']}ms)",
+            "detail": {
+                "function_calls": queries_detail,
+                "count": len(function_calls)
+            }
+        }
         
         # 2. Functions 실행 (RAG 검색)
         yield {"type": "status", "step": "function", "message": "🔄 [2/3] Functions 실행 중..."}
@@ -151,15 +178,69 @@ def run_orchestration_agent_stream(message: str, history: List[Dict] = None, tim
         
         if function_calls:
             try:
+                # 검색 시작 상세 정보 전송
+                for idx, call in enumerate(function_calls):
+                    func_name = call.get("function", "")
+                    params = call.get("params", {})
+                    if func_name == "univ":
+                        yield {
+                            "type": "status",
+                            "step": "search_start",
+                            "message": f"🔍 검색 중: {params.get('university', '')}",
+                            "detail": {
+                                "index": idx,
+                                "university": params.get("university", ""),
+                                "query": params.get("query", "")
+                            }
+                        }
+                    elif func_name == "consult":
+                        yield {
+                            "type": "status",
+                            "step": "search_start",
+                            "message": "📊 성적 분석 중...",
+                            "detail": {
+                                "index": idx,
+                                "type": "consult",
+                                "target_univ": params.get("target_univ", [])
+                            }
+                        }
+                
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
                     function_results = loop.run_until_complete(execute_function_calls(function_calls))
                 finally:
                     loop.close()
-                    
+                
                 timing["function"] = round((time.time() - func_start) * 1000)
-                yield {"type": "status", "step": "function", "message": f"✅ Functions 완료: {len(function_results)}개 결과 ({timing['function']}ms)"}
+                
+                # 검색 완료 상세 정보 추출 (찾은 문서 목록)
+                search_results_detail = []
+                for key, func_result in function_results.items():
+                    if isinstance(func_result, dict) and "chunks" in func_result:
+                        university = func_result.get("university", "")
+                        doc_titles = func_result.get("document_titles", {})
+                        doc_count = func_result.get("count", 0)
+                        
+                        # 중복 제거된 문서 제목 리스트
+                        unique_titles = list(set(doc_titles.values())) if doc_titles else []
+                        
+                        search_results_detail.append({
+                            "university": university,
+                            "query": func_result.get("query", ""),
+                            "doc_count": doc_count,
+                            "documents": unique_titles[:5]  # 최대 5개 문서 제목
+                        })
+                
+                yield {
+                    "type": "status", 
+                    "step": "search_complete", 
+                    "message": f"✅ Functions 완료: {len(function_results)}개 결과 ({timing['function']}ms)",
+                    "detail": {
+                        "results": search_results_detail,
+                        "total_count": sum(r.get("doc_count", 0) for r in search_results_detail)
+                    }
+                }
             except Exception as func_error:
                 timing["function"] = round((time.time() - func_start) * 1000)
                 yield {"type": "status", "step": "function", "message": f"⚠️ Function 오류: {func_error}"}

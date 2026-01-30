@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { sendMessageStream, ChatResponse, resetSession } from '../api/client'
+import { sendMessageStream, sendMessageStreamWithImage, ChatResponse, resetSession } from '../api/client'
 import ChatMessage from '../components/ChatMessage'
 import ThinkingProcess from '../components/ThinkingProcess'
 import AgentPanel from '../components/AgentPanel'
@@ -28,6 +28,7 @@ interface Message {
   source_urls?: string[]
   used_chunks?: UsedChunk[]
   isStreaming?: boolean  // 스트리밍 중인지 여부
+  imageUrl?: string  // 이미지 첨부 시 미리보기 URL
 }
 
 interface AgentData {
@@ -114,6 +115,15 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+  
+  // 카테고리별 검색창 안내 메시지
+  const categoryMessages: Record<string, string> = {
+    '합격 예측': '내 점수로 갈 수 있는 대학을 알려드립니다',
+    '환산 점수': '대학별 환산점수를 계산해드립니다',
+    '모집요강': '전형별 모집 정보를 알려드립니다',
+    '대학 정보': '입결 및 대학 정보를 알려드립니다',
+  }
   const [sessionId, setSessionId] = useState(() => `session-${Date.now()}`)
   const [isSideNavOpen, setIsSideNavOpen] = useState(() => {
     // 데스크톱에서는 기본적으로 열림, 모바일에서는 닫힘
@@ -146,10 +156,17 @@ export default function ChatPage() {
   const [testRunMode, setTestRunMode] = useState<'sequential' | 'parallel'>('sequential') // 순차/병렬
   const [isTestSettingsOpen, setIsTestSettingsOpen] = useState(false) // 설정 패널 열림 상태
   
+  // 이미지 업로드 관련
+  const [selectedImage, setSelectedImage] = useState<File | null>(null)
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null)
+  const [isUploadMenuOpen, setIsUploadMenuOpen] = useState(false) // + 버튼 메뉴
+  const uploadMenuRef = useRef<HTMLDivElement>(null) // 메뉴 외부 클릭 감지용
+  
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const sendingRef = useRef(false) // 중복 전송 방지
   const abortControllerRef = useRef<AbortController | null>(null) // 스트리밍 취소용
   const searchContainerRef = useRef<HTMLDivElement>(null) // 검색창 외부 클릭 감지용
+  const imageInputRef = useRef<HTMLInputElement>(null) // 이미지 파일 input ref
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -371,6 +388,22 @@ export default function ChatPage() {
     }
   }, [isSearchOpen])
 
+  // 업로드 메뉴 외부 클릭 감지
+  useEffect(() => {
+    if (!isUploadMenuOpen) return
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (uploadMenuRef.current && !uploadMenuRef.current.contains(event.target as Node)) {
+        setIsUploadMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isUploadMenuOpen])
+
   // 새 채팅 시작 핸들러
   const handleNewChat = async () => {
     // 진행 중인 요청 취소
@@ -404,6 +437,46 @@ export default function ChatPage() {
     
     // 새 채팅 시작
     startNewChat()
+    
+    // 이미지 상태 초기화
+    setSelectedImage(null)
+    setImagePreviewUrl(null)
+  }
+  
+  // 이미지 선택 핸들러
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    
+    // 파일 타입 검증
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+    if (!allowedTypes.includes(file.type)) {
+      alert('지원하지 않는 이미지 형식입니다. (JPEG, PNG, GIF, WebP만 가능)')
+      return
+    }
+    
+    // 파일 크기 검증 (10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      alert('이미지 크기는 10MB를 초과할 수 없습니다.')
+      return
+    }
+    
+    // 이미지 미리보기 URL 생성
+    const previewUrl = URL.createObjectURL(file)
+    setSelectedImage(file)
+    setImagePreviewUrl(previewUrl)
+    
+    // input 초기화 (같은 파일 다시 선택 가능하도록)
+    e.target.value = ''
+  }
+  
+  // 이미지 선택 취소
+  const handleImageRemove = () => {
+    if (imagePreviewUrl) {
+      URL.revokeObjectURL(imagePreviewUrl)
+    }
+    setSelectedImage(null)
+    setImagePreviewUrl(null)
   }
 
   // 세션 선택 시 메시지 불러오기
@@ -517,10 +590,19 @@ export default function ChatPage() {
       }
     }
 
+    // 이미지 처리: 현재 선택된 이미지와 미리보기 URL 저장
+    const currentImage = selectedImage
+    const currentImagePreviewUrl = imagePreviewUrl
+    
+    // 이미지 상태 초기화 (전송 시작)
+    setSelectedImage(null)
+    setImagePreviewUrl(null)
+    
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: userInput,
+      text: currentImage ? `[이미지 첨부] ${userInput}` : userInput,
       isUser: true,
+      imageUrl: currentImagePreviewUrl || undefined,  // 이미지 미리보기 URL 포함
     }
 
     // 스트리밍 봇 메시지 ID (실시간 업데이트용)
@@ -570,145 +652,142 @@ export default function ChatPage() {
       let firstLogReceived = false
       let firstChunkReceived = false
       
-      await sendMessageStream(
-        userInput,
-        currentSessionIdToUse || sessionId,
-        // 로그 콜백
-        (log: string) => {
-          // 취소된 경우 콜백 실행 안 함
-          if (abortController.signal.aborted) return
-          
-          // 타이밍: 첫 로그 수신
-          if (!firstLogReceived) {
-            timingLogger.mark('first_log_received')
-            firstLogReceived = true
-          }
-          
-          // 백엔드 단계 감지
-          timingLogger.markFromLog(log)
-          
-          setAgentData((prev) => ({
-            ...prev,
-            logs: [...prev.logs, log]
-          }))
-          // 메인 채팅 영역에도 현재 로그 표시 (사용자 친화적으로 변환)
-          const formattedLog = formatLogMessage(log)
-          setCurrentLog(formattedLog)
-        },
-        // 결과 콜백
-        async (response: ChatResponse) => {
-          // 취소된 경우 콜백 실행 안 함
-          if (abortController.signal.aborted) return
-          
-          // 타이밍: 결과 수신
-          timingLogger.mark('result_received')
-
-          // 타이밍: 파싱 완료
-          timingLogger.mark('parse_complete')
-
-          // 스트리밍 봇 메시지를 최종 메시지로 업데이트 (sources, used_chunks 등 추가)
-          setMessages((prev) => prev.map(msg => 
-            msg.id === streamingBotMessageId
-              ? {
-                  ...msg,
-                  text: response.response || msg.text,  // 최종 응답으로 교체 (또는 스트리밍된 텍스트 유지)
-                  sources: response.sources,
-                  source_urls: response.source_urls,
-                  used_chunks: response.used_chunks,
-                  isStreaming: false,  // 스트리밍 완료
-                }
-              : msg
-          ))
-          console.log('✅ 스트리밍 완료:', response.response?.substring(0, 50) || '(스트리밍 텍스트)')
-
-          // 타이밍: 렌더링 완료
-          timingLogger.mark('render_complete')
-
-          // 스트리밍 종료 표시 (메시지 추가 직후)
-          isStreamingRef.current = false
-
-          // 첫 메시지인 경우 세션 제목 업데이트 (로그인한 경우)
-          if (isAuthenticated && currentSessionIdToUse) {
-            const userMessageCount = messages.filter(m => m.isUser).length + 1 // +1은 방금 추가한 메시지
-            if (userMessageCount === 1 && userInput) {
-              const title = userInput.substring(0, 50)
-              updateSessionTitle(currentSessionIdToUse, title)
-            }
-          }
-
-          // Agent 디버그 데이터 업데이트
-          setAgentData((prev) => ({
-            ...prev,
-            orchestrationResult: response.orchestration_result || null,
-            subAgentResults: response.sub_agent_results || null,
-            finalAnswer: response.response,
-            rawAnswer: response.raw_answer || null  // ✅ 원본 답변 추가
-          }))
-          
-          // 백엔드 타이밍 정보 저장
-          if (response.metadata?.timing) {
-            timingLogger.setBackendTiming(response.metadata.timing)
-          }
-          
-          // 타이밍: 저장 완료 & 전체 완료
-          timingLogger.mark('save_complete')
-          timingLogger.mark('total_complete')
-          
-          // 타이밍 로그 저장 및 출력
-          timingLogger.printSummary()
-          timingLogger.logToLocalStorage()
-          
-          // 실행 로그 저장 (모든 사용자)
-          const elapsedMs = response.metadata?.timing?.total_time 
-            ? response.metadata.timing.total_time * 1000 
-            : Date.now() - parseInt(userMessage.id)
-          
-          void addLog({
-            conversationHistory: messages.map(m => `${m.isUser ? 'User' : 'Bot'}: ${m.text.substring(0, 100)}`),
-            userQuestion: userInput,
-            routerOutput: response.router_output || null,
-            functionResult: response.function_results || null,
-            finalAnswer: response.response,
-            elapsedTime: elapsedMs,
-            timing: response.metadata?.timing || undefined,
-          })
-        },
-        // 에러 콜백
-        (error: string) => {
-          // 취소된 경우 에러 메시지 표시 안 함
-          if (abortController.signal.aborted) return
-          
-          // 스트리밍 봇 메시지를 에러 메시지로 교체
-          setMessages((prev) => prev.map(msg => 
-            msg.id === streamingBotMessageId
-              ? { ...msg, text: error }
-              : msg
-          ))
-        },
-        abortController.signal,
-        // onChunk 콜백 - 실시간 텍스트 스트리밍
-        (chunk: string) => {
-          // 취소된 경우 콜백 실행 안 함
-          if (abortController.signal.aborted) return
-          
-          // 첫 청크가 오면 생각하는 과정 즉시 숨김
-          if (!firstChunkReceived) {
-            firstChunkReceived = true
-            setCurrentLog('')
-            setIsLoading(false)
-          }
-          
-          // 스트리밍 봇 메시지에 청크 추가
-          setMessages((prev) => prev.map(msg => 
-            msg.id === streamingBotMessageId
-              ? { ...msg, text: msg.text + chunk }
-              : msg
-          ))
-          
-          // 자동 스크롤
-          scrollToBottom()
+      // 공통 콜백 함수들
+      const onLogCallback = (log: string) => {
+        if (abortController.signal.aborted) return
+        
+        if (!firstLogReceived) {
+          timingLogger.mark('first_log_received')
+          firstLogReceived = true
         }
-      )
+        
+        timingLogger.markFromLog(log)
+        
+        setAgentData((prev) => ({
+          ...prev,
+          logs: [...prev.logs, log]
+        }))
+        const formattedLog = formatLogMessage(log)
+        setCurrentLog(formattedLog)
+      }
+      
+      const onResultCallback = async (response: ChatResponse) => {
+        if (abortController.signal.aborted) return
+        
+        timingLogger.mark('result_received')
+        timingLogger.mark('parse_complete')
+
+        setMessages((prev) => prev.map(msg => 
+          msg.id === streamingBotMessageId
+            ? {
+                ...msg,
+                text: response.response || msg.text,
+                sources: response.sources,
+                source_urls: response.source_urls,
+                used_chunks: response.used_chunks,
+                isStreaming: false,
+              }
+            : msg
+        ))
+        console.log('✅ 스트리밍 완료:', response.response?.substring(0, 50) || '(스트리밍 텍스트)')
+
+        timingLogger.mark('render_complete')
+        isStreamingRef.current = false
+
+        if (isAuthenticated && currentSessionIdToUse) {
+          const userMessageCount = messages.filter(m => m.isUser).length + 1
+          if (userMessageCount === 1 && userInput) {
+            const title = userInput.substring(0, 50)
+            updateSessionTitle(currentSessionIdToUse, title)
+          }
+        }
+
+        setAgentData((prev) => ({
+          ...prev,
+          orchestrationResult: response.orchestration_result || null,
+          subAgentResults: response.sub_agent_results || null,
+          finalAnswer: response.response,
+          rawAnswer: response.raw_answer || null
+        }))
+        
+        if (response.metadata?.timing) {
+          timingLogger.setBackendTiming(response.metadata.timing)
+        }
+        
+        timingLogger.mark('save_complete')
+        timingLogger.mark('total_complete')
+        
+        timingLogger.printSummary()
+        timingLogger.logToLocalStorage()
+        
+        const elapsedMs = response.metadata?.timing?.total_time 
+          ? response.metadata.timing.total_time * 1000 
+          : Date.now() - parseInt(userMessage.id)
+        
+        void addLog({
+          conversationHistory: messages.map(m => `${m.isUser ? 'User' : 'Bot'}: ${m.text.substring(0, 100)}`),
+          userQuestion: userInput,
+          routerOutput: response.router_output || null,
+          functionResult: response.function_results || null,
+          finalAnswer: response.response,
+          elapsedTime: elapsedMs,
+          timing: response.metadata?.timing || undefined,
+        })
+      }
+      
+      const onErrorCallback = (error: string) => {
+        if (abortController.signal.aborted) return
+        
+        setMessages((prev) => prev.map(msg => 
+          msg.id === streamingBotMessageId
+            ? { ...msg, text: error }
+            : msg
+        ))
+      }
+      
+      const onChunkCallback = (chunk: string) => {
+        if (abortController.signal.aborted) return
+        
+        if (!firstChunkReceived) {
+          firstChunkReceived = true
+          setCurrentLog('')
+          setIsLoading(false)
+        }
+        
+        setMessages((prev) => prev.map(msg => 
+          msg.id === streamingBotMessageId
+            ? { ...msg, text: msg.text + chunk }
+            : msg
+        ))
+        
+        scrollToBottom()
+      }
+      
+      // 이미지가 있는 경우 이미지 처리 API 호출
+      if (currentImage) {
+        console.log('🖼️ 이미지와 함께 메시지 전송:', currentImage.name)
+        await sendMessageStreamWithImage(
+          userInput,
+          currentSessionIdToUse || sessionId,
+          currentImage,
+          onLogCallback,
+          onResultCallback,
+          onErrorCallback,
+          abortController.signal,
+          onChunkCallback
+        )
+      } else {
+        // 일반 텍스트 메시지
+        await sendMessageStream(
+          userInput,
+          currentSessionIdToUse || sessionId,
+          onLogCallback,
+          onResultCallback,
+          onErrorCallback,
+          abortController.signal,
+          onChunkCallback
+        )
+      }
     } catch (error: any) {
       // AbortError는 무시 (사용자가 새 채팅을 시작한 경우)
       if (error?.name === 'AbortError') {
@@ -805,6 +884,15 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-screen">
+      {/* 숨겨진 이미지 파일 input (전역) */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/gif,image/webp"
+        onChange={handleImageSelect}
+        className="hidden"
+      />
+      
       {/* Agent 디버그 패널 (좌측) */}
       <AgentPanel
         orchestrationResult={agentData.orchestrationResult}
@@ -824,7 +912,7 @@ export default function ChatPage() {
           className={`fixed top-0 left-0 h-full w-80 z-50 transform transition-transform duration-300 ease-in-out ${
             isSideNavOpen ? 'translate-x-0' : '-translate-x-full'
           } sm:fixed sm:z-40`}
-          style={{ backgroundColor: '#F1F5FB' }}
+          style={{ backgroundColor: '#F1F5FB', fontFamily: "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif", fontWeight: 600 }}
         >
         <div className="h-full flex flex-col">
           {/* 사이드바 토글 버튼 (왼쪽 상단) */}
@@ -881,7 +969,7 @@ export default function ChatPage() {
             
             {/* 드롭다운 메뉴 */}
             {isAnnouncementDropdownOpen && (
-              <div className="mt-2 ml-4 space-y-1 border-l-2 border-gray-200 pl-4 max-h-96 overflow-y-auto">
+              <div className="mt-2 ml-4 space-y-1 border-l-2 border-gray-200 pl-4 max-h-96 overflow-y-auto" style={{ fontFamily: "'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif" }}>
                 {announcements.length === 0 ? (
                   <p className="text-xs text-gray-500 py-2">등록된 공지사항이 없습니다.</p>
                 ) : (
@@ -1170,7 +1258,7 @@ export default function ChatPage() {
                 </p>
                 <button
                   onClick={() => setIsAuthModalOpen(true)}
-                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:bg-blue-800 transition-colors font-medium text-xs sm:text-sm"
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-400 text-white rounded-lg hover:bg-blue-500 active:bg-blue-600 transition-colors font-medium text-xs sm:text-sm"
                 >
                   회원가입 또는 로그인
                 </button>
@@ -1210,7 +1298,7 @@ export default function ChatPage() {
               <img
                 src="/로고.png"
                 alt="UniZ Logo"
-                className="h-8 cursor-pointer"
+                className="h-12 cursor-pointer"
                 onClick={handleNewChat}
               />
             </div>
@@ -1254,7 +1342,7 @@ export default function ChatPage() {
               <img
                 src="/로고.png"
                 alt="UniZ Logo"
-                className="h-10 cursor-pointer"
+                className="h-14 cursor-pointer"
                 onClick={handleNewChat}
               />
             </div>
@@ -1380,28 +1468,28 @@ export default function ChatPage() {
 
         {/* 채팅 영역 */}
         <div className="flex-1 overflow-y-auto px-[17px] sm:px-6 py-4 pb-16">
-          <div className="max-w-[800px] mx-auto">
+          <div className="max-w-5xl mx-auto">
             {messages.length === 0 ? (
               <div className="min-h-[calc(100vh-150px)] flex flex-col items-center justify-between sm:justify-center">
                 {/* 상단 영역: 인사말 + 애니메이션 (모바일) / 인사말 + 채팅창 + 애니메이션 (데스크톱) */}
                 <div className="w-full flex-1 flex flex-col justify-center sm:flex-none" style={{ marginTop: '32px' }}>
-                  {/* 인사말 */}
+                  {/* 인사말 - 동적 애니메이션 */}
                   <div className="text-center mb-6 sm:mb-6">
-                    <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3 sm:mb-4">
+                    <h1 
+                      className="text-2xl sm:text-3xl font-bold text-gray-600 animate-fade-in-up leading-tight"
+                      style={{ animationDelay: '0.1s', animationFillMode: 'both' }}
+                    >
                       {isAuthenticated && user?.name ? (
-                        <>안녕하세요 {user.name}님! 👋</>
+                        <><span className="text-blue-500">{user.name}</span>님 안녕하세요, 무엇이 궁금하신가요?</>
                       ) : (
-                        <>안녕하세요! 👋</>
+                        <>안녕하세요, 무엇이 궁금하신가요?</>
                       )}
                     </h1>
-                    <p className="text-base sm:text-lg text-gray-600">
-                      무엇을 도와드릴까요?
-                    </p>
                   </div>
 
                   {/* 데스크톱: 채팅창 (모바일에서 숨김) */}
                   <div className="hidden sm:flex w-full items-center gap-2 mb-16">
-                    <div className="flex-1 relative">
+                    <div className="flex-1 bg-gray-50 rounded-3xl focus-within:ring-2 focus-within:ring-blue-500">
                       <textarea
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
@@ -1411,22 +1499,110 @@ export default function ChatPage() {
                             handleSend()
                           }
                         }}
-                        placeholder="유니로드에게 무엇이든 물어보세요"
+                        placeholder={selectedCategory ? categoryMessages[selectedCategory] : "유니로드에게 무엇이든 물어보세요"}
                         disabled={isLoading}
                         rows={1}
-                        className="w-full px-4 py-5 text-base bg-gray-50 rounded-3xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 min-h-[64px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
-                        style={{ height: 'auto', minHeight: '64px' }}
+                        className="w-full px-5 pt-5 pb-2 text-base bg-transparent rounded-t-3xl focus:outline-none disabled:bg-gray-100 min-h-[50px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                        style={{ height: 'auto', minHeight: '50px' }}
                         onInput={(e) => {
                           const target = e.target as HTMLTextAreaElement
                           target.style.height = 'auto'
                           target.style.height = Math.min(target.scrollHeight, 200) + 'px'
                         }}
                       />
+                      {/* 선택된 카테고리 태그 + 업로드 메뉴 (검색창 안) */}
+                      <div className="flex items-center gap-3 px-5 pb-4">
+                        {/* + 버튼 및 드롭다운 메뉴 */}
+                        <div className="relative group" ref={uploadMenuRef}>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              setIsUploadMenuOpen(!isUploadMenuOpen)
+                            }}
+                            disabled={isLoading}
+                            className="w-8 h-8 rounded-full border border-gray-300 flex items-center justify-center text-gray-500 hover:bg-gray-100 hover:border-gray-400 transition-colors disabled:opacity-50"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                            </svg>
+                          </button>
+                          {/* 커스텀 툴팁 */}
+                          {!isUploadMenuOpen && (
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-gray-800 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                              성적표를 넣어보세요
+                              <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
+                            </div>
+                          )}
+                          {/* 드롭다운 메뉴 */}
+                          {isUploadMenuOpen && (
+                            <div className="absolute bottom-full left-0 mb-2 w-48 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-50">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  imageInputRef.current?.click()
+                                  setIsUploadMenuOpen(false)
+                                }}
+                                className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
+                              >
+                                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                성적표 이미지 넣기
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  // TODO: 성적표 데이터 입력 모달 열기
+                                  setIsUploadMenuOpen(false)
+                                  alert('성적표 데이터 입력 기능은 준비 중입니다.')
+                                }}
+                                className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
+                              >
+                                <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                성적표 데이터 입력
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        {/* 이미지 미리보기 (선택된 경우) */}
+                        {imagePreviewUrl && (
+                          <div className="relative flex items-center">
+                            <img src={imagePreviewUrl} alt="미리보기" className="h-8 w-8 object-cover rounded" />
+                            <button
+                              onClick={handleImageRemove}
+                              className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        )}
+                        {selectedCategory && (
+                          <span className="inline-flex items-center gap-1.5 text-blue-600 text-sm font-medium">
+                            {selectedCategory}
+                            <button
+                              onClick={() => setSelectedCategory(null)}
+                              className="hover:text-blue-800 transition-colors"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <button
                       onClick={() => handleSend()}
-                      disabled={isLoading || !input.trim()}
-                      className="flex-shrink-0 w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                      disabled={isLoading || (!input.trim() && !selectedImage)}
+                      className="flex-shrink-0 self-center w-14 h-14 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                     >
                       <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -1434,20 +1610,34 @@ export default function ChatPage() {
                     </button>
                   </div>
 
-                  {/* 롤링 플레이스홀더 애니메이션 */}
-                  <div className="w-full mt-4 sm:mt-0">
-                    <RollingPlaceholder
-                      onQuestionClick={(question) => {
-                        handleSend(question)
-                      }}
-                    />
-                  </div>
+                  {/* 롤링 플레이스홀더 - 카테고리 선택 시 검색창 바로 아래에 표시 */}
+                  {selectedCategory ? (
+                    <div className="w-full -mt-12 pl-5">
+                      <RollingPlaceholder
+                        onQuestionClick={(question) => {
+                          setInput(question)
+                        }}
+                        onCategorySelect={setSelectedCategory}
+                        selectedCategory={selectedCategory}
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-full mt-4 sm:mt-0 flex justify-center">
+                      <RollingPlaceholder
+                        onQuestionClick={(question) => {
+                          setInput(question)
+                        }}
+                        onCategorySelect={setSelectedCategory}
+                        selectedCategory={selectedCategory}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* 모바일 하단: 채팅창 (데스크톱에서 숨김) */}
                 <div className="sm:hidden w-full pb-0 mt-4">
                   <div className="w-full flex items-center gap-2">
-                    <div className="flex-1 relative">
+                    <div className="flex-1 bg-gray-50 rounded-3xl focus-within:ring-2 focus-within:ring-blue-500">
                       <textarea
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
@@ -1457,22 +1647,109 @@ export default function ChatPage() {
                             handleSend()
                           }
                         }}
-                        placeholder="유니로드에게 무엇이든 물어보세요"
+                        placeholder={selectedCategory ? categoryMessages[selectedCategory] : "유니로드에게 무엇이든 물어보세요"}
                         disabled={isLoading}
                         rows={1}
-                        className="w-full px-4 py-3 text-base bg-gray-50 rounded-3xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 min-h-[48px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
-                        style={{ height: 'auto' }}
+                        className="w-full px-4 pt-4 pb-1 text-base bg-transparent rounded-t-3xl focus:outline-none disabled:bg-gray-100 min-h-[40px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                        style={{ height: 'auto', minHeight: '40px' }}
                         onInput={(e) => {
                           const target = e.target as HTMLTextAreaElement
                           target.style.height = 'auto'
                           target.style.height = Math.min(target.scrollHeight, 200) + 'px'
                         }}
                       />
+                      {/* 선택된 카테고리 태그 + 업로드 메뉴 (검색창 안) */}
+                      <div className="flex items-center gap-2 px-4 pb-3">
+                        {/* + 버튼 및 드롭다운 메뉴 (모바일) */}
+                        <div className="relative group">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              setIsUploadMenuOpen(!isUploadMenuOpen)
+                            }}
+                            disabled={isLoading}
+                            className="w-7 h-7 rounded-full border border-gray-300 flex items-center justify-center text-gray-500 hover:bg-gray-100 hover:border-gray-400 transition-colors disabled:opacity-50"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                            </svg>
+                          </button>
+                          {/* 커스텀 툴팁 (모바일) */}
+                          {!isUploadMenuOpen && (
+                            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-2 py-1 bg-gray-800 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                              성적표를 넣어보세요
+                              <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
+                            </div>
+                          )}
+                          {/* 드롭다운 메뉴 (모바일) */}
+                          {isUploadMenuOpen && (
+                            <div className="absolute bottom-full left-0 mb-2 w-44 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-50">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  imageInputRef.current?.click()
+                                  setIsUploadMenuOpen(false)
+                                }}
+                                className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                              >
+                                <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                성적표 이미지 넣기
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  setIsUploadMenuOpen(false)
+                                  alert('성적표 데이터 입력 기능은 준비 중입니다.')
+                                }}
+                                className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                              >
+                                <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                                성적표 데이터 입력
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        {/* 이미지 미리보기 (선택된 경우) */}
+                        {imagePreviewUrl && (
+                          <div className="relative flex items-center">
+                            <img src={imagePreviewUrl} alt="미리보기" className="h-6 w-6 object-cover rounded" />
+                            <button
+                              onClick={handleImageRemove}
+                              className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-red-500 text-white rounded-full flex items-center justify-center text-[10px] hover:bg-red-600"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        )}
+                        {selectedCategory && (
+                          <span className="inline-flex items-center gap-1 text-blue-600 text-sm font-medium">
+                            {selectedCategory}
+                            <button
+                              onClick={() => setSelectedCategory(null)}
+                              className="hover:text-blue-800 transition-colors"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <button
                       onClick={() => handleSend()}
-                      disabled={isLoading || !input.trim()}
-                      className="flex-shrink-0 w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                      disabled={isLoading || (!input.trim() && !selectedImage)}
+                      className="flex-shrink-0 self-center w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -1505,6 +1782,7 @@ export default function ChatPage() {
                   userQuery={userQuery}
                   isStreaming={msg.isStreaming}
                   onRegenerate={!msg.isUser && userQuery && index === messages.length - 1 ? () => handleRegenerate(msg.id, userQuery) : undefined}
+                  imageUrl={msg.imageUrl}
                 />
               )
             })}
@@ -1523,43 +1801,125 @@ export default function ChatPage() {
         {messages.length > 0 && (
           <div className="bg-white sticky bottom-0 sm:bottom-[40px]">
             <div className="px-4 sm:px-6 py-2">
-              <div className="max-w-[800px] mx-auto flex items-center gap-2">
-                {/* 입력 필드 */}
-                <div className="flex-1 relative">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        handleSend()
-                      }
-                    }}
-                    placeholder="유니로드에게 무엇이든 물어보세요"
-                disabled={isLoading}
-                    rows={1}
-                    className="w-full px-4 py-3 sm:py-5 text-base bg-gray-50 rounded-3xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 min-h-[48px] sm:min-h-[64px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
-                    style={{
-                      height: 'auto',
-                    }}
-                    onInput={(e) => {
-                      const target = e.target as HTMLTextAreaElement
-                      target.style.height = 'auto'
-                      target.style.height = Math.min(target.scrollHeight, 200) + 'px'
-                    }}
-              />
-                </div>
+              <div className="max-w-5xl mx-auto">
+                {/* 이미지 미리보기 */}
+                {imagePreviewUrl && (
+                  <div className="mb-2 relative inline-block">
+                    <img 
+                      src={imagePreviewUrl} 
+                      alt="업로드할 이미지" 
+                      className="max-h-24 rounded-lg border border-gray-200"
+                    />
+                    <button
+                      onClick={handleImageRemove}
+                      className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center hover:bg-red-600 transition-colors shadow-md"
+                      title="이미지 제거"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                )}
                 
-                {/* 전송 버튼 */}
-              <button
-                onClick={() => handleSend()}
-                disabled={isLoading || !input.trim()}
-                  className="flex-shrink-0 w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-              >
-                  <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                  </svg>
-              </button>
+                <div className="flex items-center gap-2">
+                  {/* + 버튼 및 드롭다운 메뉴 (채팅 중) */}
+                  <div className="relative flex-shrink-0 group">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setIsUploadMenuOpen(!isUploadMenuOpen)
+                      }}
+                      disabled={isLoading}
+                      className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border border-gray-300 flex items-center justify-center text-gray-500 hover:bg-gray-100 hover:border-gray-400 active:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                      </svg>
+                    </button>
+                    {/* 커스텀 툴팁 (채팅 중) */}
+                    {!isUploadMenuOpen && (
+                      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-gray-800 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                        성적표를 넣어보세요
+                        <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-gray-800"></div>
+                      </div>
+                    )}
+                    {/* 드롭다운 메뉴 (채팅 중) */}
+                    {isUploadMenuOpen && (
+                      <div className="absolute bottom-full left-0 mb-2 w-48 bg-white rounded-xl shadow-lg border border-gray-200 py-2 z-50">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            imageInputRef.current?.click()
+                            setIsUploadMenuOpen(false)
+                          }}
+                          className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
+                        >
+                          <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                          </svg>
+                          성적표 이미지 넣기
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setIsUploadMenuOpen(false)
+                            alert('성적표 데이터 입력 기능은 준비 중입니다.')
+                          }}
+                          className="w-full px-4 py-2.5 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-3"
+                        >
+                          <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                          </svg>
+                          성적표 데이터 입력
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* 입력 필드 */}
+                  <div className="flex-1 relative">
+                    <textarea
+                      value={input}
+                      onChange={(e) => setInput(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault()
+                          handleSend()
+                        }
+                      }}
+                      placeholder={selectedImage ? "이미지에 대해 질문하세요..." : "유니로드에게 무엇이든 물어보세요"}
+                      disabled={isLoading}
+                      rows={1}
+                      className="w-full px-4 py-3 sm:py-5 text-base bg-gray-50 rounded-3xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 min-h-[48px] sm:min-h-[64px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                      style={{
+                        height: 'auto',
+                      }}
+                      onInput={(e) => {
+                        const target = e.target as HTMLTextAreaElement
+                        target.style.height = 'auto'
+                        target.style.height = Math.min(target.scrollHeight, 200) + 'px'
+                      }}
+                    />
+                  </div>
+                  
+                  {/* 전송 버튼 */}
+                  <button
+                    onClick={() => handleSend()}
+                    disabled={isLoading || (!input.trim() && !selectedImage)}
+                    className="flex-shrink-0 w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

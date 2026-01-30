@@ -2,14 +2,16 @@
 채팅 API 라우터 (멀티에이전트 기반)
 전체 파이프라인: Orchestration Agent → Sub Agents → Final Agent → 최종 답변
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, File, UploadFile, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 import asyncio
 import json
+import base64
 
 from services.supabase_client import supabase_service
+from services.gemini_service import gemini_service
 from services.multi_agent import (
     run_orchestration_agent,
     run_orchestration_agent_stream,
@@ -433,6 +435,218 @@ async def chat(request: ChatRequest):
         import traceback
         traceback.print_exc()
         raise HTTPException(500, f"채팅 처리 중 오류가 발생했습니다: {str(e)}")
+
+
+# 지원하는 이미지 MIME 타입
+ALLOWED_IMAGE_TYPES = {
+    "image/jpeg": "jpeg",
+    "image/png": "png", 
+    "image/gif": "gif",
+    "image/webp": "webp"
+}
+MAX_IMAGE_SIZE_MB = 10
+MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024
+
+
+@router.post("/v2/stream/with-image")
+async def chat_stream_v2_with_image(
+    message: str = Form(...),
+    session_id: str = Form(default="default"),
+    image: UploadFile = File(...)
+):
+    """
+    이미지와 함께 스트리밍 채팅 - 이미지 분석 후 멀티에이전트 파이프라인으로 전달
+    
+    흐름:
+    1. Gemini로 이미지 분석 (설명/OCR)
+    2. 분석 결과를 사용자 메시지에 포함
+    3. 기존 멀티에이전트 파이프라인으로 답변 생성
+    
+    SSE (Server-Sent Events) 형식:
+    - {"type": "status", "step": "image_analysis", "message": "이미지 분석 중..."}
+    - {"type": "status", "step": "...", "message": "..."}
+    - {"type": "chunk", "text": "응답 텍스트 조각"}
+    - {"type": "done", "response": "전체 응답", "image_analysis": "이미지 분석 결과"}
+    """
+    import time
+    
+    # 이미지 검증
+    if image.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            400, 
+            f"지원하지 않는 이미지 형식입니다. 지원 형식: {', '.join(ALLOWED_IMAGE_TYPES.keys())}"
+        )
+    
+    # 이미지 데이터 읽기
+    image_data = await image.read()
+    
+    if len(image_data) > MAX_IMAGE_SIZE_BYTES:
+        raise HTTPException(400, f"이미지 크기는 {MAX_IMAGE_SIZE_MB}MB를 초과할 수 없습니다.")
+    
+    def generate():
+        pipeline_start = time.time()
+        print(f"\n🔵 [STREAM_V2_IMAGE_START] {session_id}:{message[:30]}")
+        print(f"🖼️ 이미지: {image.filename}, {image.content_type}, {len(image_data)} bytes")
+        
+        # 세션별 히스토리 로드
+        if session_id not in conversation_sessions:
+            conversation_sessions[session_id] = []
+        history = conversation_sessions[session_id][-20:]
+        
+        full_response = ""
+        image_analysis = ""
+        timing = {}
+        function_results = {}
+        router_output = {}
+        sources = []
+        source_urls = []
+        used_chunks = []
+        
+        try:
+            # 1단계: 이미지 분석 시작 상태 전송
+            yield f"data: {json.dumps({'type': 'status', 'step': 'image_analysis', 'message': '이미지를 분석하는 중...'}, ensure_ascii=False)}\n\n"
+            
+            # 2단계: Gemini로 이미지 분석 (설명/OCR만 수행, 답변 생성 X)
+            image_prompt = """이 이미지를 자세히 분석해주세요. 다음 내용을 포함해주세요:
+
+1. 이미지에 보이는 내용을 상세히 설명
+2. 텍스트가 있다면 모두 읽어서 정확히 기록 (OCR)
+3. 표, 그래프, 숫자 등이 있다면 구조화된 형태로 정리
+4. 문서 유형 (성적표, 모집요강, 안내문 등) 파악
+
+분석 결과:"""
+            
+            # 동기적으로 이미지 분석 실행 (generator 내부이므로)
+            import asyncio
+            loop = asyncio.new_event_loop()
+            try:
+                image_analysis = loop.run_until_complete(
+                    gemini_service.generate_with_image(
+                        prompt=image_prompt,
+                        image_data=image_data,
+                        mime_type=image.content_type
+                    )
+                )
+                print(f"✅ 이미지 분석 완료: {len(image_analysis)}자")
+            except Exception as e:
+                print(f"❌ 이미지 분석 실패: {e}")
+                image_analysis = "이미지를 분석할 수 없습니다."
+            finally:
+                loop.close()
+            
+            # 3단계: 이미지 분석 결과를 포함한 메시지 구성
+            enhanced_message = f"""[사용자가 이미지를 첨부했습니다]
+
+=== 이미지 분석 결과 ===
+{image_analysis}
+=== 이미지 분석 끝 ===
+
+사용자 질문: {message}
+
+위 이미지 분석 결과를 참고하여 사용자의 질문에 답변해주세요."""
+            
+            yield f"data: {json.dumps({'type': 'status', 'step': 'agent_start', 'message': '답변을 생성하는 중...'}, ensure_ascii=False)}\n\n"
+            
+            # 4단계: 기존 멀티에이전트 파이프라인 실행
+            for event in run_orchestration_agent_stream(enhanced_message, history):
+                event_type = event.get("type")
+                
+                if event_type == "status":
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                
+                elif event_type == "chunk":
+                    full_response += event.get("text", "")
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                
+                elif event_type == "done":
+                    timing = event.get("timing", {})
+                    function_results = event.get("function_results", {})
+                    router_output = event.get("router_output", {})
+                    full_response = event.get("response", full_response)
+                    sources = event.get("sources", [])
+                    source_urls = event.get("source_urls", [])
+                    used_chunks = event.get("used_chunks", [])
+                
+                elif event_type == "error":
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    return
+            
+            # 대화 이력에 추가 (이미지 포함 메시지로 표시)
+            user_content = f"[이미지 첨부] {message}"
+            history.append({"role": "user", "content": user_content})
+            history.append({"role": "assistant", "content": full_response})
+            conversation_sessions[session_id] = history[-20:]
+            
+            pipeline_time = time.time() - pipeline_start
+            
+            # 메시지 저장 (세션 기반 채팅 내역)
+            try:
+                session_check = supabase_service.client.table("chat_sessions")\
+                    .select("id")\
+                    .eq("id", session_id)\
+                    .execute()
+                
+                if session_check.data:
+                    print(f"✅ 세션 존재 확인, 메시지 저장 중... ({session_id})")
+                    
+                    # 사용자 메시지 저장 (이미지 포함 표시)
+                    supabase_service.client.table("chat_messages").insert({
+                        "session_id": session_id,
+                        "role": "user",
+                        "content": user_content
+                    }).execute()
+                    
+                    # AI 응답 메시지 저장
+                    supabase_service.client.table("chat_messages").insert({
+                        "session_id": session_id,
+                        "role": "assistant",
+                        "content": full_response
+                    }).execute()
+                    
+                    # 세션 updated_at 갱신
+                    supabase_service.client.table("chat_sessions")\
+                        .update({"updated_at": "now()"})\
+                        .eq("id", session_id)\
+                        .execute()
+                    
+                    print(f"💾 메시지 저장 완료: {session_id}")
+                else:
+                    print(f"⚠️ 세션 없음, 메시지 저장 건너뜀: {session_id}")
+            except Exception as e:
+                print(f"❌ 메시지 저장 실패: {e}")
+            
+            # 완료 이벤트 전송 (멀티에이전트 파이프라인 결과 포함)
+            done_event = {
+                "type": "done",
+                "response": full_response,
+                "image_analysis": image_analysis,
+                "timing": timing,
+                "pipeline_time": round(pipeline_time * 1000),
+                "router_output": router_output,
+                "function_results": function_results,
+                "sources": sources,
+                "source_urls": source_urls,
+                "used_chunks": used_chunks
+            }
+            yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
+            
+            print(f"🟢 [STREAM_V2_IMAGE_END] 총 {pipeline_time:.2f}초, {len(full_response)}자")
+            
+        except Exception as e:
+            print(f"❌ 이미지 채팅 오류: {e}")
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+    
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"
+        }
+    )
 
 
 @router.post("/v2/stream")

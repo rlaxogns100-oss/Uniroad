@@ -8,9 +8,10 @@ interface ChatMessageProps {
   userQuery?: string  // AI 답변일 때 연결된 사용자 질문
   isStreaming?: boolean  // 스트리밍 중인지 여부
   onRegenerate?: () => void  // 재생성 콜백
+  imageUrl?: string  // 이미지 첨부 시 미리보기 URL
 }
 
-export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming, onRegenerate }: ChatMessageProps) {
+export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming, onRegenerate, imageUrl }: ChatMessageProps) {
   const [showFactCheck, setShowFactCheck] = useState(false)
   const [showGlow, setShowGlow] = useState(false)
   const [liked, setLiked] = useState<boolean | null>(null)  // null: 선택 안함, true: 좋아요, false: 싫어요
@@ -391,12 +392,29 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
     return <div className="whitespace-pre-wrap">{wrapBulletLines(parts.length > 0 ? parts : parseTitles(cleanedMessage))}</div>
   }
 
+  // 메시지에서 [이미지 첨부] 태그 제거
+  const getDisplayMessage = () => {
+    return message.replace(/^\[이미지 첨부\]\s*/, '')
+  }
+
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       {isUser ? (
         // 사용자 메시지: 말풍선 스타일 유지
-        <div className="max-w-[70%] rounded-2xl px-4 py-3 text-gray-800" style={{ backgroundColor: '#F1F5FB' }}>
-          {renderMessage()}
+        <div className="max-w-[70%]">
+          {/* 이미지가 있으면 이미지 먼저 표시 */}
+          {imageUrl && (
+            <div className="mb-2 flex justify-end">
+              <img 
+                src={imageUrl} 
+                alt="첨부된 이미지" 
+                className="max-w-full max-h-64 rounded-lg border border-gray-200 shadow-sm"
+              />
+            </div>
+          )}
+          <div className="rounded-2xl px-4 py-3 text-gray-800" style={{ backgroundColor: '#F1F5FB' }}>
+            <div className="whitespace-pre-wrap">{getDisplayMessage()}</div>
+          </div>
         </div>
       ) : (
         // AI 답변: Gemini 스타일 (말풍선 없이, 폰트/간격 조정)
