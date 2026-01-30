@@ -1384,7 +1384,7 @@ export default function ChatPage() {
             {messages.length === 0 ? (
               <div className="min-h-[calc(100vh-150px)] flex flex-col items-center justify-between sm:justify-center">
                 {/* 상단 영역: 인사말 + 애니메이션 (모바일) / 인사말 + 채팅창 + 애니메이션 (데스크톱) */}
-                <div className="w-full flex-1 flex flex-col justify-center sm:flex-none" style={{ marginTop: '32px' }}>
+                <div className="w-full flex flex-col justify-center sm:flex-none" style={{ marginTop: '32px' }}>
                   {/* 인사말 */}
                   <div className="text-center mb-6 sm:mb-6">
                     <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3 sm:mb-4">
@@ -1445,7 +1445,7 @@ export default function ChatPage() {
                 </div>
 
                 {/* 모바일 하단: 채팅창 (데스크톱에서 숨김) */}
-                <div className="sm:hidden w-full pb-0 mt-4">
+                <div className="sm:hidden w-full mt-auto pb-2">
                   <div className="w-full flex items-center gap-2">
                     <div className="flex-1 relative">
                       <textarea
