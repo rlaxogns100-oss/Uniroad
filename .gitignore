@@ -16,6 +16,7 @@ backend/**/*.pyc
 backend/**/*.pyo
 backend/**/*.pyd
 backend/logs/
+logs/
 *.log
 
 # Token usage tracking

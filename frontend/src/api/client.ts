@@ -33,6 +33,21 @@ export interface OrchestrationResult {
   }>
   notes?: string
   error?: string
+  // Router Agent 결과
+  router_result?: {
+    function_calls?: Array<{
+      function: string
+      params: Record<string, any>
+    }>
+    raw_response?: string
+    tokens?: {
+      in: number
+      out: number
+      total: number
+    }
+  }
+  // Function 실행 결과
+  function_results?: Record<string, any>
 }
 
 export interface SubAgentResult {
@@ -65,6 +80,8 @@ export interface ChatResponse {
   source_urls: string[]
   used_chunks?: UsedChunk[]  // 답변에 사용된 청크
   // 멀티에이전트 디버그 데이터
+  router_output?: Record<string, any>  // Router 출력 (최상위)
+  function_results?: Record<string, any>  // Function 결과 (최상위)
   orchestration_result?: OrchestrationResult
   sub_agent_results?: Record<string, SubAgentResult>
   metadata?: Record<string, any>
@@ -102,17 +119,21 @@ export interface Agent {
   description: string
 }
 
-// 채팅 API (스트리밍)
+// 채팅 API (Router Agent) - 비스트리밍 폴백
 export const sendMessageStream = async (
   message: string,
   sessionId: string,
   onLog: (log: string) => void,
   onResult: (result: ChatResponse) => void,
   onError?: (error: string) => void,
-  abortSignal?: AbortSignal
+  abortSignal?: AbortSignal,
+  onChunk?: (chunk: string) => void  // 실시간 텍스트 청크 콜백
 ): Promise<void> => {
   try {
-    const response = await fetch('/api/chat/stream', {
+    onLog('🔍 질문을 분석하는 중...')
+    
+    // 실시간 스트리밍 엔드포인트 사용
+    const response = await fetch('/api/chat/v2/stream', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -131,46 +152,79 @@ export const sendMessageStream = async (
       return
     }
 
+    // SSE 스트리밍 처리
     const reader = response.body?.getReader()
-    const decoder = new TextDecoder()
-
     if (!reader) {
-      console.error('Reader를 사용할 수 없습니다')
-      onError?.('스트림을 읽을 수 없습니다')
+      onError?.('스트리밍을 지원하지 않습니다')
       return
     }
 
+    const decoder = new TextDecoder()
     let buffer = ''
-    
+    let fullResponse = ''
+    let finalData: any = null
+
     while (true) {
       const { done, value } = await reader.read()
-      
       if (done) break
-      
+
       buffer += decoder.decode(value, { stream: true })
       
-      // SSE 메시지 파싱
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-      
+      // SSE 메시지 파싱 (data: {...}\n\n 형식)
+      const lines = buffer.split('\n\n')
+      buffer = lines.pop() || ''  // 마지막 불완전한 청크는 버퍼에 유지
+
       for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const data = JSON.parse(line.slice(6))
-            
-            if (data.type === 'log') {
-              onLog(data.message)
-            } else if (data.type === 'result') {
-              onResult(data.data)
-            } else if (data.type === 'error') {
-              onError?.(data.data.response || '오류가 발생했습니다')
-            }
-          } catch (parseError) {
-            console.error('JSON 파싱 오류:', line, parseError)
+        if (!line.startsWith('data: ')) continue
+        
+        try {
+          const jsonStr = line.slice(6)  // 'data: ' 제거
+          const event = JSON.parse(jsonStr)
+          
+          if (event.type === 'status') {
+            // 상태 업데이트 - detail 정보를 JSON으로 직렬화하여 전달
+            const logMessage = event.detail 
+              ? `${event.message || ''}|||${JSON.stringify({ step: event.step, detail: event.detail })}`
+              : event.message || ''
+            onLog(logMessage)
+          } else if (event.type === 'chunk') {
+            // 텍스트 청크 - 실시간으로 화면에 표시
+            const chunkText = event.text || ''
+            fullResponse += chunkText
+            onChunk?.(chunkText)
+          } else if (event.type === 'done') {
+            // 완료
+            finalData = event
+            onLog('✨ 답변 완료!')
+          } else if (event.type === 'error') {
+            onError?.(event.message || '알 수 없는 오류')
+            return
           }
+        } catch (e) {
+          console.warn('SSE 파싱 오류:', e, line)
         }
       }
     }
+
+    // 최종 결과 전달 (출처 정보 포함)
+    const chatResponse: ChatResponse = {
+      response: finalData?.response || fullResponse,
+      raw_answer: finalData?.response || fullResponse,
+      sources: finalData?.sources || [],
+      source_urls: finalData?.source_urls || [],
+      used_chunks: finalData?.used_chunks || [],
+      router_output: finalData?.router_output,
+      function_results: finalData?.function_results,
+      orchestration_result: null,
+      sub_agent_results: null,
+      metadata: {
+        timing: finalData?.timing,
+        pipeline_time: finalData?.pipeline_time
+      }
+    }
+    
+    onResult(chatResponse)
+    
   } catch (error: any) {
     // AbortError는 무시
     if (error?.name === 'AbortError') {
@@ -178,7 +232,122 @@ export const sendMessageStream = async (
       return
     }
     
-    console.error('스트리밍 오류:', error)
+    console.error('채팅 오류:', error)
+    onError?.(error?.message || '네트워크 오류가 발생했습니다')
+  }
+}
+
+// 이미지와 함께 채팅 API (스트리밍)
+export const sendMessageStreamWithImage = async (
+  message: string,
+  sessionId: string,
+  image: File,
+  onLog: (log: string) => void,
+  onResult: (result: ChatResponse) => void,
+  onError?: (error: string) => void,
+  abortSignal?: AbortSignal,
+  onChunk?: (chunk: string) => void
+): Promise<void> => {
+  try {
+    onLog('🖼️ 이미지를 분석하는 중...')
+    
+    // FormData로 이미지와 메시지 전송
+    const formData = new FormData()
+    formData.append('message', message)
+    formData.append('session_id', sessionId)
+    formData.append('image', image)
+    
+    const response = await fetch('/api/chat/v2/stream/with-image', {
+      method: 'POST',
+      body: formData,
+      signal: abortSignal,
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('API 에러:', response.status, errorText)
+      onError?.(`서버 오류 (${response.status}): ${errorText}`)
+      return
+    }
+
+    // SSE 스트리밍 처리
+    const reader = response.body?.getReader()
+    if (!reader) {
+      onError?.('스트리밍을 지원하지 않습니다')
+      return
+    }
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let fullResponse = ''
+    let finalData: any = null
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      
+      // SSE 메시지 파싱 (data: {...}\n\n 형식)
+      const lines = buffer.split('\n\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        
+        try {
+          const jsonStr = line.slice(6)
+          const event = JSON.parse(jsonStr)
+          
+          if (event.type === 'status') {
+            // 상태 업데이트 - detail 정보를 JSON으로 직렬화하여 전달
+            const logMessage = event.detail 
+              ? `${event.message || ''}|||${JSON.stringify({ step: event.step, detail: event.detail })}`
+              : event.message || ''
+            onLog(logMessage)
+          } else if (event.type === 'chunk') {
+            const chunkText = event.text || ''
+            fullResponse += chunkText
+            onChunk?.(chunkText)
+          } else if (event.type === 'done') {
+            finalData = event
+            onLog('✨ 이미지 분석 완료!')
+          } else if (event.type === 'error') {
+            onError?.(event.message || '알 수 없는 오류')
+            return
+          }
+        } catch (e) {
+          console.warn('SSE 파싱 오류:', e, line)
+        }
+      }
+    }
+
+    // 최종 결과 전달
+    const chatResponse: ChatResponse = {
+      response: finalData?.response || fullResponse,
+      raw_answer: finalData?.response || fullResponse,
+      sources: finalData?.sources || [],
+      source_urls: finalData?.source_urls || [],
+      used_chunks: finalData?.used_chunks || [],
+      router_output: null,
+      function_results: null,
+      orchestration_result: null,
+      sub_agent_results: null,
+      metadata: {
+        image_analysis: finalData?.image_analysis,
+        pipeline_time: finalData?.pipeline_time
+      }
+    }
+    
+    onResult(chatResponse)
+    
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      console.log('요청이 취소되었습니다')
+      return
+    }
+    
+    console.error('이미지 채팅 오류:', error)
     onError?.(error?.message || '네트워크 오류가 발생했습니다')
   }
 }

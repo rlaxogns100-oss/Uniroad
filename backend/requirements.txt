@@ -2,33 +2,35 @@
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
 python-multipart==0.0.6
-pydantic>=2.11.7
-pydantic-settings>=2.1.0
+pydantic==2.5.3
+pydantic-settings==2.1.0
 
-# OpenAI (임베딩용)
+# OpenAI & LlamaParse
 openai==1.10.0
+llama-parse==0.4.0
 
 # Google Gemini
 google-generativeai>=0.3.0
 
 # Database & Vector
-supabase==2.27.1
+supabase==2.3.4
 pgvector==0.2.4
 
 # Text Processing
 langchain>=0.1.0
 langchain-text-splitters>=0.0.1
+langchain-google-genai>=2.0.0
 
 # PDF Processing (fallback)
 pypdf==4.0.1
 
 # Utilities
 python-dotenv==1.0.0
-httpx>=0.26.0
+httpx>=0.24.0,<0.26
 aiofiles==23.2.1
 
-# CORS & Auth
+# Auth / JWT
+PyJWT>=2.0.0
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
-PyJWT[crypto]>=2.10.1
 

@@ -62,13 +62,15 @@ export function useChat() {
       const token = localStorage.getItem('access_token')
       if (!token) return
 
+      console.log('📥 [useChat] 메시지 로드 시작:', sessionId)
       const response = await axios.get(`/api/sessions/${sessionId}/messages`, {
         headers: { Authorization: `Bearer ${token}` }
       })
 
+      console.log('✅ [useChat] 메시지 로드 완료:', response.data?.length, '개', response.data)
       setMessages(response.data || [])
     } catch (error) {
-      console.error('메시지 불러오기 실패:', error)
+      console.error('❌ [useChat] 메시지 불러오기 실패:', error)
       setMessages([])
     } finally {
       setLoading(false)
@@ -145,6 +147,32 @@ export function useChat() {
     }
   }, [isAuthenticated, loadSessions])
 
+  // 세션 삭제
+  const deleteSession = useCallback(async (sessionId: string) => {
+    if (!isAuthenticated) return
+
+    try {
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+
+      await axios.delete(`/api/sessions/${sessionId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+
+      // 삭제된 세션이 현재 선택된 세션이면 초기화
+      if (currentSessionId === sessionId) {
+        setCurrentSessionId(null)
+        setMessages([])
+      }
+
+      // 세션 목록 새로고침
+      await loadSessions()
+    } catch (error) {
+      console.error('세션 삭제 실패:', error)
+      throw error
+    }
+  }, [isAuthenticated, currentSessionId, loadSessions])
+
   // 초기 로드
   useEffect(() => {
     if (isAuthenticated && user?.id) {
@@ -164,6 +192,7 @@ export function useChat() {
     selectSession,
     startNewChat,
     updateSessionTitle,
+    deleteSession,
   }
 }
 

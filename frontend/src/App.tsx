@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext'
 import ChatPage from './pages/ChatPage'
 import AdminPage from './pages/AdminPage'
 import AgentAdminPage from './pages/AgentAdminPage'
+import AdminAgentPage from './pages/AdminAgentPage'
 import AuthPage from './pages/AuthPage'
 import TimingDashboard from './pages/TimingDashboard'
 
@@ -85,6 +86,14 @@ function App() {
             element={
               <AdminRoute>
                 <TimingDashboard />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/adminagent"
+            element={
+              <AdminRoute>
+                <AdminAgentPage />
               </AdminRoute>
             }
           />

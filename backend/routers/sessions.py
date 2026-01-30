@@ -196,19 +196,33 @@ async def delete_session(
     user: dict = Depends(get_current_user)
 ):
     """
-    세션 삭제
+    세션 삭제 (메시지 포함)
     """
     try:
+        # 먼저 세션 소유권 확인
+        session_check = supabase_service.client.table("chat_sessions")\
+            .select("id")\
+            .eq("id", session_id)\
+            .eq("user_id", user["user_id"])\
+            .execute()
+        
+        if not session_check.data:
+            raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다")
+        
+        # 메시지 먼저 삭제
+        supabase_service.client.table("chat_messages")\
+            .delete()\
+            .eq("session_id", session_id)\
+            .execute()
+        
+        # 세션 삭제
         response = supabase_service.client.table("chat_sessions")\
             .delete()\
             .eq("id", session_id)\
             .eq("user_id", user["user_id"])\
             .execute()
         
-        if not response.data:
-            raise HTTPException(status_code=404, detail="세션을 찾을 수 없습니다")
-        
-        return {"message": "세션이 삭제되었습니다"}
+        return {"message": "세션과 메시지가 삭제되었습니다"}
     
     except HTTPException:
         raise

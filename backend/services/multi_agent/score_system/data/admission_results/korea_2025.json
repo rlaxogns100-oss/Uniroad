@@ -1,0 +1,123 @@
+[
+  {
+    "univ": "고려대학교",
+    "major": "경영대학",
+    "recruit_count": 84,
+    "competition_rate": 2.85,
+    "cut_70_score": 654.12,
+    "total_scale": 1000,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "고려대학교",
+    "major": "국어국문학과",
+    "recruit_count": 16,
+    "competition_rate": 2.56,
+    "cut_70_score": 660.42,
+    "total_scale": 1000,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "고려대학교",
+    "major": "경제학과",
+    "recruit_count": 34,
+    "competition_rate": 2.88,
+    "cut_70_score": 659.71,
+    "total_scale": 1000,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "고려대학교",
+    "major": "통계학과",
+    "recruit_count": 19,
+    "competition_rate": 4.21,
+    "cut_70_score": 661.91,
+    "total_scale": 1000,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "고려대학교",
+    "major": "의과대학",
+    "recruit_count": 28,
+    "competition_rate": 3.32,
+    "cut_70_score": 697.28,
+    "total_scale": 1000,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "고려대학교",
+    "major": "컴퓨터학과",
+    "recruit_count": 32,
+    "competition_rate": 4.69,
+    "cut_70_score": 665.70,
+    "total_scale": 1000,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "고려대학교",
+    "major": "전기전자공학부",
+    "recruit_count": 65,
+    "competition_rate": 3.88,
+    "cut_70_score": 666.76,
+    "total_scale": 1000,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "고려대학교",
+    "major": "사이버국방학과",
+    "recruit_count": 16,
+    "competition_rate": 3.81,
+    "cut_70_score": 528.57,
+    "total_scale": 800,
+    "type": "일반",
+    "field": "자연",
+    "note": "특수학과 800점 만점"
+  },
+  {
+    "univ": "고려대학교",
+    "major": "국어국문학과",
+    "recruit_count": 6,
+    "competition_rate": 2.50,
+    "cut_70_score": 525.89,
+    "total_scale": 800,
+    "type": "교과우수",
+    "field": "인문"
+  },
+  {
+    "univ": "고려대학교",
+    "major": "경제학과",
+    "recruit_count": 15,
+    "competition_rate": 3.80,
+    "cut_70_score": 526.05,
+    "total_scale": 800,
+    "type": "교과우수",
+    "field": "인문"
+  },
+  {
+    "univ": "고려대학교",
+    "major": "의과대학",
+    "recruit_count": 12,
+    "competition_rate": 3.92,
+    "cut_70_score": 559.89,
+    "total_scale": 800,
+    "type": "교과우수",
+    "field": "자연"
+  },
+  {
+    "univ": "고려대학교",
+    "major": "컴퓨터학과",
+    "recruit_count": 14,
+    "competition_rate": 3.14,
+    "cut_70_score": 527.84,
+    "total_scale": 800,
+    "type": "교과우수",
+    "field": "자연"
+  }
+]

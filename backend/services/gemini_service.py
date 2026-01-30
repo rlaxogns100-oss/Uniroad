@@ -419,6 +419,120 @@ class GeminiService:
         
         raise Exception("문서 정보 추출 최대 재시도 초과")
 
+    async def generate_with_image(
+        self,
+        prompt: str,
+        image_data: bytes,
+        mime_type: str = "image/jpeg",
+        system_instruction: str = ""
+    ) -> str:
+        """
+        이미지와 텍스트를 함께 처리하여 응답 생성 (Retry 로직 포함)
+
+        Args:
+            prompt: 텍스트 프롬프트
+            image_data: 이미지 바이트 데이터
+            mime_type: 이미지 MIME 타입 (image/jpeg, image/png, image/gif, image/webp)
+            system_instruction: 시스템 지시사항 (선택)
+
+        Returns:
+            생성된 텍스트
+
+        Raises:
+            Exception: 생성 실패 시
+        """
+        max_retries = 3
+        retry_delays = [2, 4, 8]  # Exponential backoff
+        
+        for attempt in range(max_retries):
+            try:
+                # 이미지 파트 생성
+                image_part = {
+                    "mime_type": mime_type,
+                    "data": image_data
+                }
+                
+                # 프롬프트 준비
+                full_prompt = f"{system_instruction}\n\n{prompt}" if system_instruction else prompt
+                
+                # 멀티모달 컨텐츠 구성 (텍스트 + 이미지)
+                contents = [full_prompt, image_part]
+                
+                # request_options 설정
+                request_options = genai.types.RequestOptions(
+                    retry=None,
+                    timeout=120.0
+                )
+                
+                logger.info(f"🖼️ 이미지 분석 요청: mime_type={mime_type}, size={len(image_data)} bytes")
+                
+                response = self.model.generate_content(contents, request_options=request_options)
+                
+                # 토큰 사용량 기록
+                if hasattr(response, 'usage_metadata'):
+                    usage = response.usage_metadata
+                    prompt_tokens = getattr(usage, 'prompt_token_count', 0)
+                    output_tokens = getattr(usage, 'candidates_token_count', 0)
+                    total_tokens = getattr(usage, 'total_token_count', 0)
+                    
+                    print(f"💰 토큰 사용량 (generate_with_image): {usage}")
+                    logger.info(f"💰 토큰 사용량 - "
+                              f"입력: {prompt_tokens}, "
+                              f"출력: {output_tokens}, "
+                              f"총합: {total_tokens}")
+                    
+                    # CSV에 기록
+                    log_token_usage(
+                        operation="이미지분석",
+                        prompt_tokens=prompt_tokens,
+                        output_tokens=output_tokens,
+                        total_tokens=total_tokens,
+                        model=GEMINI_FLASH_MODEL,
+                        details=f"mime_type={mime_type}"
+                    )
+                
+                # 빈 응답 체크
+                if not response.candidates or len(response.candidates) == 0:
+                    logger.warning("Gemini generate_with_image: candidates가 없습니다")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delays[attempt])
+                        continue
+                    return "이미지를 분석할 수 없습니다. 다시 시도해주세요."
+                
+                candidate = response.candidates[0]
+                if not candidate.content or not candidate.content.parts or len(candidate.content.parts) == 0:
+                    finish_reason = getattr(candidate, 'finish_reason', None)
+                    logger.warning(f"Gemini generate_with_image: content.parts가 없습니다. finish_reason={finish_reason}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delays[attempt])
+                        continue
+                    return "이미지를 분석할 수 없습니다. 다시 시도해주세요."
+                
+                result = response.text.strip()
+                logger.info(f"🖼️ 이미지 분석 완료: {len(result)}자")
+                
+                return result
+                
+            except Exception as e:
+                error_msg = str(e)
+                
+                # 503, 429 에러는 재시도
+                if ("503" in error_msg or "429" in error_msg or "overloaded" in error_msg.lower() or "rate limit" in error_msg.lower()):
+                    if attempt < max_retries - 1:
+                        delay = retry_delays[attempt]
+                        logger.warning(f"이미지 분석 Rate Limit/Overload (시도 {attempt + 1}/{max_retries}) → {delay}초 후 재시도: {error_msg}")
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"이미지 분석 최대 재시도 초과: {error_msg}")
+                        raise
+                else:
+                    # 다른 에러는 즉시 raise
+                    logger.error(f"Gemini generate_with_image 오류: {e}")
+                    raise
+        
+        raise Exception("이미지 분석 최대 재시도 초과")
+
 
 # 전역 인스턴스
 gemini_service = GeminiService.get_instance()
