@@ -6,6 +6,12 @@ export default defineConfig({
   server: {
     host: '0.0.0.0', // 모든 네트워크 인터페이스에서 접근 가능
     port: 5173,
+    allowedHosts: [
+      'uni2road.com',
+      'www.uni2road.com',
+      '3.107.178.26',
+      'localhost'
+    ],
     proxy: {
       '/api': {
         target: 'http://localhost:8000',
@@ -16,4 +22,3 @@ export default defineConfig({
     }
   }
 })
-
