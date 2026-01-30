@@ -44,43 +44,51 @@ app.include_router(admin_evaluate.router, prefix="/api/admin", tags=["관리자�
 
 @app.on_event("startup")
 async def startup_event():
-    """서버 시작 시 모델 및 DB 연결 미리 초기화"""
+    """서버 시작 시 모델 및 DB 연결 미리 초기화 (실패해도 서버는 계속 실행)"""
     import time
     start_time = time.time()
     
     print("🚀 서버 Warm-up 시작...")
     
-    # 1. Supabase 연결 Warm-up (DB 커넥션 미리 생성)
+    # 1. Supabase 연결 Warm-up
     print("   [1/4] Supabase 연결 중...")
-    from services.supabase_client import SupabaseService
     try:
+        from services.supabase_client import SupabaseService
         client = SupabaseService.get_client()
-        # 간단한 쿼리로 연결 활성화 (SSL 핸드셰이크 포함)
         client.table("chat_sessions").select("id").limit(1).execute()
         print("   ✅ Supabase 연결 Warm-up 완료")
     except Exception as e:
-        print(f"   ⚠️ Supabase Warm-up 실패: {e}")
+        print(f"   ⚠️ Supabase Warm-up 실패 (무시하고 계속): {e}")
     
-    # 2. RAG Functions (임베딩 모델) 초기화
+    # 2. RAG Functions 초기화
     print("   [2/4] RAGFunctions 초기화 중...")
-    from services.multi_agent.functions import RAGFunctions
-    RAGFunctions.get_instance()
-    print("   ✅ RAGFunctions 초기화 완료")
+    try:
+        from services.multi_agent.functions import RAGFunctions
+        RAGFunctions.get_instance()
+        print("   ✅ RAGFunctions 초기화 완료")
+    except Exception as e:
+        print(f"   ⚠️ RAGFunctions 초기화 실패 (무시하고 계속): {e}")
     
     # 3. Router Agent 초기화
     print("   [3/4] RouterAgent 초기화 중...")
-    from services.multi_agent.router_agent import get_router
-    get_router()
-    print("   ✅ RouterAgent 초기화 완료")
+    try:
+        from services.multi_agent.router_agent import get_router
+        get_router()
+        print("   ✅ RouterAgent 초기화 완료")
+    except Exception as e:
+        print(f"   ⚠️ RouterAgent 초기화 실패 (무시하고 계속): {e}")
     
     # 4. Main Agent 초기화
     print("   [4/4] MainAgent 초기화 중...")
-    from services.multi_agent.main_agent import get_main_agent
-    get_main_agent()
-    print("   ✅ MainAgent 초기화 완료")
+    try:
+        from services.multi_agent.main_agent import get_main_agent
+        get_main_agent()
+        print("   ✅ MainAgent 초기화 완료")
+    except Exception as e:
+        print(f"   ⚠️ MainAgent 초기화 실패 (무시하고 계속): {e}")
     
     elapsed = time.time() - start_time
-    print(f"🎉 서버 Warm-up 완료! (총 {elapsed:.2f}초)")
+    print(f"🎉 서버 Warm-up 완료! (총 {elapsed:.2f}초) - 서버는 정상 기동됩니다.")
 
 
 @app.get("/")

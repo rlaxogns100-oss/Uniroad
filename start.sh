@@ -11,7 +11,7 @@ if command -v osascript &> /dev/null; then
     
     # 백엔드 터미널
     osascript -e 'tell application "Terminal"
-        do script "cd \"'$(pwd)'/backend\" && source venv/bin/activate && python main.py"
+        do script "cd \"'$(pwd)'/backend\" && python3 main.py"
     end tell'
     
     # 프론트엔드 터미널
@@ -31,8 +31,7 @@ else
     echo ""
     echo "터미널 1 (백엔드):"
     echo "  cd backend"
-    echo "  source venv/bin/activate"
-    echo "  python main.py"
+    echo "  python3 main.py"
     echo ""
     echo "터미널 2 (프론트엔드):"
     echo "  cd frontend"
@@ -40,4 +39,3 @@ else
 fi
 
 echo ""
-

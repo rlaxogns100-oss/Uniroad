@@ -7,11 +7,13 @@ interface ChatMessageProps {
   source_urls?: string[]  // 다운로드 URL (기존 방식용)
   userQuery?: string  // AI 답변일 때 연결된 사용자 질문
   isStreaming?: boolean  // 스트리밍 중인지 여부
+  onRegenerate?: () => void  // 재생성 콜백
 }
 
-export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming }: ChatMessageProps) {
+export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming, onRegenerate }: ChatMessageProps) {
   const [showFactCheck, setShowFactCheck] = useState(false)
   const [showGlow, setShowGlow] = useState(false)
+  const [liked, setLiked] = useState<boolean | null>(null)  // null: 선택 안함, true: 좋아요, false: 싫어요
   
   // AI 답변 스트리밍이 완료되면 글로우 효과 트리거
   useEffect(() => {
@@ -35,22 +37,33 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
     }
   }
   
+  // 후처리된 메시지 생성 (섹션 마크, 마크다운, 대괄호 제거)
+  const getCleanedMessage = () => {
+    return message
+      .replace(/===SECTION_START(?::\w+)?===\s*/g, '')  // 섹션 마크 제거
+      .replace(/===SECTION_END===\s*/g, '')
+      .replace(/<cite[^>]*>([\s\S]*?)<\/cite>/g, '$1')  // cite 태그 제거
+      .replace(/\*\*([^*]+)\*\*/g, '$1')  // **볼드** → 볼드
+      .replace(/【([^】]+)】/g, '$1')  // 【타이틀】 → 타이틀
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')  // [텍스트](링크) → 텍스트
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  }
+  
   // 복사하기
   const handleCopy = () => {
-    navigator.clipboard.writeText(message)
+    navigator.clipboard.writeText(getCleanedMessage())
     alert('답변이 복사되었습니다.')
   }
   
   // 좋아요
   const handleLike = () => {
-    console.log('좋아요')
-    // TODO: 백엔드 API 연동
+    setLiked(liked === true ? null : true)
   }
   
   // 싫어요
   const handleDislike = () => {
-    console.log('싫어요')
-    // TODO: 백엔드 API 연동
+    setLiked(liked === false ? null : false)
   }
   
   // 공유하기
@@ -58,7 +71,7 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
     if (navigator.share) {
       navigator.share({
         title: '유니로드 답변',
-        text: message,
+        text: getCleanedMessage(),
       }).catch(() => {})
     } else {
       handleCopy()
@@ -67,8 +80,9 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
   
   // 재생성
   const handleRegenerate = () => {
-    console.log('재생성')
-    // TODO: 재생성 기능 구현
+    if (onRegenerate) {
+      onRegenerate()
+    }
   }
   // **텍스트** 형식을 볼드체로 파싱하는 헬퍼 함수
   const parseBold = (text: string | React.ReactNode): React.ReactNode => {
@@ -377,10 +391,14 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
             {/* 좋아요 */}
             <button
               onClick={handleLike}
-              className="custom-tooltip p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+              className={`custom-tooltip p-2 rounded-lg transition-colors ${
+                liked === true 
+                  ? 'text-blue-600 bg-blue-100 hover:bg-blue-200' 
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
+              }`}
               data-tooltip="좋아요"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5" fill={liked === true ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
               </svg>
             </button>
@@ -388,10 +406,14 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
             {/* 싫어요 */}
             <button
               onClick={handleDislike}
-              className="custom-tooltip p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+              className={`custom-tooltip p-2 rounded-lg transition-colors ${
+                liked === false 
+                  ? 'text-red-600 bg-red-100 hover:bg-red-200' 
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
+              }`}
               data-tooltip="싫어요"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5" fill={liked === false ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
               </svg>
             </button>

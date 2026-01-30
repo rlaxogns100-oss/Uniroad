@@ -28,6 +28,43 @@ log_queues: Dict[str, asyncio.Queue] = {}
 conversation_sessions: Dict[str, List[Dict[str, Any]]] = {}
 
 
+async def load_history_from_db(session_id: str) -> List[Dict[str, Any]]:
+    """
+    DB에서 세션 히스토리 로드 (메모리에 없을 경우)
+    세션 전환 시 이전 대화 맥락을 AI에게 전달하기 위함
+    """
+    try:
+        # chat_messages 테이블에서 해당 세션의 메시지 가져오기
+        messages_response = supabase_service.client.table("chat_messages")\
+            .select("role, content")\
+            .eq("session_id", session_id)\
+            .order("created_at")\
+            .limit(20)\
+            .execute()
+        
+        if messages_response.data:
+            history = []
+            for msg in messages_response.data:
+                history.append({
+                    "role": msg.get("role", "user"),
+                    "content": msg.get("content", "")
+                })
+            return history
+    except Exception as e:
+        print(f"⚠️ DB에서 히스토리 로드 실패 (무시): {e}")
+    
+    return []
+
+
+def get_or_load_history(session_id: str) -> List[Dict[str, Any]]:
+    """
+    메모리에서 히스토리 가져오기. 없으면 빈 리스트 반환 (async 버전 사용 권장)
+    """
+    if session_id not in conversation_sessions:
+        conversation_sessions[session_id] = []
+    return conversation_sessions[session_id][-20:]
+
+
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = "default"
@@ -82,9 +119,13 @@ async def chat(request: ChatRequest):
         log_and_emit(f"# Request ID: {request_id}")
         log_and_emit(f"{'#'*80}")
 
-        # 세션별 히스토리 로드 (최근 20개만 유지)
-        if session_id not in conversation_sessions:
-            conversation_sessions[session_id] = []
+        # 세션별 히스토리 로드 (메모리에 없으면 DB에서 로드)
+        if session_id not in conversation_sessions or len(conversation_sessions[session_id]) == 0:
+            db_history = await load_history_from_db(session_id)
+            if db_history:
+                conversation_sessions[session_id] = db_history
+            else:
+                conversation_sessions[session_id] = []
         history = conversation_sessions[session_id][-20:]
 
         # ========================================
@@ -413,7 +454,7 @@ async def chat_stream_v2(request: ChatRequest):
         pipeline_start = time.time()
         print(f"\n🔵 [STREAM_V2_START] {session_id}:{message[:30]}")
         
-        # 세션별 히스토리 로드 (최근 20개만 유지)
+        # 세션별 히스토리 로드 (동기 generator이므로 메모리에서만 확인)
         if session_id not in conversation_sessions:
             conversation_sessions[session_id] = []
         history = conversation_sessions[session_id][-20:]
@@ -578,9 +619,13 @@ async def chat_stream(request: ChatRequest):
             yield send_log(f"# 질문: {message}")
             yield send_log(f"{'#'*80}")
 
-            # 세션별 히스토리 로드 (최근 20개만 유지)
-            if session_id not in conversation_sessions:
-                conversation_sessions[session_id] = []
+            # 세션별 히스토리 로드 (메모리에 없으면 DB에서 로드)
+            if session_id not in conversation_sessions or len(conversation_sessions[session_id]) == 0:
+                db_history = await load_history_from_db(session_id)
+                if db_history:
+                    conversation_sessions[session_id] = db_history
+                else:
+                    conversation_sessions[session_id] = []
             history = conversation_sessions[session_id][-20:]
             timing_logger.mark("history_loaded")
 

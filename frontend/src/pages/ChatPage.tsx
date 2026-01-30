@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { sendMessageStream, ChatResponse } from '../api/client'
+import { sendMessageStream, ChatResponse, resetSession } from '../api/client'
 import ChatMessage from '../components/ChatMessage'
 import ThinkingProcess from '../components/ThinkingProcess'
 import AgentPanel from '../components/AgentPanel'
 import AuthModal from '../components/AuthModal'
+import RollingPlaceholder from '../components/RollingPlaceholder'
 import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
 import { FrontendTimingLogger } from '../utils/timingLogger'
@@ -138,6 +139,7 @@ export default function ChatPage() {
   })
   const [currentLog, setCurrentLog] = useState<string>('') // 현재 진행 상태 로그
   const [searchQuery, setSearchQuery] = useState<string>('') // 채팅 검색어
+  const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false) // 검색창 열림 상태
   
   // 관리자 전용 테스트 설정
   const [testRunCount, setTestRunCount] = useState<number>(1) // 시행 횟수
@@ -147,6 +149,7 @@ export default function ChatPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const sendingRef = useRef(false) // 중복 전송 방지
   const abortControllerRef = useRef<AbortController | null>(null) // 스트리밍 취소용
+  const searchContainerRef = useRef<HTMLDivElement>(null) // 검색창 외부 클릭 감지용
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -316,26 +319,44 @@ export default function ChatPage() {
     setIsAnnouncementModalOpen(true)
   }
 
-  // 화면 크기 변경 시 사이드바 상태 조정
+  // 초기 화면 크기에 따라 사이드바 상태 설정 (한 번만)
   useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth >= 640) {
-        setIsSideNavOpen(true)
-      } else {
-        setIsSideNavOpen(false)
+    if (window.innerWidth >= 640) {
+      setIsSideNavOpen(true)
+    }
+  }, [])
+
+  // 검색창 외부 클릭 감지
+  useEffect(() => {
+    if (!isSearchOpen) return
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setIsSearchOpen(false)
       }
     }
 
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isSearchOpen])
 
   // 새 채팅 시작 핸들러
-  const handleNewChat = () => {
+  const handleNewChat = async () => {
     // 진행 중인 요청 취소
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
       abortControllerRef.current = null
+    }
+    
+    // 백엔드 메모리 히스토리 초기화
+    if (currentSessionId) {
+      try {
+        await resetSession(currentSessionId)
+      } catch (e) {
+        console.log('세션 리셋 실패 (무시):', e)
+      }
     }
     
     // 모든 상태 초기화
@@ -399,25 +420,57 @@ export default function ChatPage() {
     setIsAgentPanelOpen(!isAgentPanelOpen)
   }
 
-  const handleSend = async () => {
+  // 재생성 함수: 이전 질문/답변 제거 후 다시 질문
+  const handleRegenerate = (aiMessageId: string, userQuery: string) => {
+    // messages에서 해당 AI 메시지의 index 찾기
+    const aiIndex = messages.findIndex(m => m.id === aiMessageId)
+    if (aiIndex === -1) return
+    
+    // 직전 사용자 메시지 찾기
+    let userIndex = -1
+    for (let i = aiIndex - 1; i >= 0; i--) {
+      if (messages[i].isUser) {
+        userIndex = i
+        break
+      }
+    }
+    
+    // 메시지 제거 (사용자 질문 + AI 답변)
+    const newMessages = messages.filter((_, idx) => {
+      if (userIndex !== -1 && idx === userIndex) return false
+      if (idx === aiIndex) return false
+      return true
+    })
+    
+    setMessages(newMessages)
+    
+    // 약간의 딜레이 후 다시 질문
+    setTimeout(() => {
+      handleSend(userQuery)
+    }, 100)
+  }
+
+  const handleSend = async (directMessage?: string) => {
+    const messageToSend = directMessage || input
+    
     // 중복 전송 방지 (더블 클릭, 빠른 Enter 연타 방지)
-    if (!input.trim() || isLoading || sendingRef.current) {
+    if (!messageToSend.trim() || isLoading || sendingRef.current) {
       console.log('🚫 전송 차단:', { 
-        hasInput: !!input.trim(), 
+        hasInput: !!messageToSend.trim(), 
         isLoading, 
         alreadySending: sendingRef.current 
       })
       return
     }
 
-    console.log('📤 메시지 전송 시작:', input)
+    console.log('📤 메시지 전송 시작:', messageToSend)
     sendingRef.current = true
     isStreamingRef.current = true // 스트리밍 시작
     
     // 타이밍 측정 시작
-    const timingLogger = new FrontendTimingLogger(currentSessionId || 'new', input)
+    const timingLogger = new FrontendTimingLogger(currentSessionId || 'new', messageToSend)
     
-    const userInput = input
+    const userInput = messageToSend
     setInput('')
     setIsLoading(true)
 
@@ -733,39 +786,52 @@ export default function ChatPage() {
       }`}>
         {/* 사이드 네비게이션 */}
         <div
-          className={`fixed top-0 left-0 h-full w-80 bg-white shadow-xl z-50 transform transition-transform duration-300 ease-in-out ${
+          className={`fixed top-0 left-0 h-full w-80 z-50 transform transition-transform duration-300 ease-in-out ${
             isSideNavOpen ? 'translate-x-0' : '-translate-x-full'
           } sm:fixed sm:z-40`}
+          style={{ backgroundColor: '#F1F5FB' }}
         >
         <div className="h-full flex flex-col">
-          {/* 우측 상단 닫기 버튼 */}
-          <div className="absolute top-4 right-4 z-10">
+          {/* 사이드바 토글 버튼 (왼쪽 상단) */}
+          <div className="absolute top-4 left-4 z-10">
             <button
               onClick={() => setIsSideNavOpen(false)}
               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              title="사이드바 닫기"
             >
-              <svg className="w-5 h-5 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
           </div>
 
-          {/* 1. 공지사항 (드롭다운) */}
-          <div className="px-4 sm:px-6 pt-16 pb-2">
+          {/* 1. 새 채팅 버튼 (로그인한 경우에만 표시) */}
+          {isAuthenticated && (
+            <div className="px-4 sm:px-6 pt-16 pb-2">
+              <button
+                onClick={handleNewChat}
+                className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors text-left"
+              >
+                <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                </svg>
+                <span className="text-sm font-medium text-left">새 채팅</span>
+              </button>
+            </div>
+          )}
+
+          {/* 2. 공지사항 (드롭다운) */}
+          <div className="px-4 sm:px-6 pb-2">
             <button 
               onClick={() => setIsAnnouncementDropdownOpen(!isAnnouncementDropdownOpen)}
-              className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-left"
+              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors text-left"
             >
-              <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-                </svg>
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-gray-900">공지사항</p>
-              </div>
+              <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+              <span className="text-sm font-medium flex-1 text-left">공지사항</span>
               <svg 
-                className={`w-5 h-5 text-gray-600 transition-transform ${isAnnouncementDropdownOpen ? 'rotate-180' : ''}`}
+                className={`w-5 h-5 text-gray-500 flex-shrink-0 transition-transform ${isAnnouncementDropdownOpen ? 'rotate-180' : ''}`}
                 fill="none" 
                 stroke="currentColor" 
                 viewBox="0 0 24 24"
@@ -776,7 +842,7 @@ export default function ChatPage() {
             
             {/* 드롭다운 메뉴 */}
             {isAnnouncementDropdownOpen && (
-              <div className="mt-2 ml-4 space-y-1 border-l-2 border-blue-200 pl-4 max-h-96 overflow-y-auto">
+              <div className="mt-2 ml-4 space-y-1 border-l-2 border-gray-200 pl-4 max-h-96 overflow-y-auto">
                 {announcements.length === 0 ? (
                   <p className="text-xs text-gray-500 py-2">등록된 공지사항이 없습니다.</p>
                 ) : (
@@ -858,43 +924,31 @@ export default function ChatPage() {
             )}
           </div>
 
-          {/* 2. 오픈채팅방 */}
+          {/* 3. 오픈채팅방 */}
           <div className="px-4 sm:px-6 pb-2">
             <button 
               onClick={() => setIsOpenChatModalOpen(true)}
-              className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-left"
+              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors text-left"
             >
-              <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
-                </svg>
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-gray-900 mb-0.5">오픈채팅방</p>
-                <p className="text-[10px] text-gray-600 leading-snug">
-                  사용 후기를 들려주세요.<br />
-                  서울대 개발자의 무료 입시상담!
-                </p>
-              </div>
+              <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
+              </svg>
+              <span className="text-sm font-medium text-left">오픈채팅방</span>
             </button>
           </div>
 
-          {/* 3. 내 입시 기록 관리 (드롭다운) */}
+          {/* 4. 내 입시 기록 관리 (드롭다운) */}
           <div className="px-4 sm:px-6 pb-2">
             <button 
               onClick={() => setIsRecordDropdownOpen(!isRecordDropdownOpen)}
-              className="w-full flex items-center gap-3 px-4 py-3 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-left"
+              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-gray-50 rounded-lg transition-colors text-left"
             >
-              <div className="w-8 h-8 rounded-lg bg-blue-500 flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-gray-900">내 입시 기록 관리</p>
-              </div>
+              <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span className="text-sm font-medium flex-1 text-left">내 입시 기록 관리</span>
               <svg 
-                className={`w-5 h-5 text-gray-600 transition-transform ${isRecordDropdownOpen ? 'rotate-180' : ''}`}
+                className={`w-5 h-5 text-gray-500 flex-shrink-0 transition-transform ${isRecordDropdownOpen ? 'rotate-180' : ''}`}
                 fill="none" 
                 stroke="currentColor" 
                 viewBox="0 0 24 24"
@@ -905,7 +959,7 @@ export default function ChatPage() {
             
             {/* 드롭다운 메뉴 */}
             {isRecordDropdownOpen && (
-              <div className="mt-2 ml-4 space-y-1 border-l-2 border-blue-200 pl-4">
+              <div className="mt-2 ml-4 space-y-1 border-l-2 border-gray-200 pl-4">
                 {/* 내 생활기록부 관리 */}
                 <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-gray-50 rounded-lg transition-colors text-left group">
                   <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
@@ -939,61 +993,48 @@ export default function ChatPage() {
             )}
           </div>
 
-          {/* 4. 채팅 검색 (로그인한 경우에만 표시) */}
-          {isAuthenticated && (
-            <div className="px-4 sm:px-6 pb-3 border-t border-gray-100 pt-4">
-              <div className="relative">
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="채팅 검색"
-                  className="w-full px-3 py-2.5 pl-10 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-                <svg
-                  className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                  />
-                </svg>
-                {searchQuery && (
-                  <button
-                    onClick={() => setSearchQuery('')}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M6 18L18 6M6 6l12 12"
-                      />
-                    </svg>
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* 5. 채팅 내역 (로그인한 경우에만 표시) */}
           {isAuthenticated && (
             <div className="flex-1 px-4 sm:px-6 pb-4 overflow-y-auto custom-scrollbar">
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-bold text-gray-900">채팅 내역</h2>
                 <button
-                  onClick={handleNewChat}
-                  className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                  onClick={() => setIsSearchOpen(!isSearchOpen)}
+                  className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
+                  title="채팅 검색"
                 >
-                  새 채팅
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
                 </button>
               </div>
+              
+              {/* 검색창 (토글) */}
+              {isSearchOpen && (
+                <div ref={searchContainerRef} className="relative mb-3">
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="채팅 검색..."
+                    autoFocus
+                    className="w-full px-3 py-2 pl-9 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                  <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              )}
               
               <div className="space-y-1">
                 {(() => {
@@ -1017,15 +1058,13 @@ export default function ChatPage() {
                       key={session.id}
                       className={`w-full px-3 py-2 rounded-lg transition-colors flex items-center justify-between group ${
                         currentSessionId === session.id
-                          ? 'bg-blue-50 text-blue-900'
+                          ? 'text-gray-900'
                           : 'hover:bg-gray-50 text-gray-900'
                       }`}
+                      style={currentSessionId === session.id ? { backgroundColor: '#DCE4F2' } : undefined}
                     >
                       <button
-                        onClick={() => {
-                          selectSession(session.id)
-                          setIsSideNavOpen(false)
-                        }}
+                        onClick={() => selectSession(session.id)}
                         className="flex-1 text-left min-w-0"
                       >
                         <p className="text-xs font-medium truncate">{session.title}</p>
@@ -1105,14 +1144,16 @@ export default function ChatPage() {
           {/* 모바일 헤더 */}
           <div className="sm:hidden px-4 py-3 flex justify-between items-center">
             <div className="flex items-center gap-3">
+            {!isSideNavOpen && (
             <button
                 onClick={() => setIsSideNavOpen(true)}
                 className="p-2 -ml-2 hover:bg-gray-100 rounded-lg transition-colors"
             >
-              <svg className="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
+            )}
               <img src="/로고.png" alt="UniZ Logo" className="h-8" />
             </div>
             
@@ -1140,14 +1181,14 @@ export default function ChatPage() {
           {/* 데스크톱 헤더 */}
           <div className="hidden sm:flex px-6 py-4 justify-between items-center">
             <div className="flex items-center gap-4">
-              {/* 사이드바 토글 버튼 - 사이드바가 닫혔을 때만 표시 */}
+              {/* 사이드바 토글 버튼 - 사이드바 닫혔을 때만 표시 */}
               {!isSideNavOpen && (
                 <button
                   onClick={() => setIsSideNavOpen(true)}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   title="사이드바 열기"
                 >
-                  <svg className="w-6 h-6 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
                   </svg>
                 </button>
@@ -1275,77 +1316,79 @@ export default function ChatPage() {
         </header>
 
         {/* 채팅 영역 */}
-        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 sm:py-8 pb-safe">
+        <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 pb-16">
           <div className="max-w-[800px] mx-auto">
-            {messages.length === 0 && (
-              <div className="text-center py-12 sm:py-16">
-                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3 sm:mb-4">
-                  {isAuthenticated && user?.name ? (
-                    <>안녕하세요 {user.name}님! 👋</>
-                  ) : (
-                    <>안녕하세요! 👋</>
-                  )}
-                </h1>
-                <p className="text-base sm:text-lg text-gray-600 mb-8 sm:mb-12">
-                  무엇을 도와드릴까요?
-                </p>
-                
-                {/* 퀵 액션 카드 - 모바일: 세로, 데스크톱: 그리드 */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 sm:gap-4 max-w-2xl mx-auto">
-                  <button
-                    onClick={() => setInput('서울대 2028 정시 변경사항 알려줘')}
-                    className="bg-white rounded-2xl p-3 sm:p-6 shadow-sm hover:shadow-md active:shadow-md active:scale-[0.98] transition-all text-left group"
-                  >
-                    <div className="flex items-start gap-3 sm:gap-4">
-                      <div className="text-2xl sm:text-4xl flex-shrink-0 group-hover:scale-110 transition-transform">📋</div>
-                      <div className="flex-1">
-                        <p className="text-sm sm:text-lg font-semibold text-gray-900 mb-0.5 sm:mb-1">대입 정책 조회</p>
-                        <p className="text-xs sm:text-sm text-gray-500">최신 입시 정책을 빠르게 확인하세요</p>
-                      </div>
+            {messages.length === 0 ? (
+              <div className="min-h-[calc(100vh-150px)] flex flex-col items-center justify-center">
+                {/* 중앙 영역: 인사말 + 채팅창 + 애니메이션 */}
+                <div className="w-full" style={{ marginTop: '64px' }}>
+                  {/* 인사말 */}
+                  <div className="text-center mb-6">
+                    <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3 sm:mb-4">
+                      {isAuthenticated && user?.name ? (
+                        <>안녕하세요 {user.name}님! 👋</>
+                      ) : (
+                        <>안녕하세요! 👋</>
+                      )}
+                    </h1>
+                    <p className="text-base sm:text-lg text-gray-600">
+                      무엇을 도와드릴까요?
+                    </p>
                   </div>
-                  </button>
                   
-                  <button
-                    onClick={() => setInput('내신 2.5등급인데 서울대 연세대 고려대 비교해줘')}
-                    className="bg-white rounded-2xl p-3 sm:p-6 shadow-sm hover:shadow-md active:shadow-md active:scale-[0.98] transition-all text-left group"
-                  >
-                    <div className="flex items-start gap-3 sm:gap-4">
-                      <div className="text-2xl sm:text-4xl flex-shrink-0 group-hover:scale-110 transition-transform">🎓</div>
-                      <div className="flex-1">
-                        <p className="text-sm sm:text-lg font-semibold text-gray-900 mb-0.5 sm:mb-1">대학별 입결 비교</p>
-                        <p className="text-xs sm:text-sm text-gray-500">내 성적으로 갈 수 있는 대학을 비교 분석</p>
-                      </div>
+                  {/* 채팅창 */}
+                  <div className="w-full flex items-center gap-2">
+                    {/* 입력 필드 */}
+                    <div className="flex-1 relative">
+                      <textarea
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault()
+                            handleSend()
+                          }
+                        }}
+                        placeholder="유니로드에게 무엇이든 물어보세요"
+                        disabled={isLoading}
+                        rows={1}
+                        className="w-full px-4 py-5 text-base bg-gray-50 rounded-3xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 min-h-[64px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                        style={{
+                          height: 'auto',
+                          minHeight: '64px',
+                        }}
+                        onInput={(e) => {
+                          const target = e.target as HTMLTextAreaElement
+                          target.style.height = 'auto'
+                          target.style.height = Math.min(target.scrollHeight, 200) + 'px'
+                        }}
+                      />
+                    </div>
+                    
+                    {/* 전송 버튼 */}
+                    <button
+                      onClick={() => handleSend()}
+                      disabled={isLoading || !input.trim()}
+                      className="flex-shrink-0 w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                      </svg>
+                    </button>
                   </div>
-                  </button>
                   
-                  <button
-                    onClick={() => setInput('백분위 95%면 어느 대학 갈 수 있어?')}
-                    className="bg-white rounded-2xl p-3 sm:p-6 shadow-sm hover:shadow-md active:shadow-md active:scale-[0.98] transition-all text-left group"
-                  >
-                    <div className="flex items-start gap-3 sm:gap-4">
-                      <div className="text-2xl sm:text-4xl flex-shrink-0 group-hover:scale-110 transition-transform">📊</div>
-                      <div className="flex-1">
-                        <p className="text-sm sm:text-lg font-semibold text-gray-900 mb-0.5 sm:mb-1">합격 가능성 분석</p>
-                        <p className="text-xs sm:text-sm text-gray-500">정확한 데이터 기반으로 합격 가능성 예측</p>
-                      </div>
+                  {/* 롤링 플레이스홀더 애니메이션 - 채팅창 바로 아래 64px */}
+                  <div className="w-full" style={{ marginTop: '64px' }}>
+                    <RollingPlaceholder 
+                      onQuestionClick={(question) => {
+                        // 클릭한 질문으로 바로 채팅 시작
+                        handleSend(question)
+                      }}
+                    />
                   </div>
-                  </button>
-                  
-                  <button
-                    onClick={() => setInput('수능까지 3개월 남았는데 공부 계획 세워줘')}
-                    className="bg-white rounded-2xl p-3 sm:p-6 shadow-sm hover:shadow-md active:shadow-md active:scale-[0.98] transition-all text-left group"
-                  >
-                    <div className="flex items-start gap-3 sm:gap-4">
-                      <div className="text-2xl sm:text-4xl flex-shrink-0 group-hover:scale-110 transition-transform">📚</div>
-                      <div className="flex-1">
-                        <p className="text-sm sm:text-lg font-semibold text-gray-900 mb-0.5 sm:mb-1">맞춤형 공부 계획</p>
-                        <p className="text-xs sm:text-sm text-gray-500">나에게 딱 맞는 효율적인 학습 전략 수립</p>
-                      </div>
-                  </div>
-                  </button>
                 </div>
               </div>
-            )}
+            ) : null}
 
             {messages.map((msg, index) => {
               // AI 답변일 경우 직전 사용자 질문 찾기
@@ -1368,6 +1411,7 @@ export default function ChatPage() {
                   source_urls={msg.source_urls}
                   userQuery={userQuery}
                   isStreaming={msg.isStreaming}
+                  onRegenerate={!msg.isUser && userQuery && index === messages.length - 1 ? () => handleRegenerate(msg.id, userQuery) : undefined}
                 />
               )
             })}
@@ -1382,41 +1426,52 @@ export default function ChatPage() {
           </div>
         </div>
 
-        {/* 입력 영역 - 고정 */}
-        <div className="bg-white pb-safe safe-area-bottom sticky bottom-0">
-          <div className="px-4 sm:px-6 py-3 sm:py-4">
-            <div className="max-w-[800px] mx-auto flex items-end gap-2">
-              {/* 입력 필드 */}
-              <div className="flex-1 relative">
-            <input
-              type="text"
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault()
-                      handleSend()
-                    }
-                  }}
-                  placeholder="유니로드에게 무엇이든 물어보세요"
-              disabled={isLoading}
-                  className="w-full px-4 py-3 text-base bg-gray-50 rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 min-h-[48px] placeholder:text-gray-400"
-            />
+        {/* 입력 영역 - 고정 (메시지가 있을 때만 표시) */}
+        {messages.length > 0 && (
+          <div className="bg-white sticky" style={{ bottom: '40px' }}>
+            <div className="px-4 sm:px-6 py-2">
+              <div className="max-w-[800px] mx-auto flex items-center gap-2">
+                {/* 입력 필드 */}
+                <div className="flex-1 relative">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSend()
+                      }
+                    }}
+                    placeholder="유니로드에게 무엇이든 물어보세요"
+                disabled={isLoading}
+                    rows={1}
+                    className="w-full px-4 py-5 text-base bg-gray-50 rounded-3xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 min-h-[64px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                    style={{
+                      height: 'auto',
+                      minHeight: '64px',
+                    }}
+                    onInput={(e) => {
+                      const target = e.target as HTMLTextAreaElement
+                      target.style.height = 'auto'
+                      target.style.height = Math.min(target.scrollHeight, 200) + 'px'
+                    }}
+              />
+                </div>
+                
+                {/* 전송 버튼 */}
+              <button
+                onClick={() => handleSend()}
+                disabled={isLoading || !input.trim()}
+                  className="flex-shrink-0 w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+              >
+                  <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                  </svg>
+              </button>
               </div>
-              
-              {/* 전송 버튼 */}
-            <button
-              onClick={handleSend}
-              disabled={isLoading || !input.trim()}
-                className="flex-shrink-0 w-11 h-11 sm:w-12 sm:h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-            >
-                <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                </svg>
-            </button>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       {/* 로그인 모달 */}

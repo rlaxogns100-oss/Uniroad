@@ -16,6 +16,7 @@ backend/**/*.pyc
 backend/**/*.pyo
 backend/**/*.pyd
 backend/logs/
+logs/
 *.log
 
 # 테스트 파일
