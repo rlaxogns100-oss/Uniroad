@@ -105,7 +105,7 @@ export default function RollingPlaceholder({ onQuestionClick, onCategorySelect, 
               <span
                 onClick={() => handleQuestionClick(question, qIndex)}
                 className={`
-                  inline-block text-base font-medium px-4 py-2.5 rounded-full cursor-pointer transition-all duration-200
+                  inline-block text-base font-semibold px-4 py-2.5 rounded-full cursor-pointer transition-all duration-200
                   ${selectedQuestionIndex === qIndex 
                     ? 'bg-gray-200 text-gray-800' 
                     : 'text-gray-700 hover:bg-gray-100'

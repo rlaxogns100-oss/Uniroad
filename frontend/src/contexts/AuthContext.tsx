@@ -17,6 +17,7 @@ interface AuthContextType {
   signUp: (email: string, password: string, name?: string) => Promise<void>
   signInWithGoogle: () => Promise<void>
   signInWithKakao: () => Promise<void>
+  quickSignIn: (name: string) => void  // 비밀번호 없이 빠른 로그인
   signOut: () => void
   isAuthenticated: boolean
 }
@@ -171,6 +172,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
+  // 비밀번호 없이 빠른 로그인 (테스트용)
+  const quickSignIn = (name: string) => {
+    const userData: User = {
+      id: `quick-${Date.now()}`,
+      email: `${name}@test.com`,
+      name: name,
+    }
+    setUser(userData)
+    setAccessToken('quick-access-token')
+    localStorage.setItem('access_token', 'quick-access-token')
+    localStorage.setItem('user', JSON.stringify(userData))
+  }
+
   const signOut = async () => {
     try {
       await supabase.auth.signOut()
@@ -194,6 +208,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signUp,
         signInWithGoogle,
         signInWithKakao,
+        quickSignIn,
         signOut,
         isAuthenticated: !!user,
       }}

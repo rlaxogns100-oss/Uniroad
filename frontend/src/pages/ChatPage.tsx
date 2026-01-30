@@ -1440,6 +1440,12 @@ export default function ChatPage() {
                   >
                     Admin
                   </button>
+                  <button
+                    onClick={() => navigate('/upload')}
+                    className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                  >
+                    📤 업로드
+                  </button>
                 </>
               )}
             
@@ -1476,7 +1482,7 @@ export default function ChatPage() {
                   {/* 인사말 - 동적 애니메이션 */}
                   <div className="text-center mb-6 sm:mb-6">
                     <h1 
-                      className="text-2xl sm:text-3xl font-bold text-gray-600 animate-fade-in-up leading-tight"
+                      className="text-2xl sm:text-3xl font-semibold text-gray-800 animate-fade-in-up leading-tight"
                       style={{ animationDelay: '0.1s', animationFillMode: 'both' }}
                     >
                       {isAuthenticated && user?.name ? (
@@ -1485,6 +1491,12 @@ export default function ChatPage() {
                         <>안녕하세요, 무엇이 궁금하신가요?</>
                       )}
                     </h1>
+                    <p 
+                      className="text-base sm:text-lg text-gray-500 mt-3 animate-fade-in-up"
+                      style={{ animationDelay: '0.2s', animationFillMode: 'both' }}
+                    >
+                      입시의 여정을 함께하는 유니로드입니다
+                    </p>
                   </div>
 
                   {/* 데스크톱: 채팅창 (모바일에서 숨김) */}

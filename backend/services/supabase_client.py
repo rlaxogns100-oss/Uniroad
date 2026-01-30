@@ -86,7 +86,8 @@ class SupabaseService:
         total_pages: int,
         total_chunks: int,
         file_url: Optional[str] = None,
-        hashtags: Optional[list] = None
+        hashtags: Optional[list] = None,
+        school_name: Optional[str] = None
     ) -> bool:
         """문서 메타데이터 삽입 (파일당 1개)"""
         client = cls.get_client()
@@ -109,6 +110,10 @@ class SupabaseService:
             # hashtags가 있으면 추가
             if hashtags:
                 data['hashtags'] = hashtags
+            
+            # school_name이 있으면 추가
+            if school_name:
+                data['school_name'] = school_name
             
             response = client.table('documents_metadata').insert(data).execute()
 
@@ -205,7 +210,8 @@ class SupabaseService:
                     'fileUrl': row.get('file_url'),  # 다운로드 URL
                     'category': '미분류',  # 나중에 추가 예정
                     'uploadedAt': row['created_at'],
-                    'hashtags': row.get('hashtags', [])  # 해시태그
+                    'hashtags': row.get('hashtags', []),  # 해시태그
+                    'schoolName': row.get('school_name')  # 학교 이름
                 })
 
             return documents

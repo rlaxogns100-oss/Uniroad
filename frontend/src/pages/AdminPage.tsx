@@ -238,12 +238,20 @@ export default function AdminPage() {
             <h1 className="text-2xl font-bold text-gray-900">📚 관리자 페이지</h1>
             <p className="text-sm text-gray-600">문서 업로드 및 관리</p>
           </div>
-          <button
-            onClick={() => navigate('/')}
-            className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors"
-          >
-            ← 채팅으로
-          </button>
+          <div className="flex gap-3">
+            <button
+              onClick={() => navigate('/upload')}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+            >
+              📤 업로드 페이지
+            </button>
+            <button
+              onClick={() => navigate('/')}
+              className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors"
+            >
+              ← 채팅으로
+            </button>
+          </div>
         </div>
       </header>
 

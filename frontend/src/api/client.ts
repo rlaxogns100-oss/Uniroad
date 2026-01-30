@@ -112,6 +112,7 @@ export interface Document {
   category: string
   uploadedAt: string
   hashtags?: string[]
+  schoolName?: string
 }
 
 export interface Agent {
@@ -354,10 +355,14 @@ export const sendMessageStreamWithImage = async (
 
 // 업로드 API
 export const uploadDocument = async (
-  file: File
+  file: File,
+  schoolName?: string
 ): Promise<UploadResponse> => {
   const formData = new FormData()
   formData.append('file', file)
+  if (schoolName) {
+    formData.append('school_name', schoolName)
+  }
 
   const response = await api.post<UploadResponse>('/upload/', formData, {
     headers: {

@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import ChatPage from './pages/ChatPage'
 import AdminPage from './pages/AdminPage'
+import AdminUploadPage from './pages/AdminUploadPage'
 import AgentAdminPage from './pages/AgentAdminPage'
 import AdminAgentPage from './pages/AdminAgentPage'
 import AuthPage from './pages/AuthPage'
@@ -70,6 +71,14 @@ function App() {
             element={
               <AdminRoute>
                 <AdminPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/upload"
+            element={
+              <AdminRoute>
+                <AdminUploadPage />
               </AdminRoute>
             }
           />

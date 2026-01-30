@@ -198,9 +198,9 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
         {/* 이메일 로그인 뷰 */}
         {view === 'email' && (
-          <div className="px-8 pb-8 pt-4">
+          <div className="px-8 pb-12 pt-6">
             {/* 뒤로가기 + 제목 */}
-            <div className="flex items-center mb-6">
+            <div className="flex items-center mb-8">
               <button
                 type="button"
                 onClick={() => { setView('main'); setError(''); }}
@@ -213,7 +213,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
               <h1 className="text-xl font-bold text-gray-900 ml-2">이메일로 로그인</h1>
             </div>
 
-            <form onSubmit={handleEmailSignIn} className="space-y-4">
+            <form onSubmit={handleEmailSignIn} className="space-y-5">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">이메일</label>
                 <input
@@ -270,9 +270,9 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
         {/* 회원가입 뷰 */}
         {view === 'signup' && (
-          <div className="px-8 pb-8 pt-4">
+          <div className="px-8 pb-12 pt-6">
             {/* 뒤로가기 + 제목 */}
-            <div className="flex items-center mb-6">
+            <div className="flex items-center mb-8">
               <button
                 type="button"
                 onClick={() => { setView('email'); setError(''); }}
@@ -285,7 +285,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
               <h1 className="text-xl font-bold text-gray-900 ml-2">회원가입</h1>
             </div>
 
-            <form onSubmit={handleSignUp} className="space-y-4">
+            <form onSubmit={handleSignUp} className="space-y-5">
               <div>
                 <label className="block text-sm font-semibold text-gray-700 mb-2">이름</label>
                 <input

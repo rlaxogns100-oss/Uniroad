@@ -2,6 +2,7 @@
 파일 업로드 API 라우터
 """
 from fastapi import APIRouter, File, UploadFile, Form, HTTPException
+from fastapi.responses import StreamingResponse
 from services.documents import (
     gemini_pdf_service as pdf_service,
     classifier_service,
@@ -9,13 +10,17 @@ from services.documents import (
 )
 from services.supabase_client import supabase_service
 import time
+import json
+import asyncio
+from typing import Optional
 
 router = APIRouter()
 
 
 @router.post("/")
 async def upload_document(
-    file: UploadFile = File(...)
+    file: UploadFile = File(...),
+    school_name: Optional[str] = Form(None)
 ):
     """
     PDF 문서 업로드 및 처리
@@ -34,6 +39,8 @@ async def upload_document(
     print(f"\n{'=' * 60}")
     print(f"📄 파일 업로드 시작: {file.filename}")
     print(f"   자동 추출 제목: {title}")
+    if school_name:
+        print(f"   🏫 학교: {school_name}")
     print(f"   크기: {file.size / 1024 / 1024:.2f}MB" if file.size else "   크기: Unknown")
     print(f"{'=' * 60}\n")
     
@@ -121,7 +128,8 @@ async def upload_document(
             total_pages=total_pages,
             total_chunks=len(chunks),
             file_url=file_url,  # Storage URL 추가
-            hashtags=hashtags  # 해시태그 추가
+            hashtags=hashtags,  # 해시태그 추가
+            school_name=school_name  # 학교 이름 추가
         )
 
         if not metadata_success:
