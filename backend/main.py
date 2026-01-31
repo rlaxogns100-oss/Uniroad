@@ -4,8 +4,11 @@ FastAPI 메인 애플리케이션
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from config import settings
 from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs
+import os
 # agent_admin은 router_agent 테스트 중 비활성화
 
 # FastAPI 앱 생성
@@ -42,6 +45,18 @@ app.include_router(documents.router, prefix="/api/documents", tags=["문서관�
 app.include_router(announcements.router, prefix="/api/announcements", tags=["공지사항"])
 app.include_router(admin_evaluate.router, prefix="/api/admin", tags=["관리자평가"])
 app.include_router(admin_logs.router, prefix="/api/admin", tags=["관리자로그"])
+
+# 정적 파일 경로 설정
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LANDING_DIR = os.path.join(BASE_DIR, "landing")
+FRONTEND_DIST_DIR = os.path.join(BASE_DIR, "frontend", "dist")
+FRONTEND_PUBLIC_DIR = os.path.join(BASE_DIR, "frontend", "public")
+
+# 정적 파일 서빙 (landing 폴더의 이미지 등)
+app.mount("/landing", StaticFiles(directory=LANDING_DIR), name="landing")
+
+# 채팅 앱 정적 파일 서빙 (빌드된 프론트엔드)
+app.mount("/assets", StaticFiles(directory=os.path.join(FRONTEND_DIST_DIR, "assets")), name="assets")
 
 @app.on_event("startup")
 async def startup_event():
@@ -94,13 +109,31 @@ async def startup_event():
 
 @app.get("/")
 async def root():
-    """루트 엔드포인트 - 서버 상태 확인"""
-    return {
-        "status": "online",
-        "service": "유니로드",
-        "version": "2.0.0",
-        "backend": "FastAPI",
-    }
+    """랜딩 페이지"""
+    landing_index = os.path.join(LANDING_DIR, "index.html")
+    return FileResponse(landing_index)
+
+
+@app.get("/로고.png")
+async def logo_image():
+    """로고 이미지"""
+    logo_path = os.path.join(FRONTEND_PUBLIC_DIR, "로고.png")
+    return FileResponse(logo_path)
+
+
+@app.get("/배경.png")
+async def background_image():
+    """배경 이미지"""
+    bg_path = os.path.join(FRONTEND_PUBLIC_DIR, "배경.png")
+    return FileResponse(bg_path)
+
+
+@app.get("/chat")
+@app.get("/chat/{full_path:path}")
+async def chat_app(full_path: str = ""):
+    """채팅 애플리케이션 (SPA)"""
+    frontend_index = os.path.join(FRONTEND_DIST_DIR, "index.html")
+    return FileResponse(frontend_index)
 
 
 @app.get("/api/health")
