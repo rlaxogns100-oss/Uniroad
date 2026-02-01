@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { sendMessageStream, ChatResponse, resetSession } from '../api/client'
+import { sendMessageStream, sendMessageStreamWithImage, ChatResponse, resetSession } from '../api/client'
 import ChatMessage from '../components/ChatMessage'
 import ThinkingProcess from '../components/ThinkingProcess'
 import AgentPanel from '../components/AgentPanel'
@@ -29,6 +29,7 @@ interface Message {
   source_urls?: string[]
   used_chunks?: UsedChunk[]
   isStreaming?: boolean  // 스트리밍 중인지 여부
+  imageUrl?: string  // 이미지 첨부 시 미리보기 URL
 }
 
 interface AgentData {
@@ -142,16 +143,24 @@ export default function ChatPage() {
   const [currentLog, setCurrentLog] = useState<string>('') // 현재 진행 상태 로그
   const [searchQuery, setSearchQuery] = useState<string>('') // 채팅 검색어
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false) // 검색창 열림 상태
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null) // 카테고리 선택 상태
   
   // 관리자 전용 테스트 설정
   const [testRunCount, setTestRunCount] = useState<number>(1) // 시행 횟수
   const [testRunMode, setTestRunMode] = useState<'sequential' | 'parallel'>('sequential') // 순차/병렬
   const [isTestSettingsOpen, setIsTestSettingsOpen] = useState(false) // 설정 패널 열림 상태
   
+  // 이미지 업로드 관련
+  const [selectedImage, setSelectedImage] = useState<File | null>(null)
+  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null)
+  const [isUploadMenuOpen, setIsUploadMenuOpen] = useState(false) // 업로드 메뉴 열림 상태
+  
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const sendingRef = useRef(false) // 중복 전송 방지
   const abortControllerRef = useRef<AbortController | null>(null) // 스트리밍 취소용
   const searchContainerRef = useRef<HTMLDivElement>(null) // 검색창 외부 클릭 감지용
+  const imageInputRef = useRef<HTMLInputElement>(null) // 이미지 파일 input ref
+  const uploadMenuRef = useRef<HTMLDivElement>(null) // 업로드 메뉴 ref
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -373,6 +382,22 @@ export default function ChatPage() {
     }
   }, [isSearchOpen])
 
+  // 업로드 메뉴 외부 클릭 감지
+  useEffect(() => {
+    if (!isUploadMenuOpen) return
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (uploadMenuRef.current && !uploadMenuRef.current.contains(event.target as Node)) {
+        setIsUploadMenuOpen(false)
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isUploadMenuOpen])
+
   // 새 채팅 시작 핸들러
   const handleNewChat = async () => {
     // 진행 중인 요청 취소
@@ -406,6 +431,46 @@ export default function ChatPage() {
     
     // 새 채팅 시작
     startNewChat()
+    
+    // 이미지 상태 초기화
+    setSelectedImage(null)
+    setImagePreviewUrl(null)
+  }
+
+  // 이미지 선택 핸들러
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    
+    // 파일 타입 검증
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
+    if (!allowedTypes.includes(file.type)) {
+      alert('지원하지 않는 이미지 형식입니다. (JPEG, PNG, GIF, WebP만 가능)')
+      return
+    }
+    
+    // 파일 크기 검증 (10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      alert('이미지 크기는 10MB를 초과할 수 없습니다.')
+      return
+    }
+    
+    // 이미지 미리보기 URL 생성
+    const previewUrl = URL.createObjectURL(file)
+    setSelectedImage(file)
+    setImagePreviewUrl(previewUrl)
+    
+    // input 초기화 (같은 파일 다시 선택 가능하도록)
+    e.target.value = ''
+  }
+  
+  // 이미지 선택 취소
+  const handleImageRemove = () => {
+    if (imagePreviewUrl) {
+      URL.revokeObjectURL(imagePreviewUrl)
+    }
+    setSelectedImage(null)
+    setImagePreviewUrl(null)
   }
 
   // 세션 선택 시 메시지 불러오기
@@ -485,9 +550,11 @@ export default function ChatPage() {
     const messageToSend = directMessage || input
     
     // 중복 전송 방지 (더블 클릭, 빠른 Enter 연타 방지)
-    if (!messageToSend.trim() || isLoading || sendingRef.current) {
+    // 이미지가 있으면 텍스트 없이도 전송 가능
+    if ((!messageToSend.trim() && !selectedImage) || isLoading || sendingRef.current) {
       console.log('🚫 전송 차단:', { 
         hasInput: !!messageToSend.trim(), 
+        hasImage: !!selectedImage,
         isLoading, 
         alreadySending: sendingRef.current 
       })
@@ -519,10 +586,19 @@ export default function ChatPage() {
       }
     }
 
+    // 이미지 처리: 현재 선택된 이미지와 미리보기 URL 저장
+    const currentImage = selectedImage
+    const currentImagePreviewUrl = imagePreviewUrl
+    
+    // 이미지 상태 초기화 (전송 시작)
+    setSelectedImage(null)
+    setImagePreviewUrl(null)
+    
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: userInput,
+      text: currentImage ? `[이미지 첨부] ${userInput}` : userInput,
       isUser: true,
+      imageUrl: currentImagePreviewUrl || undefined,
     }
 
     // 스트리밍 봇 메시지 ID (실시간 업데이트용)
@@ -572,11 +648,8 @@ export default function ChatPage() {
       let firstLogReceived = false
       let firstChunkReceived = false
       
-      await sendMessageStream(
-        userInput,
-        currentSessionIdToUse || sessionId,
-        // 로그 콜백
-        (log: string) => {
+      // 공통 콜백 함수들 정의
+      const onLogCallback = (log: string) => {
           // 취소된 경우 콜백 실행 안 함
           if (abortController.signal.aborted) return
           
@@ -596,9 +669,9 @@ export default function ChatPage() {
           // 메인 채팅 영역에도 현재 로그 표시 (사용자 친화적으로 변환)
           const formattedLog = formatLogMessage(log)
           setCurrentLog(formattedLog)
-        },
-        // 결과 콜백
-        async (response: ChatResponse) => {
+        }
+      
+      const onResultCallback = async (response: ChatResponse) => {
           // 취소된 경우 콜백 실행 안 함
           if (abortController.signal.aborted) return
           
@@ -674,9 +747,9 @@ export default function ChatPage() {
             elapsedTime: elapsedMs,
             timing: response.metadata?.timing || undefined,
           })
-        },
-        // 에러 콜백
-        (error: string) => {
+        }
+      
+      const onErrorCallback = (error: string) => {
           // 취소된 경우 에러 메시지 표시 안 함
           if (abortController.signal.aborted) return
           
@@ -686,10 +759,10 @@ export default function ChatPage() {
               ? { ...msg, text: error }
               : msg
           ))
-        },
-        abortController.signal,
-        // onChunk 콜백 - 실시간 텍스트 스트리밍
-        (chunk: string) => {
+        }
+      
+      // onChunk 콜백 - 실시간 텍스트 스트리밍
+      const onChunkCallback = (chunk: string) => {
           // 취소된 경우 콜백 실행 안 함
           if (abortController.signal.aborted) return
           
@@ -710,7 +783,30 @@ export default function ChatPage() {
           // 자동 스크롤
           scrollToBottom()
         }
-      )
+      
+      // 이미지가 있으면 이미지와 함께 전송, 없으면 일반 전송
+      if (currentImage) {
+        await sendMessageStreamWithImage(
+          userInput,
+          currentSessionIdToUse || sessionId,
+          currentImage,
+          onLogCallback,
+          onResultCallback,
+          onErrorCallback,
+          abortController.signal,
+          onChunkCallback
+        )
+      } else {
+        await sendMessageStream(
+          userInput,
+          currentSessionIdToUse || sessionId,
+          onLogCallback,
+          onResultCallback,
+          onErrorCallback,
+          abortController.signal,
+          onChunkCallback
+        )
+      }
     } catch (error: any) {
       // AbortError는 무시 (사용자가 새 채팅을 시작한 경우)
       if (error?.name === 'AbortError') {
@@ -807,6 +903,15 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-screen">
+      {/* 전역 이미지 파일 input (숨김) */}
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/gif,image/webp"
+        onChange={handleImageSelect}
+        className="hidden"
+      />
+      
       {/* Agent 디버그 패널 (좌측) */}
       <AgentPanel
         orchestrationResult={agentData.orchestrationResult}
@@ -1414,55 +1519,32 @@ export default function ChatPage() {
                     </p>
                   </div>
 
-                  {/* 데스크톱: 채팅창 (모바일에서 숨김) */}
-                  <div className="hidden sm:flex w-full items-center gap-2 mb-16">
-                    <div className="flex-1 relative">
-                      <textarea
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault()
-                            handleSend()
-                          }
-                        }}
-                        placeholder="유니로드에게 무엇이든 물어보세요"
-                        disabled={isLoading}
-                        rows={1}
-                        className="w-full px-4 py-5 text-base bg-gray-50 rounded-3xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 min-h-[64px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
-                        style={{ height: 'auto', minHeight: '64px' }}
-                        onInput={(e) => {
-                          const target = e.target as HTMLTextAreaElement
-                          target.style.height = 'auto'
-                          target.style.height = Math.min(target.scrollHeight, 200) + 'px'
-                        }}
-                      />
+                  {/* 데스크톱: 이미지 미리보기 */}
+                  {imagePreviewUrl && (
+                    <div className="hidden sm:block w-full mb-2">
+                      <div className="inline-flex items-center gap-2 bg-gray-100 rounded-lg p-2">
+                        <img 
+                          src={imagePreviewUrl} 
+                          alt="첨부 이미지" 
+                          className="h-16 w-16 object-cover rounded-lg"
+                        />
+                        <button
+                          onClick={handleImageRemove}
+                          className="p-1 hover:bg-gray-200 rounded-full transition-colors"
+                          title="이미지 제거"
+                        >
+                          <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
-                    <button
-                      onClick={() => handleSend()}
-                      disabled={isLoading || !input.trim()}
-                      className="flex-shrink-0 w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                      </svg>
-                    </button>
-                  </div>
-
-                  {/* 롤링 플레이스홀더 애니메이션 */}
-                  <div className="w-full mt-4 sm:mt-0">
-                    <RollingPlaceholder
-                      onQuestionClick={(question) => {
-                        handleSend(question)
-                      }}
-                    />
-                  </div>
-                </div>
-
-                {/* 모바일 하단: 채팅창 (데스크톱에서 숨김) */}
-                <div className="sm:hidden w-full mt-auto pb-2">
-                  <div className="w-full flex items-center gap-2">
-                    <div className="flex-1 relative">
+                  )}
+                  
+                  {/* 데스크톱: 채팅창 (모바일에서 숨김) */}
+                  <div className="hidden sm:block w-full mb-16">
+                    <div className="bg-gray-50 rounded-3xl focus-within:ring-2 focus-within:ring-blue-500 px-4 py-3">
+                      {/* 텍스트 입력 영역 */}
                       <textarea
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
@@ -1475,7 +1557,7 @@ export default function ChatPage() {
                         placeholder="유니로드에게 무엇이든 물어보세요"
                         disabled={isLoading}
                         rows={1}
-                        className="w-full px-4 py-3 text-base bg-gray-50 rounded-3xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 min-h-[48px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                        className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[32px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
                         style={{ height: 'auto' }}
                         onInput={(e) => {
                           const target = e.target as HTMLTextAreaElement
@@ -1483,16 +1565,232 @@ export default function ChatPage() {
                           target.style.height = Math.min(target.scrollHeight, 200) + 'px'
                         }}
                       />
+                      
+                      {/* 하단 영역: 버튼들 + 태그 + 전송 버튼 */}
+                      <div className="flex items-center justify-between mt-2">
+                        <div className="flex items-center gap-2">
+                          {/* 성적 입력 메뉴 버튼 */}
+                          <div className="relative" ref={uploadMenuRef}>
+                            <button
+                              onClick={() => setIsUploadMenuOpen(!isUploadMenuOpen)}
+                              disabled={isLoading}
+                              className="w-8 h-8 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              title="성적 입력"
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                              </svg>
+                            </button>
+                            
+                            {/* 드롭업 메뉴 */}
+                            {isUploadMenuOpen && (
+                              <div className="absolute bottom-10 left-0 bg-white rounded-xl shadow-lg border border-gray-200 py-2 min-w-[200px] z-50">
+                                <button
+                                  onClick={() => {
+                                    imageInputRef.current?.click()
+                                    setIsUploadMenuOpen(false)
+                                  }}
+                                  className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                >
+                                  <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  </svg>
+                                  <span className="text-sm font-medium text-gray-700">성적표 이미지 입력하기</span>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (!isAuthenticated) {
+                                      alert('로그인이 필요합니다.')
+                                      setIsAuthModalOpen(true)
+                                    } else {
+                                      setIsProfileFormOpen(true)
+                                    }
+                                    setIsUploadMenuOpen(false)
+                                  }}
+                                  className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                >
+                                  <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                  </svg>
+                                  <span className="text-sm font-medium text-gray-700">성적표 입력하기</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* 선택된 카테고리 태그 */}
+                          {selectedCategory && (
+                            <div className="inline-flex items-center gap-1.5 bg-blue-100 text-blue-700 rounded-full px-3 py-1 text-sm font-medium">
+                              <span>{selectedCategory}</span>
+                              <button
+                                onClick={() => setSelectedCategory(null)}
+                                className="hover:bg-blue-200 rounded-full transition-colors"
+                                title="태그 제거"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* 전송 버튼 */}
+                        <button
+                          onClick={() => handleSend()}
+                          disabled={isLoading || (!input.trim() && !selectedImage)}
+                          className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
-                    <button
-                      onClick={() => handleSend()}
-                      disabled={isLoading || !input.trim()}
-                      className="flex-shrink-0 w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                      </svg>
-                    </button>
+                  </div>
+
+                  {/* 롤링 플레이스홀더 애니메이션 */}
+                  <div className="w-full mt-4 sm:mt-0">
+                    <RollingPlaceholder
+                      onQuestionClick={(question) => {
+                        setSelectedCategory(null) // 질문 클릭 시 카테고리 초기화
+                        handleSend(question)
+                      }}
+                      selectedCategory={selectedCategory}
+                      onCategorySelect={setSelectedCategory}
+                    />
+                  </div>
+                </div>
+
+                {/* 모바일 하단: 채팅창 (데스크톱에서 숨김) */}
+                <div className="sm:hidden w-full mt-auto pb-2">
+                  {/* 모바일: 이미지 미리보기 */}
+                  {imagePreviewUrl && (
+                    <div className="mb-2">
+                      <div className="inline-flex items-center gap-2 bg-gray-100 rounded-lg p-2">
+                        <img 
+                          src={imagePreviewUrl} 
+                          alt="첨부 이미지" 
+                          className="h-12 w-12 object-cover rounded-lg"
+                        />
+                        <button
+                          onClick={handleImageRemove}
+                          className="p-1 hover:bg-gray-200 rounded-full transition-colors"
+                          title="이미지 제거"
+                        >
+                          <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  
+                  <div className="w-full">
+                    <div className="bg-gray-50 rounded-3xl focus-within:ring-2 focus-within:ring-blue-500 px-3 py-2">
+                      {/* 텍스트 입력 영역 */}
+                      <textarea
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault()
+                            handleSend()
+                          }
+                        }}
+                        placeholder="유니로드에게 무엇이든 물어보세요"
+                        disabled={isLoading}
+                        rows={1}
+                        className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                        style={{ height: 'auto' }}
+                        onInput={(e) => {
+                          const target = e.target as HTMLTextAreaElement
+                          target.style.height = 'auto'
+                          target.style.height = Math.min(target.scrollHeight, 200) + 'px'
+                        }}
+                      />
+                      
+                      {/* 하단 영역: 버튼들 + 태그 + 전송 버튼 */}
+                      <div className="flex items-center justify-between mt-2">
+                        <div className="flex items-center gap-2">
+                          {/* 성적 입력 메뉴 버튼 (모바일) */}
+                          <div className="relative">
+                            <button
+                              onClick={() => setIsUploadMenuOpen(!isUploadMenuOpen)}
+                              disabled={isLoading}
+                              className="w-8 h-8 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                              title="성적 입력"
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                              </svg>
+                            </button>
+                            
+                            {/* 드롭업 메뉴 (모바일) */}
+                            {isUploadMenuOpen && (
+                              <div className="absolute bottom-10 left-0 bg-white rounded-xl shadow-lg border border-gray-200 py-2 min-w-[200px] z-50">
+                                <button
+                                  onClick={() => {
+                                    imageInputRef.current?.click()
+                                    setIsUploadMenuOpen(false)
+                                  }}
+                                  className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                >
+                                  <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  </svg>
+                                  <span className="text-sm font-medium text-gray-700">성적표 이미지 입력하기</span>
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (!isAuthenticated) {
+                                      alert('로그인이 필요합니다.')
+                                      setIsAuthModalOpen(true)
+                                    } else {
+                                      setIsProfileFormOpen(true)
+                                    }
+                                    setIsUploadMenuOpen(false)
+                                  }}
+                                  className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                                >
+                                  <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                  </svg>
+                                  <span className="text-sm font-medium text-gray-700">성적표 입력하기</span>
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {/* 선택된 카테고리 태그 */}
+                          {selectedCategory && (
+                            <div className="inline-flex items-center gap-1 bg-blue-100 text-blue-700 rounded-full px-2.5 py-0.5 text-xs font-medium">
+                              <span>{selectedCategory}</span>
+                              <button
+                                onClick={() => setSelectedCategory(null)}
+                                className="hover:bg-blue-200 rounded-full transition-colors"
+                                title="태그 제거"
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* 전송 버튼 */}
+                        <button
+                          onClick={() => handleSend()}
+                          disabled={isLoading || (!input.trim() && !selectedImage)}
+                          className="w-9 h-9 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1519,6 +1817,7 @@ export default function ChatPage() {
                   source_urls={msg.source_urls}
                   userQuery={userQuery}
                   isStreaming={msg.isStreaming}
+                  imageUrl={msg.imageUrl}
                   onRegenerate={!msg.isUser && userQuery && index === messages.length - 1 ? () => handleRegenerate(msg.id, userQuery) : undefined}
                 />
               )
@@ -1537,13 +1836,37 @@ export default function ChatPage() {
         {/* 입력 영역 - 고정 (메시지가 있을 때만 표시) */}
         {messages.length > 0 && (
           <div className="bg-white sticky bottom-0 sm:bottom-[40px]">
+            {/* 이미지 미리보기 */}
+            {imagePreviewUrl && (
+              <div className="px-4 sm:px-6 pb-2">
+                <div className="max-w-[800px] mx-auto">
+                  <div className="inline-flex items-center gap-2 bg-gray-100 rounded-lg p-2">
+                    <img 
+                      src={imagePreviewUrl} 
+                      alt="첨부 이미지" 
+                      className="h-16 w-16 object-cover rounded-lg"
+                    />
+                    <button
+                      onClick={handleImageRemove}
+                      className="p-1 hover:bg-gray-200 rounded-full transition-colors"
+                      title="이미지 제거"
+                    >
+                      <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            
             <div className="px-4 sm:px-6 py-2">
-              <div className="max-w-[800px] mx-auto flex items-center gap-2">
-                {/* 입력 필드 */}
-                <div className="flex-1 relative">
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
+              <div className="max-w-[800px] mx-auto">
+                <div className="bg-gray-50 rounded-3xl focus-within:ring-2 focus-within:ring-blue-500 px-3 sm:px-4 py-2 sm:py-3">
+                  {/* 텍스트 입력 영역 */}
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter' && !e.shiftKey) {
                         e.preventDefault()
@@ -1551,30 +1874,98 @@ export default function ChatPage() {
                       }
                     }}
                     placeholder="유니로드에게 무엇이든 물어보세요"
-                disabled={isLoading}
+                    disabled={isLoading}
                     rows={1}
-                    className="w-full px-4 py-3 sm:py-5 text-base bg-gray-50 rounded-3xl focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100 min-h-[48px] sm:min-h-[64px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
-                    style={{
-                      height: 'auto',
-                    }}
+                    className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] sm:min-h-[32px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                    style={{ height: 'auto' }}
                     onInput={(e) => {
                       const target = e.target as HTMLTextAreaElement
                       target.style.height = 'auto'
                       target.style.height = Math.min(target.scrollHeight, 200) + 'px'
                     }}
-              />
+                  />
+                  
+                  {/* 하단 영역: 버튼들 + 태그 + 전송 버튼 */}
+                  <div className="flex items-center justify-between mt-2">
+                    <div className="flex items-center gap-2">
+                      {/* 성적 입력 메뉴 버튼 */}
+                      <div className="relative">
+                        <button
+                          onClick={() => setIsUploadMenuOpen(!isUploadMenuOpen)}
+                          disabled={isLoading}
+                          className="w-8 h-8 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                          title="성적 입력"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                          </svg>
+                        </button>
+                        
+                        {/* 드롭업 메뉴 */}
+                        {isUploadMenuOpen && (
+                          <div className="absolute bottom-10 left-0 bg-white rounded-xl shadow-lg border border-gray-200 py-2 min-w-[200px] z-50">
+                            <button
+                              onClick={() => {
+                                imageInputRef.current?.click()
+                                setIsUploadMenuOpen(false)
+                              }}
+                              className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                            >
+                              <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                              </svg>
+                              <span className="text-sm font-medium text-gray-700">성적표 이미지 입력하기</span>
+                            </button>
+                            <button
+                              onClick={() => {
+                                if (!isAuthenticated) {
+                                  alert('로그인이 필요합니다.')
+                                  setIsAuthModalOpen(true)
+                                } else {
+                                  setIsProfileFormOpen(true)
+                                }
+                                setIsUploadMenuOpen(false)
+                              }}
+                              className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3 transition-colors"
+                            >
+                              <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                              <span className="text-sm font-medium text-gray-700">성적표 입력하기</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* 선택된 카테고리 태그 */}
+                      {selectedCategory && (
+                        <div className="inline-flex items-center gap-1 sm:gap-1.5 bg-blue-100 text-blue-700 rounded-full px-2.5 sm:px-3 py-0.5 sm:py-1 text-xs sm:text-sm font-medium">
+                          <span>{selectedCategory}</span>
+                          <button
+                            onClick={() => setSelectedCategory(null)}
+                            className="hover:bg-blue-200 rounded-full transition-colors"
+                            title="태그 제거"
+                          >
+                            <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* 전송 버튼 */}
+                    <button
+                      onClick={() => handleSend()}
+                      disabled={isLoading || (!input.trim() && !selectedImage)}
+                      className="w-9 h-9 sm:w-10 sm:h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                    >
+                      <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-                
-                {/* 전송 버튼 */}
-              <button
-                onClick={() => handleSend()}
-                disabled={isLoading || !input.trim()}
-                  className="flex-shrink-0 w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-              >
-                  <svg className="w-5 h-5 sm:w-6 sm:h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                  </svg>
-              </button>
               </div>
             </div>
           </div>
