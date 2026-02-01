@@ -126,7 +126,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
             {/* 제목 */}
             <h1 className="text-2xl font-bold text-center text-gray-900 mb-3">
-              유니로드에 오신 것을 환영합니다
+              유니로드에 오신 것을 환영합니다 👋🎓
             </h1>
             
             {/* 부제목 */}
@@ -248,7 +248,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-4 bg-blue-600 text-white rounded-2xl font-semibold text-lg hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors mt-2"
+                className="w-full py-4 bg-blue-500 text-white rounded-2xl font-semibold text-lg hover:bg-blue-600 active:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors mt-2"
               >
                 {loading ? '로그인 중...' : '로그인'}
               </button>
@@ -333,7 +333,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-4 bg-blue-600 text-white rounded-2xl font-semibold text-lg hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors mt-2"
+                className="w-full py-4 bg-blue-500 text-white rounded-2xl font-semibold text-lg hover:bg-blue-600 active:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors mt-2"
               >
                 {loading ? '가입 중...' : '회원가입'}
               </button>

@@ -1290,7 +1290,7 @@ export default function ChatPage() {
                 </p>
                 <button
                   onClick={() => setIsAuthModalOpen(true)}
-                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 active:bg-blue-800 transition-colors font-medium text-xs sm:text-sm"
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 active:bg-blue-700 transition-colors font-medium text-xs sm:text-sm"
                 >
                   회원가입 또는 로그인
                 </button>
@@ -1507,15 +1507,15 @@ export default function ChatPage() {
                 <div className="w-full flex flex-col justify-center sm:flex-none" style={{ marginTop: '32px' }}>
                   {/* 인사말 */}
                   <div className="text-center mb-6 sm:mb-6">
-                    <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 mb-3 sm:mb-4">
+                    <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-3 sm:mb-4 whitespace-nowrap">
                       {isAuthenticated && user?.name ? (
-                        <>안녕하세요 {user.name}님! 👋</>
+                        <>안녕하세요 {user.name}님 👋 여러분과 입시 여정을 함께하는 유니로드입니다!</>
                       ) : (
-                        <>안녕하세요! 👋</>
+                        <>안녕하세요 👋 여러분과 입시 여정을 함께하는 유니로드입니다!</>
                       )}
                     </h1>
                     <p className="text-base sm:text-lg text-gray-600">
-                      무엇을 도와드릴까요?
+                      무엇을 도와드릴까요? 🎓
                     </p>
                   </div>
 
