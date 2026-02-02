@@ -9,9 +9,11 @@ interface ChatMessageProps {
   isStreaming?: boolean  // 스트리밍 중인지 여부
   onRegenerate?: () => void  // 재생성 콜백
   imageUrl?: string  // 이미지 첨부 시 미리보기 URL
+  showLoginPrompt?: boolean  // 로그인 유도 메시지 표시 여부
+  onLoginClick?: () => void  // 로그인 버튼 클릭 콜백
 }
 
-export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming, onRegenerate, imageUrl }: ChatMessageProps) {
+export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming, onRegenerate, imageUrl, showLoginPrompt, onLoginClick }: ChatMessageProps) {
   const [showFactCheck, setShowFactCheck] = useState(false)
   const [showGlow, setShowGlow] = useState(false)
   const [liked, setLiked] = useState<boolean | null>(null)  // null: 선택 안함, true: 좋아요, false: 싫어요
@@ -489,8 +491,21 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
             {renderMessage()}
           </div>
           
-          {/* 버튼 영역 - 스트리밍 완료 후에만 표시 */}
-          {!isStreaming && (
+          {/* 로그인 유도 버튼 - Rate Limit 초과 시 */}
+          {showLoginPrompt && (
+            <button
+              onClick={onLoginClick}
+              className="mt-4 px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+              </svg>
+              로그인하기
+            </button>
+          )}
+          
+          {/* 버튼 영역 - 스트리밍 완료 후에만 표시, 로그인 유도 시 숨김 */}
+          {!isStreaming && !showLoginPrompt && (
           <div className="flex gap-1 mt-3 items-center">
             {/* 복사 */}
             <button

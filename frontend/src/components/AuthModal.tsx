@@ -4,9 +4,14 @@ import { useAuth } from '../contexts/AuthContext'
 interface AuthModalProps {
   isOpen: boolean
   onClose: () => void
+  customMessage?: {
+    title: string
+    description: string
+  }
+  onLoginSuccess?: () => void  // 로그인 성공 시 콜백
 }
 
-export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
+export default function AuthModal({ isOpen, onClose, customMessage, onLoginSuccess }: AuthModalProps) {
   const { signIn, signUp, signInWithGoogle, signInWithKakao } = useAuth()
   
   const [view, setView] = useState<'main' | 'email' | 'signup'>('main')
@@ -27,6 +32,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
     try {
       await signIn(email, password)
+      onLoginSuccess?.()
       onClose()
       resetForm()
     } catch (err: any) {
@@ -43,6 +49,7 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
     try {
       await signUp(email, password, name)
+      onLoginSuccess?.()
       onClose()
       resetForm()
     } catch (err: any) {
@@ -126,12 +133,12 @@ export default function AuthModal({ isOpen, onClose }: AuthModalProps) {
 
             {/* 제목 */}
             <h1 className="text-2xl font-bold text-center text-gray-900 mb-3">
-              유니로드에 오신 것을 환영합니다 👋🎓
+              {customMessage?.title || '유니로드에 오신 것을 환영합니다 👋🎓'}
             </h1>
             
             {/* 부제목 */}
             <p className="text-center text-gray-500 text-sm mb-10">
-              로그인하여 맞춤형 입시 상담, 대화 기록 등에 접근하세요.
+              {customMessage?.description || '로그인하여 맞춤형 입시 상담, 대화 기록 등에 접근하세요.'}
             </p>
 
             {error && (
