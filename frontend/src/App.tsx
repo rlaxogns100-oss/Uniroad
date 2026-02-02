@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import LandingPage from './pages/LandingPage'
 import ChatPage from './pages/ChatPage'
 import AdminPage from './pages/AdminPage'
 import AdminUploadPage from './pages/AdminUploadPage'
@@ -62,10 +63,8 @@ function App() {
       <AuthProvider>
         <Routes>
           <Route path="/auth" element={<AuthPage />} />
-          <Route
-            path="/"
-            element={<ChatPage />}
-          />
+          <Route path="/" element={<LandingPage />} />
+          <Route path="/chat" element={<ChatPage />} />
           <Route
             path="/admin"
             element={
