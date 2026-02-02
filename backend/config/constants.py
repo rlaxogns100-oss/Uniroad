@@ -22,3 +22,8 @@ CLASSIFICATION_SAMPLE_LENGTH = 2000
 # Gemini 모델
 GEMINI_FLASH_MODEL = "gemini-3-flash-preview"  # 대화/판단용 (고품질)
 GEMINI_LITE_MODEL = "gemini-2.5-flash-lite"    # 문서 처리용 (고속)
+
+# Rate Limiting 설정
+RATE_LIMIT_REGISTERED_USER = 50  # 로그인 유저 일일 제한
+RATE_LIMIT_GUEST = 10            # 게스트 IP 일일 제한
+RATE_LIMIT_RESET_HOUR_KST = 0    # 자정 초기화 (00:00 KST)

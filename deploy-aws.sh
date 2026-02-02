@@ -174,6 +174,10 @@ echo ""
 echo "🌐 8단계: Nginx 설정..."
 
 sudo tee /etc/nginx/sites-available/uniroad > /dev/null << 'EOF'
+# Rate Limiting Zone 정의 (http 블록에 포함되도록 nginx.conf에도 추가 필요)
+# 이 부분은 /etc/nginx/nginx.conf의 http 블록에 수동으로 추가해야 합니다:
+# limit_req_zone $binary_remote_addr zone=chat_limit:10m rate=5r/s;
+
 server {
     listen 80;
     server_name 3.107.178.26;
@@ -184,7 +188,29 @@ server {
         try_files $uri $uri/ /index.html;
     }
 
-    # 백엔드 API 프록시
+    # 백엔드 Chat API (Rate Limiting 적용)
+    location /api/chat/ {
+        # Rate Limiting: 1초 5회, burst 10회까지 허용
+        limit_req zone=chat_limit burst=10 nodelay;
+        limit_req_status 503;
+        
+        proxy_pass http://localhost:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        
+        # SSE 지원
+        proxy_buffering off;
+        proxy_read_timeout 3600s;
+        proxy_connect_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # 백엔드 API 프록시 (다른 API - Rate Limit 없음)
     location /api/ {
         proxy_pass http://localhost:8000;
         proxy_http_version 1.1;

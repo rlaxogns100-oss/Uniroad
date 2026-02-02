@@ -2,7 +2,7 @@
 채팅 API 라우터 (멀티에이전트 기반)
 전체 파이프라인: Orchestration Agent → Sub Agents → Final Agent → 최종 답변
 """
-from fastapi import APIRouter, HTTPException, File, UploadFile, Form
+from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Request, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -20,6 +20,8 @@ from services.multi_agent import (
     AVAILABLE_AGENTS
 )
 from utils.timing_logger import TimingLogger
+from middleware.auth import optional_auth
+from middleware.rate_limit import check_and_increment_usage, get_client_ip
 
 router = APIRouter()
 
@@ -88,7 +90,11 @@ class ChatResponse(BaseModel):
 
 
 @router.post("/", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None)
+):
     """
     멀티에이전트 기반 채팅 메시지 처리
 
@@ -100,6 +106,31 @@ async def chat(request: ChatRequest):
     logs = []
     
     try:
+        # ========================================
+        # Rate Limiting 체크
+        # ========================================
+        # 1. IP 추출
+        client_ip = get_client_ip(http_request)
+        
+        # 2. 선택적 인증
+        user = await optional_auth(authorization)
+        user_id = user["user_id"] if user else None
+        
+        # 3. Rate Limit 체크 및 증가
+        is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
+        if not is_allowed:
+            raise HTTPException(
+                status_code=429,
+                detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
+            )
+        
+        # 로그에 사용량 정보 추가
+        logs.append(f"📊 API 사용량: {current_count}/{limit}회")
+        print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
+        
+        # ========================================
+        # 기존 채팅 로직
+        # ========================================
         session_id = request.session_id
         message = request.message
         
@@ -465,7 +496,9 @@ MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024
 async def chat_stream_v2_with_image(
     message: str = Form(...),
     session_id: str = Form(default="default"),
-    image: UploadFile = File(...)
+    image: UploadFile = File(...),
+    http_request: Request = None,
+    authorization: Optional[str] = Header(None)
 ):
     """
     이미지와 함께 스트리밍 채팅 - 이미지 분석 후 멀티에이전트 파이프라인으로 전달
@@ -483,7 +516,25 @@ async def chat_stream_v2_with_image(
     """
     import time
     
+    # ========================================
+    # Rate Limiting 체크
+    # ========================================
+    client_ip = get_client_ip(http_request)
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    
+    is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
+    if not is_allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
+        )
+    
+    print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
+    
+    # ========================================
     # 이미지 검증
+    # ========================================
     if image.content_type not in ALLOWED_IMAGE_TYPES:
         raise HTTPException(
             400, 
@@ -663,7 +714,11 @@ async def chat_stream_v2_with_image(
 
 
 @router.post("/v2/stream")
-async def chat_stream_v2(request: ChatRequest):
+async def chat_stream_v2(
+    request: ChatRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None)
+):
     """
     스트리밍 채팅 v2 - Main Agent 응답을 실시간 스트리밍
     
@@ -673,6 +728,22 @@ async def chat_stream_v2(request: ChatRequest):
     - {"type": "done", "timing": {...}, "response": "전체 응답"}
     """
     import time
+    
+    # ========================================
+    # Rate Limiting 체크 (generator 외부에서 실행)
+    # ========================================
+    client_ip = get_client_ip(http_request)
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    
+    is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
+    if not is_allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
+        )
+    
+    print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
     
     def generate():
         session_id = request.session_id
@@ -814,7 +885,11 @@ async def chat_stream_v2(request: ChatRequest):
 
 
 @router.post("/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(
+    request: ChatRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None)
+):
     """
     멀티에이전트 기반 채팅 메시지 처리 (스트리밍)
     
@@ -823,6 +898,22 @@ async def chat_stream(request: ChatRequest):
     2. Sub Agents 실행 → 결과 수집
     3. Final Agent → 최종 답변 생성
     """
+    # ========================================
+    # Rate Limiting 체크 (generator 외부에서 실행)
+    # ========================================
+    client_ip = get_client_ip(http_request)
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    
+    is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
+    if not is_allowed:
+        raise HTTPException(
+            status_code=429,
+            detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
+        )
+    
+    print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
+    
     async def generate():
         logs = []
         log_queue = asyncio.Queue()
