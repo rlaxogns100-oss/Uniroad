@@ -30,6 +30,7 @@ interface Message {
   used_chunks?: UsedChunk[]
   isStreaming?: boolean  // 스트리밍 중인지 여부
   imageUrl?: string  // 이미지 첨부 시 미리보기 URL
+  showLoginPrompt?: boolean  // 로그인 유도 메시지 표시 여부
 }
 
 interface AgentData {
@@ -101,7 +102,7 @@ interface Announcement {
 
 export default function ChatPage() {
   const navigate = useNavigate()
-  const { user, signOut, isAuthenticated } = useAuth()
+  const { user, signOut, isAuthenticated, accessToken } = useAuth()
   const {
     sessions,
     currentSessionId,
@@ -125,9 +126,11 @@ export default function ChatPage() {
   const [isAnnouncementDropdownOpen, setIsAnnouncementDropdownOpen] = useState(false)
   const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false)
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
+  const [authModalMessage, setAuthModalMessage] = useState<{ title: string; description: string } | undefined>(undefined)
   const [isOpenChatModalOpen, setIsOpenChatModalOpen] = useState(false)
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false)
   const [isProfileFormOpen, setIsProfileFormOpen] = useState(false)
+  const [showProfileGuide, setShowProfileGuide] = useState(false)
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -753,6 +756,18 @@ export default function ChatPage() {
           // 취소된 경우 에러 메시지 표시 안 함
           if (abortController.signal.aborted) return
           
+          // 비로그인 사용자 Rate Limit 초과 - 로그인 유도
+          if (error === '__RATE_LIMIT_GUEST__') {
+            setMessages((prev) => prev.map(msg => 
+              msg.id === streamingBotMessageId
+                ? { ...msg, text: '로그인을 통해 더 많은 입시 정보와 개인별로 갈 수 있는 대학을 확인해보세요!!', showLoginPrompt: true }
+                : msg
+            ))
+            setIsLoading(false)
+            setCurrentLog('')
+            return
+          }
+          
           // 스트리밍 봇 메시지를 에러 메시지로 교체
           setMessages((prev) => prev.map(msg => 
             msg.id === streamingBotMessageId
@@ -794,7 +809,8 @@ export default function ChatPage() {
           onResultCallback,
           onErrorCallback,
           abortController.signal,
-          onChunkCallback
+          onChunkCallback,
+          accessToken || undefined  // 인증 토큰 전달
         )
       } else {
         await sendMessageStream(
@@ -804,7 +820,8 @@ export default function ChatPage() {
           onResultCallback,
           onErrorCallback,
           abortController.signal,
-          onChunkCallback
+          onChunkCallback,
+          accessToken || undefined  // 인증 토큰 전달
         )
       }
     } catch (error: any) {
@@ -1502,11 +1519,11 @@ export default function ChatPage() {
         <div className="flex-1 overflow-y-auto px-[17px] sm:px-6 py-4 pb-16">
           <div className="max-w-[800px] mx-auto">
             {messages.length === 0 ? (
-              <div className="min-h-[calc(100vh-150px)] flex flex-col items-center justify-between sm:justify-center">
-                {/* 상단 영역: 인사말 + 애니메이션 (모바일) / 인사말 + 채팅창 + 애니메이션 (데스크톱) */}
-                <div className="w-full flex flex-col justify-center sm:flex-none" style={{ marginTop: '32px' }}>
+              <div className="min-h-[calc(100vh-150px)] flex flex-col items-center justify-between sm:justify-center px-4 sm:px-8 pt-8 sm:pt-12 pb-6">
+                {/* 상단 영역: 인사말 + 카드 + 채팅창 */}
+                <div className="w-full flex flex-col justify-center sm:flex-none">
                   {/* 인사말 */}
-                  <div className="text-center mb-6 sm:mb-6">
+                  <div className="text-center mb-8 sm:mb-10">
                     <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-3 sm:mb-4 whitespace-nowrap">
                       {isAuthenticated && user?.name ? (
                         <>안녕하세요 {user.name}님 👋 여러분과 입시 여정을 함께하는 유니로드입니다!</>
@@ -1517,6 +1534,27 @@ export default function ChatPage() {
                     <p className="text-base sm:text-lg text-gray-600">
                       무엇을 도와드릴까요? 🎓
                     </p>
+                  </div>
+
+                  {/* 롤링 플레이스홀더 - 채팅창 위에 배치 */}
+                  <div className="w-full mb-8 sm:mb-10">
+                    <RollingPlaceholder
+                      onQuestionClick={(question) => {
+                        setSelectedCategory(null) // 질문 클릭 시 카테고리 초기화
+                        handleSend(question)
+                      }}
+                      selectedCategory={selectedCategory}
+                      onCategorySelect={setSelectedCategory}
+                      isAuthenticated={isAuthenticated}
+                      onLoginRequired={(message) => {
+                        setAuthModalMessage(message)
+                        setIsAuthModalOpen(true)
+                      }}
+                      onProfileRequired={() => {
+                        setShowProfileGuide(true)
+                        setIsProfileFormOpen(true)
+                      }}
+                    />
                   </div>
 
                   {/* 데스크톱: 이미지 미리보기 */}
@@ -1542,8 +1580,8 @@ export default function ChatPage() {
                   )}
                   
                   {/* 데스크톱: 채팅창 (모바일에서 숨김) */}
-                  <div className="hidden sm:block w-full mb-16">
-                    <div className="bg-gray-50 rounded-3xl focus-within:ring-2 focus-within:ring-blue-500 px-4 py-3">
+                  <div className="hidden sm:block w-full max-w-3xl mx-auto px-4">
+                    <div className="bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.08)] focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.12)] px-4 py-3 transition-shadow duration-200">
                       {/* 텍스트 입력 영역 */}
                       <textarea
                         value={input}
@@ -1649,17 +1687,6 @@ export default function ChatPage() {
                     </div>
                   </div>
 
-                  {/* 롤링 플레이스홀더 애니메이션 */}
-                  <div className="w-full mt-4 sm:mt-0">
-                    <RollingPlaceholder
-                      onQuestionClick={(question) => {
-                        setSelectedCategory(null) // 질문 클릭 시 카테고리 초기화
-                        handleSend(question)
-                      }}
-                      selectedCategory={selectedCategory}
-                      onCategorySelect={setSelectedCategory}
-                    />
-                  </div>
                 </div>
 
                 {/* 모바일 하단: 채팅창 (데스크톱에서 숨김) */}
@@ -1819,6 +1846,8 @@ export default function ChatPage() {
                   isStreaming={msg.isStreaming}
                   imageUrl={msg.imageUrl}
                   onRegenerate={!msg.isUser && userQuery && index === messages.length - 1 ? () => handleRegenerate(msg.id, userQuery) : undefined}
+                  showLoginPrompt={msg.showLoginPrompt}
+                  onLoginClick={() => setIsAuthModalOpen(true)}
                 />
               )
             })}
@@ -1975,7 +2004,16 @@ export default function ChatPage() {
       {/* 로그인 모달 */}
       <AuthModal 
         isOpen={isAuthModalOpen} 
-        onClose={() => setIsAuthModalOpen(false)} 
+        onClose={() => {
+          setIsAuthModalOpen(false)
+          setAuthModalMessage(undefined)
+        }}
+        customMessage={authModalMessage}
+        onLoginSuccess={() => {
+          // 로그인 성공 시 처음 화면으로 돌아가기
+          setMessages([])
+          setSelectedCategory(null)
+        }}
       />
 
       {/* 오픈채팅방 모달 */}
@@ -2182,7 +2220,11 @@ export default function ChatPage() {
       {/* 프로필 폼 모달 */}
       <ProfileForm 
         isOpen={isProfileFormOpen} 
-        onClose={() => setIsProfileFormOpen(false)} 
+        onClose={() => {
+          setIsProfileFormOpen(false)
+          setShowProfileGuide(false)
+        }}
+        showGuide={showProfileGuide}
       />
       </div>
     </div>

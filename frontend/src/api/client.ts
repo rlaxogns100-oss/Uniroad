@@ -128,17 +128,24 @@ export const sendMessageStream = async (
   onResult: (result: ChatResponse) => void,
   onError?: (error: string) => void,
   abortSignal?: AbortSignal,
-  onChunk?: (chunk: string) => void  // 실시간 텍스트 청크 콜백
+  onChunk?: (chunk: string) => void,  // 실시간 텍스트 청크 콜백
+  token?: string  // 인증 토큰
 ): Promise<void> => {
   try {
     onLog('🔍 질문을 분석하는 중...')
     
+    // 헤더 구성
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
+    }
+    
     // 실시간 스트리밍 엔드포인트 사용
     const response = await fetch('/api/chat/v2/stream', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({
         message,
         session_id: sessionId,
@@ -149,6 +156,24 @@ export const sendMessageStream = async (
     if (!response.ok) {
       const errorText = await response.text()
       console.error('API 에러:', response.status, errorText)
+      
+      // 429 에러 (Rate Limit)
+      if (response.status === 429) {
+        // 비로그인 사용자 (로그인 유도 메시지가 포함된 경우)
+        if (errorText.includes('로그인을 통해')) {
+          onError?.('__RATE_LIMIT_GUEST__')
+        } else {
+          // 로그인 사용자 - 백엔드 메시지 그대로 표시
+          try {
+            const parsed = JSON.parse(errorText)
+            onError?.(parsed.detail || '일일 사용량을 초과했습니다.')
+          } catch {
+            onError?.('일일 사용량을 초과했습니다. 내일 00:00에 초기화됩니다.')
+          }
+        }
+        return
+      }
+      
       onError?.(`서버 오류 (${response.status}): ${errorText}`)
       return
     }
@@ -247,7 +272,8 @@ export const sendMessageStreamWithImage = async (
   onResult: (result: ChatResponse) => void,
   onError?: (error: string) => void,
   abortSignal?: AbortSignal,
-  onChunk?: (chunk: string) => void
+  onChunk?: (chunk: string) => void,
+  token?: string  // 인증 토큰
 ): Promise<void> => {
   try {
     onLog('🖼️ 이미지를 분석하는 중...')
@@ -258,8 +284,15 @@ export const sendMessageStreamWithImage = async (
     formData.append('session_id', sessionId)
     formData.append('image', image)
     
+    // 헤더 구성
+    const headers: Record<string, string> = {}
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`
+    }
+    
     const response = await fetch('/api/chat/v2/stream/with-image', {
       method: 'POST',
+      headers,
       body: formData,
       signal: abortSignal,
     })
@@ -267,6 +300,24 @@ export const sendMessageStreamWithImage = async (
     if (!response.ok) {
       const errorText = await response.text()
       console.error('API 에러:', response.status, errorText)
+      
+      // 429 에러 (Rate Limit)
+      if (response.status === 429) {
+        // 비로그인 사용자 (로그인 유도 메시지가 포함된 경우)
+        if (errorText.includes('로그인을 통해')) {
+          onError?.('__RATE_LIMIT_GUEST__')
+        } else {
+          // 로그인 사용자 - 백엔드 메시지 그대로 표시
+          try {
+            const parsed = JSON.parse(errorText)
+            onError?.(parsed.detail || '일일 사용량을 초과했습니다.')
+          } catch {
+            onError?.('일일 사용량을 초과했습니다. 내일 00:00에 초기화됩니다.')
+          }
+        }
+        return
+      }
+      
       onError?.(`서버 오류 (${response.status}): ${errorText}`)
       return
     }

@@ -51,8 +51,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(userData)
           setLoading(false)
 
-          // URL에서 code 제거
-          window.history.replaceState(null, '', window.location.pathname)
+          // OAuth 로그인 성공 시 /chat으로 리디렉션
+          window.location.href = '/chat'
           return
         } catch (error) {
           console.error('OAuth 콜백 처리 실패:', error)

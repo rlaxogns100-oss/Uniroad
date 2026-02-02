@@ -5,6 +5,7 @@ import { getProfile, saveProfile, ScoreEntry } from '../api/client'
 interface ProfileFormProps {
   isOpen: boolean
   onClose: () => void
+  showGuide?: boolean  // 성적 입력 가이드 표시 여부
 }
 
 const subjects = [
@@ -21,7 +22,7 @@ const inquirySubjects = [
   '생활과윤리', '윤리와사상', '한국지리', '세계지리', '동아시아사', '세계사', '경제', '정치와법', '사회·문화'
 ]
 
-export default function ProfileForm({ isOpen, onClose }: ProfileFormProps) {
+export default function ProfileForm({ isOpen, onClose, showGuide }: ProfileFormProps) {
   const { accessToken } = useAuth()
   const [scores, setScores] = useState<Record<string, ScoreEntry>>({})
   const [isLoading, setIsLoading] = useState(false)
@@ -119,6 +120,26 @@ export default function ProfileForm({ isOpen, onClose }: ProfileFormProps) {
         </div>
 
         <div className="p-6 space-y-6">
+          {/* 성적 입력 가이드 */}
+          {showGuide && (
+            <div className="bg-gradient-to-r from-emerald-50 to-cyan-50 border border-emerald-200 rounded-xl p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 bg-gradient-to-br from-emerald-400 to-cyan-500 rounded-full flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="font-bold text-emerald-800 mb-1">성적을 입력하면 더 정확해요!</h3>
+                  <p className="text-sm text-emerald-700">
+                    모의고사 성적을 입력하면 대학별 환산점수를 자동으로 계산하고, 
+                    <strong> 합격 가능성이 높은 대학</strong>을 추천해드립니다.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {message && (
             <div className={`p-4 rounded ${
               message.type === 'success' ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'

@@ -119,10 +119,18 @@ async def chat(
         # 3. Rate Limit 체크 및 증가
         is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
         if not is_allowed:
-            raise HTTPException(
-                status_code=429,
-                detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
-            )
+            if user_id is None:
+                # 비로그인 사용자
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 로그인을 통해 더 많은 입시 정보와 개인별로 갈 수 있는 대학을 확인해보세요!!"
+                )
+            else:
+                # 로그인 사용자
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
+                )
         
         # 로그에 사용량 정보 추가
         logs.append(f"📊 API 사용량: {current_count}/{limit}회")
@@ -525,10 +533,18 @@ async def chat_stream_v2_with_image(
     
     is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
     if not is_allowed:
-        raise HTTPException(
-            status_code=429,
-            detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
-        )
+        if user_id is None:
+            # 비로그인 사용자
+            raise HTTPException(
+                status_code=429,
+                detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 로그인을 통해 더 많은 입시 정보와 개인별로 갈 수 있는 대학을 확인해보세요!!"
+            )
+        else:
+            # 로그인 사용자
+            raise HTTPException(
+                status_code=429,
+                detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
+            )
     
     print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
     
@@ -738,10 +754,18 @@ async def chat_stream_v2(
     
     is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
     if not is_allowed:
-        raise HTTPException(
-            status_code=429,
-            detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
-        )
+        if user_id is None:
+            # 비로그인 사용자
+            raise HTTPException(
+                status_code=429,
+                detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 로그인을 통해 더 많은 입시 정보와 개인별로 갈 수 있는 대학을 확인해보세요!!"
+            )
+        else:
+            # 로그인 사용자
+            raise HTTPException(
+                status_code=429,
+                detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
+            )
     
     print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
     
@@ -907,10 +931,18 @@ async def chat_stream(
     
     is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
     if not is_allowed:
-        raise HTTPException(
-            status_code=429,
-            detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
-        )
+        if user_id is None:
+            # 비로그인 사용자
+            raise HTTPException(
+                status_code=429,
+                detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 로그인을 통해 더 많은 입시 정보와 개인별로 갈 수 있는 대학을 확인해보세요!!"
+            )
+        else:
+            # 로그인 사용자
+            raise HTTPException(
+                status_code=429,
+                detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
+            )
     
     print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
     
