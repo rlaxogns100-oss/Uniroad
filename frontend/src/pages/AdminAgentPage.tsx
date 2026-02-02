@@ -373,12 +373,12 @@ export default function AdminAgentPage() {
     const handleLogEvaluated = () => setLogs(getLogs())
     const handleLogCleared = () => setLogs([])
     
-    window.addEventListener('admin-log-updated', handleLogUpdated as EventListener)
+    window.addEventListener('admin-log-updated', handleLogUpdated as unknown as EventListener)
     window.addEventListener('admin-log-evaluated', handleLogEvaluated)
     window.addEventListener('admin-log-cleared', handleLogCleared)
-    
+
     return () => {
-      window.removeEventListener('admin-log-updated', handleLogUpdated as EventListener)
+      window.removeEventListener('admin-log-updated', handleLogUpdated as unknown as EventListener)
       window.removeEventListener('admin-log-evaluated', handleLogEvaluated)
       window.removeEventListener('admin-log-cleared', handleLogCleared)
     }

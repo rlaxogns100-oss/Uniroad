@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import axios from 'axios'
-import { supabase } from '../lib/supabase'
 
 interface User {
   id: string
@@ -29,64 +28,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // Supabase Auth 상태 변화 감지
+  // 로컬스토리지에서 토큰 복원 + OAuth 콜백 처리
   useEffect(() => {
-    // 현재 세션 확인
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        const userData: User = {
-          id: session.user.id,
-          email: session.user.email || '',
-          name: session.user.user_metadata?.name || session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
-          avatar_url: session.user.user_metadata?.avatar_url
+    const handleOAuthCallback = async () => {
+      // OAuth 콜백 처리 (URL query에서 code 추출)
+      const urlParams = new URLSearchParams(window.location.search)
+      const code = urlParams.get('code')
+
+      if (code) {
+        console.log('OAuth code found, exchanging for token...')
+        try {
+          const response = await axios.post('/api/auth/oauth/callback', { code })
+          const { access_token, refresh_token, user: userData } = response.data
+
+          localStorage.setItem('access_token', access_token)
+          if (refresh_token) {
+            localStorage.setItem('refresh_token', refresh_token)
+          }
+          localStorage.setItem('user', JSON.stringify(userData))
+
+          setAccessToken(access_token)
+          setUser(userData)
+          setLoading(false)
+
+          // URL에서 code 제거
+          window.history.replaceState(null, '', window.location.pathname)
+          return
+        } catch (error) {
+          console.error('OAuth 콜백 처리 실패:', error)
+          window.history.replaceState(null, '', window.location.pathname)
         }
-        setUser(userData)
-        setAccessToken(session.access_token)
-        localStorage.setItem('access_token', session.access_token)
-        localStorage.setItem('user', JSON.stringify(userData))
       }
-      setLoading(false)
-    })
 
-    // Auth 상태 변화 리스너
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('Auth state changed:', event, session?.user?.email)
-      
-      if (event === 'SIGNED_IN' && session) {
-        const userData: User = {
-          id: session.user.id,
-          email: session.user.email || '',
-          name: session.user.user_metadata?.name || session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
-          avatar_url: session.user.user_metadata?.avatar_url
-        }
-        setUser(userData)
-        setAccessToken(session.access_token)
-        localStorage.setItem('access_token', session.access_token)
-        localStorage.setItem('user', JSON.stringify(userData))
-      } else if (event === 'SIGNED_OUT') {
-        setUser(null)
-        setAccessToken(null)
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('user')
-        localStorage.removeItem('refresh_token')
+      // 로컬스토리지에서 토큰 복원
+      const storedToken = localStorage.getItem('access_token')
+      const storedUser = localStorage.getItem('user')
+
+      if (storedToken && storedUser) {
+        setAccessToken(storedToken)
+        setUser(JSON.parse(storedUser))
+        verifyToken(storedToken)
+      } else {
+        setLoading(false)
       }
-    })
-
-    return () => subscription.unsubscribe()
-  }, [])
-
-  // 로컬스토리지에서 토큰 복원 (기존 호환)
-  useEffect(() => {
-    const storedToken = localStorage.getItem('access_token')
-    const storedUser = localStorage.getItem('user')
-    
-    if (storedToken && storedUser && !user) {
-      setAccessToken(storedToken)
-      setUser(JSON.parse(storedUser))
-      
-      // 토큰 유효성 검증
-      verifyToken(storedToken)
     }
+
+    handleOAuthCallback()
   }, [])
 
   const verifyToken = async (token: string) => {
@@ -136,39 +123,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = async () => {
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
+      const response = await axios.post('/api/auth/oauth/url', {
         provider: 'google',
-        options: {
-          redirectTo: window.location.origin,
-          queryParams: {
-            access_type: 'offline',
-            prompt: 'consent',
-          }
-        }
+        redirect_to: window.location.origin
       })
-      
-      if (error) {
-        throw new Error(error.message)
-      }
+      window.location.href = response.data.url
     } catch (error: any) {
-      throw new Error(error.message || 'Google 로그인 실패')
+      throw new Error(error.response?.data?.detail || 'Google 로그인 실패')
     }
   }
 
   const signInWithKakao = async () => {
     try {
-      const { error } = await supabase.auth.signInWithOAuth({
+      const response = await axios.post('/api/auth/oauth/url', {
         provider: 'kakao',
-        options: {
-          redirectTo: window.location.origin,
-        }
+        redirect_to: window.location.origin
       })
-      
-      if (error) {
-        throw new Error(error.message)
-      }
+      window.location.href = response.data.url
     } catch (error: any) {
-      throw new Error(error.message || '카카오 로그인 실패')
+      throw new Error(error.response?.data?.detail || '카카오 로그인 실패')
     }
   }
 
@@ -187,9 +160,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     try {
-      await supabase.auth.signOut()
+      await axios.post('/api/auth/signout')
     } catch (e) {
-      console.error('Supabase 로그아웃 오류:', e)
+      console.error('로그아웃 오류:', e)
     }
     setUser(null)
     setAccessToken(null)

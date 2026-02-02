@@ -45,7 +45,7 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
   const [currentStatus, setCurrentStatus] = useState('Analyzing question...')
   const [displayedStatus, setDisplayedStatus] = useState('')
   const typingIndexRef = useRef(0)
-  const typingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const typingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // 로그에서 상태 및 thinking steps 추출
   useEffect(() => {

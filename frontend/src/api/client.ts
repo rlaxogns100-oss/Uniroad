@@ -216,8 +216,8 @@ export const sendMessageStream = async (
       used_chunks: finalData?.used_chunks || [],
       router_output: finalData?.router_output,
       function_results: finalData?.function_results,
-      orchestration_result: null,
-      sub_agent_results: null,
+      orchestration_result: undefined,
+      sub_agent_results: undefined,
       metadata: {
         timing: finalData?.timing,
         pipeline_time: finalData?.pipeline_time
@@ -330,10 +330,10 @@ export const sendMessageStreamWithImage = async (
       sources: finalData?.sources || [],
       source_urls: finalData?.source_urls || [],
       used_chunks: finalData?.used_chunks || [],
-      router_output: null,
-      function_results: null,
-      orchestration_result: null,
-      sub_agent_results: null,
+      router_output: undefined,
+      function_results: undefined,
+      orchestration_result: undefined,
+      sub_agent_results: undefined,
       metadata: {
         image_analysis: finalData?.image_analysis,
         pipeline_time: finalData?.pipeline_time
