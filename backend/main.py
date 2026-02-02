@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from config import settings
-from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs, profile, functions
+from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs, profile, functions, auto_reply
 from routes import calculator
 import os
 # agent_admin은 router_agent 테스트 중 비활성화
@@ -49,6 +49,7 @@ app.include_router(admin_evaluate.router, prefix="/api/admin", tags=["관리자�
 app.include_router(admin_logs.router, prefix="/api/admin", tags=["관리자로그"])
 app.include_router(calculator.calculator_bp, prefix="/api/calculator", tags=["수능계산기"])
 app.include_router(functions.router, prefix="/api/functions", tags=["Functions"])
+app.include_router(auto_reply.router, prefix="/api/auto-reply", tags=["자동댓글봇"])
 
 # 정적 파일 경로 설정
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -144,6 +145,16 @@ async def chat_app(full_path: str = ""):
         return FileResponse(frontend_index)
     # 개발 모드: 프론트엔드 dev 서버로 리다이렉트 안내
     return {"message": "개발 모드: http://localhost:5173 에서 프론트엔드를 확인하세요"}
+
+
+@app.get("/auto-reply")
+@app.get("/auto-reply/{full_path:path}")
+async def auto_reply_app(full_path: str = ""):
+    """자동 댓글 봇 관리 페이지 (SPA)"""
+    frontend_index = os.path.join(FRONTEND_DIST_DIR, "index.html")
+    if os.path.exists(frontend_index):
+        return FileResponse(frontend_index)
+    return {"message": "개발 모드: http://localhost:5173/auto-reply 에서 프론트엔드를 확인하세요"}
 
 
 @app.get("/api/health")

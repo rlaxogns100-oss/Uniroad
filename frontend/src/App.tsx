@@ -8,6 +8,7 @@ import AgentAdminPage from './pages/AgentAdminPage'
 import AdminAgentPage from './pages/AdminAgentPage'
 import AuthPage from './pages/AuthPage'
 import TimingDashboard from './pages/TimingDashboard'
+import AutoReplyPage from './pages/AutoReplyPage'
 
 // 보호된 라우트 (로그인 필요)
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -102,6 +103,14 @@ function App() {
             element={
               <AdminRoute>
                 <AdminAgentPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/auto-reply"
+            element={
+              <AdminRoute>
+                <AutoReplyPage />
               </AdminRoute>
             }
           />
