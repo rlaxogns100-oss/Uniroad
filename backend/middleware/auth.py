@@ -112,6 +112,26 @@ async def optional_auth(authorization: Optional[str] = None) -> Optional[dict]:
     
     try:
         token = authorization.split(" ")[1]
+        
+        # Supabase 클라이언트로 토큰 검증 (verify_token과 동일한 로직)
+        try:
+            from supabase import create_client
+            from config import settings
+            
+            client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+            response = client.auth.get_user(token)
+            
+            if response.user:
+                return {
+                    "user_id": response.user.id,
+                    "email": response.user.email,
+                    "role": response.user.app_metadata.get("role", "authenticated"),
+                }
+        except:
+            # Supabase 클라이언트 실패 시 JWT 직접 검증 시도
+            pass
+        
+        # JWT 직접 검증 (fallback)
         payload = jwt.decode(
             token,
             SUPABASE_JWT_SECRET,
