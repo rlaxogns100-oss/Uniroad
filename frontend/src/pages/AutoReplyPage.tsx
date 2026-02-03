@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Fragment } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 interface BotStatus {
@@ -37,6 +37,42 @@ interface CommentsResponse {
 }
 
 const API_BASE = '/api/auto-reply'
+
+// ExpandableCell 컴포넌트 (AdminAgentPage와 동일)
+function ExpandableCell({ content, maxLength = 30, isExpanded = false }: { content: any, maxLength?: number, isExpanded?: boolean }) {
+  let processedContent = content
+  
+  // 문자열인 경우 JSON 파싱 시도
+  if (typeof processedContent === 'string') {
+    try {
+      const parsed = JSON.parse(processedContent)
+      processedContent = parsed
+    } catch {
+      // 파싱 실패하면 원본 문자열 사용
+    }
+  }
+  
+  const stringContent = typeof processedContent === 'object' 
+    ? JSON.stringify(processedContent, null, 2) 
+    : String(processedContent || '-')
+  
+  const needsExpansion = stringContent.length > maxLength
+  const displayContent = needsExpansion && !isExpanded 
+    ? stringContent.substring(0, maxLength) + '...'
+    : stringContent
+  
+  return (
+    <div className="relative">
+      {isExpanded ? (
+        <pre className="text-xs whitespace-pre-wrap font-mono max-h-[400px] overflow-y-auto bg-gray-50 p-2 rounded">
+          {stringContent}
+        </pre>
+      ) : (
+        <span className="text-xs text-gray-700">{displayContent}</span>
+      )}
+    </div>
+  )
+}
 
 export default function AutoReplyPage() {
   const navigate = useNavigate()
@@ -543,74 +579,44 @@ export default function AutoReplyPage() {
                 <tbody>
                   {comments.map((record, idx) => {
                     const isExpanded = expandedRows.has(idx)
-                    const raw = (s: string | undefined) => (s ?? '-').trim() || '-'
-                    const clip = (s: string, len: number) => s.length <= len ? s : s.slice(0, len) + '...'
                     return (
-                      <Fragment key={idx}>
-                        <tr
-                          onClick={() => {
-                            setExpandedRows(prev => {
-                              const next = new Set(prev)
-                              if (next.has(idx)) next.delete(idx)
-                              else next.add(idx)
-                              return next
-                            })
-                          }}
-                          className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
-                        >
-                          <td className="px-2 py-1.5 align-top">
-                            <span className="text-xs text-gray-700">{clip(raw(record.post_content), 35)}</span>
-                          </td>
-                          <td className="px-2 py-1.5 align-top">
-                            <span className="text-xs font-mono text-gray-700 break-all">{clip(raw(record.query), 40)}</span>
-                          </td>
-                          <td className="px-2 py-1.5 align-top">
-                            <span className="text-xs text-gray-700">{clip(raw(record.function_result), 50)}</span>
-                          </td>
-                          <td className="px-2 py-1.5 align-top">
-                            <span className="text-xs text-gray-700">{clip(record.comment, 40)}</span>
-                          </td>
-                          <td className="px-2 py-1.5 align-top">
-                            <a
-                              href={record.post_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={e => e.stopPropagation()}
-                              className="text-xs text-blue-600 hover:underline truncate block"
-                            >
-                              {record.post_title || record.post_url || '(링크)'}
-                            </a>
-                          </td>
-                        </tr>
-                        {isExpanded && (
-                          <tr className="bg-gray-50 border-b border-gray-100">
-                            <td colSpan={5} className="px-4 py-3">
-                              <div className="grid grid-cols-1 gap-4 text-xs">
-                                <div>
-                                  <div className="font-semibold text-gray-600 mb-1">원글</div>
-                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-40 overflow-y-auto text-xs">{raw(record.post_content)}</pre>
-                                </div>
-                                <div>
-                                  <div className="font-semibold text-gray-600 mb-1">쿼리 (Query Agent 출력)</div>
-                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-32 overflow-y-auto text-xs">{raw(record.query)}</pre>
-                                </div>
-                                <div>
-                                  <div className="font-semibold text-gray-600 mb-1">함수결과 (RAG 컨텍스트)</div>
-                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-40 overflow-y-auto text-xs">{raw(record.function_result)}</pre>
-                                </div>
-                                <div>
-                                  <div className="font-semibold text-gray-600 mb-1">최종답변 (Answer Agent 출력)</div>
-                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-32 overflow-y-auto text-xs">{record.comment}</pre>
-                                </div>
-                                <div>
-                                  <div className="font-semibold text-gray-600 mb-1">링크</div>
-                                  <a href={record.post_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all text-xs">{record.post_url}</a>
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
+                      <tr
+                        key={idx}
+                        onClick={() => {
+                          setExpandedRows(prev => {
+                            const next = new Set(prev)
+                            if (next.has(idx)) next.delete(idx)
+                            else next.add(idx)
+                            return next
+                          })
+                        }}
+                        className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                      >
+                        <td className="px-2 py-1.5 align-top">
+                          <ExpandableCell content={record.post_content || '-'} maxLength={35} isExpanded={isExpanded} />
+                        </td>
+                        <td className="px-2 py-1.5 align-top">
+                          <ExpandableCell content={record.query || '-'} maxLength={40} isExpanded={isExpanded} />
+                        </td>
+                        <td className="px-2 py-1.5 align-top">
+                          <ExpandableCell content={record.function_result || '-'} maxLength={50} isExpanded={isExpanded} />
+                        </td>
+                        <td className="px-2 py-1.5 align-top">
+                          <ExpandableCell content={record.comment} maxLength={40} isExpanded={isExpanded} />
+                        </td>
+                        <td className="px-2 py-1.5 align-top">
+                          <a
+                            href={record.post_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="text-xs text-blue-600 hover:underline block truncate"
+                            title={record.post_title || record.post_url}
+                          >
+                            {record.post_title || '링크'}
+                          </a>
+                        </td>
+                      </tr>
                     )
                   })}
                 </tbody>
