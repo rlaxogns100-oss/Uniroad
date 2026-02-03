@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, Fragment } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 interface BotStatus {
@@ -38,6 +38,42 @@ interface CommentsResponse {
 
 const API_BASE = '/api/auto-reply'
 
+// ExpandableCell 컴포넌트 (AdminAgentPage와 동일)
+function ExpandableCell({ content, maxLength = 30, isExpanded = false }: { content: any, maxLength?: number, isExpanded?: boolean }) {
+  let processedContent = content
+  
+  // 문자열인 경우 JSON 파싱 시도
+  if (typeof processedContent === 'string') {
+    try {
+      const parsed = JSON.parse(processedContent)
+      processedContent = parsed
+    } catch {
+      // 파싱 실패하면 원본 문자열 사용
+    }
+  }
+  
+  const stringContent = typeof processedContent === 'object' 
+    ? JSON.stringify(processedContent, null, 2) 
+    : String(processedContent || '-')
+  
+  const needsExpansion = stringContent.length > maxLength
+  const displayContent = needsExpansion && !isExpanded 
+    ? stringContent.substring(0, maxLength) + '...'
+    : stringContent
+  
+  return (
+    <div className="relative">
+      {isExpanded ? (
+        <pre className="text-xs whitespace-pre-wrap font-mono max-h-[400px] overflow-y-auto bg-gray-50 p-2 rounded">
+          {stringContent}
+        </pre>
+      ) : (
+        <span className="text-xs text-gray-700">{displayContent}</span>
+      )}
+    </div>
+  )
+}
+
 export default function AutoReplyPage() {
   const navigate = useNavigate()
   const [authenticated, setAuthenticated] = useState(false)
@@ -57,11 +93,18 @@ export default function AutoReplyPage() {
   const [restMinutes, setRestMinutes] = useState(3)
   const [configChanged, setConfigChanged] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
-  // 프롬프트 편집
+  // 프롬프트 편집 (Query + Answer 2개)
+  const [queryPrompt, setQueryPrompt] = useState('')
   const [answerPrompt, setAnswerPrompt] = useState('')
   const [promptLoading, setPromptLoading] = useState(false)
   const [promptSaving, setPromptSaving] = useState(false)
   const [promptError, setPromptError] = useState<string | null>(null)
+  const [promptsExpanded, setPromptsExpanded] = useState(false)
+  
+  // 실시간 로그
+  const [logs, setLogs] = useState<string[]>([])
+  const [logsExpanded, setLogsExpanded] = useState(false)
+  const [autoScroll, setAutoScroll] = useState(true)
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -108,6 +151,7 @@ export default function AutoReplyPage() {
       const res = await fetch(`${API_BASE}/prompts`)
       if (!res.ok) throw new Error('프롬프트 조회 실패')
       const data = await res.json()
+      setQueryPrompt(data.query_prompt ?? '')
       setAnswerPrompt(data.answer_prompt ?? '')
     } catch (e: any) {
       setPromptError(e.message ?? '프롬프트를 불러올 수 없습니다.')
@@ -116,17 +160,21 @@ export default function AutoReplyPage() {
     }
   }, [])
 
-  const handleSavePrompt = async () => {
+  const handleSavePrompts = async () => {
     setPromptSaving(true)
     setPromptError(null)
     try {
       const res = await fetch(`${API_BASE}/prompts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answer_prompt: answerPrompt })
+        body: JSON.stringify({
+          query_prompt: queryPrompt,
+          answer_prompt: answerPrompt
+        })
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || '저장 실패')
+      alert('프롬프트가 저장되었습니다.')
     } catch (e: any) {
       setPromptError(e.message ?? '저장 실패')
     } finally {
@@ -151,14 +199,55 @@ export default function AutoReplyPage() {
     return () => clearInterval(interval)
   }, [fetchStatus, fetchComments, fetchPrompts])
 
-  const handleStart = async () => {
+  // 실시간 로그 스트리밍
+  useEffect(() => {
+    if (!status?.running) {
+      // 봇이 실행 중이 아니면 연결 안 함
+      return
+    }
+
+    const eventSource = new EventSource(`${API_BASE}/logs/stream`)
+    
+    eventSource.onmessage = (event) => {
+      setLogs(prev => {
+        const newLogs = [...prev, event.data]
+        // 최근 500줄만 유지
+        return newLogs.slice(-500)
+      })
+    }
+    
+    eventSource.onerror = (error) => {
+      console.error('로그 스트림 오류:', error)
+      eventSource.close()
+    }
+    
+    return () => {
+      eventSource.close()
+    }
+  }, [status?.running])
+
+  // 자동 스크롤
+  useEffect(() => {
+    if (autoScroll && logsExpanded) {
+      const logContainer = document.getElementById('log-container')
+      if (logContainer) {
+        logContainer.scrollTop = logContainer.scrollHeight
+      }
+    }
+  }, [logs, autoScroll, logsExpanded])
+
+  const handleStart = async (dryRun: boolean = false) => {
     setActionLoading(true)
     setError(null)
     try {
-      const res = await fetch(`${API_BASE}/start`, { method: 'POST' })
+      const url = `${API_BASE}/start${dryRun ? '?dry_run=true' : ''}`
+      const res = await fetch(url, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || '시작 실패')
       await fetchStatus()
+      if (dryRun) {
+        alert('가실행 모드로 봇이 시작되었습니다. (댓글을 실제로 달지 않습니다)')
+      }
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -338,13 +427,23 @@ export default function AutoReplyPage() {
                   {actionLoading ? '처리 중...' : '봇 중지'}
                 </button>
               ) : (
-                <button
-                  onClick={handleStart}
-                  disabled={actionLoading || !status?.cookie_exists}
-                  className="flex-1 py-2.5 px-4 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors"
-                >
-                  {actionLoading ? '처리 중...' : '봇 시작'}
-                </button>
+                <>
+                  <button
+                    onClick={() => handleStart(false)}
+                    disabled={actionLoading || !status?.cookie_exists}
+                    className="flex-1 py-2.5 px-4 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors"
+                  >
+                    {actionLoading ? '처리 중...' : '봇 시작'}
+                  </button>
+                  <button
+                    onClick={() => handleStart(true)}
+                    disabled={actionLoading || !status?.cookie_exists}
+                    className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors"
+                    title="댓글을 실제로 달지 않고 생성만 테스트합니다"
+                  >
+                    {actionLoading ? '처리 중...' : '가실행'}
+                  </button>
+                </>
               )}
             </div>
 
@@ -447,29 +546,135 @@ export default function AutoReplyPage() {
           </div>
         </div>
 
-        {/* Answer Agent 프롬프트 편집 */}
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
-          <h2 className="text-lg font-semibold text-gray-800 mb-3">Answer Agent 프롬프트</h2>
-          <p className="text-sm text-gray-500 mb-3">
-            댓글 생성에 사용되는 지시문입니다. 수정 후 저장하면 다음 사이클부터 적용됩니다. 비어 있으면 봇 기본값을 사용합니다.
-          </p>
-          {promptError && (
-            <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
-              {promptError}
+        {/* 실시간 로그 뷰어 */}
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden mb-8">
+          <button
+            onClick={() => setLogsExpanded(!logsExpanded)}
+            className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-gray-800">실시간 봇 로그</h2>
+              {status?.running && (
+                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse mr-1.5"></span>
+                  실행 중
+                </span>
+              )}
+              <span className="text-sm text-gray-500">({logs.length}줄)</span>
+            </div>
+            <svg
+              className={`w-5 h-5 text-gray-500 transition-transform ${logsExpanded ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          
+          {logsExpanded && (
+            <div className="px-6 pb-6">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={autoScroll}
+                      onChange={(e) => setAutoScroll(e.target.checked)}
+                      className="rounded border-gray-300"
+                    />
+                    자동 스크롤
+                  </label>
+                </div>
+                <button
+                  onClick={() => setLogs([])}
+                  className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  로그 지우기
+                </button>
+              </div>
+              
+              <div
+                id="log-container"
+                className="bg-gray-900 text-gray-100 rounded-lg p-4 font-mono text-xs overflow-y-auto"
+                style={{ maxHeight: '500px' }}
+              >
+                {logs.length === 0 ? (
+                  <div className="text-gray-500">
+                    {status?.running ? '로그를 불러오는 중...' : '봇을 시작하면 로그가 표시됩니다.'}
+                  </div>
+                ) : (
+                  logs.map((log, idx) => (
+                    <div key={idx} className="whitespace-pre-wrap break-words">
+                      {log}
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           )}
-          {promptLoading ? (
-            <div className="text-gray-500 text-sm">불러오는 중...</div>
-          ) : (
-            <>
-              <textarea
-                value={answerPrompt}
-                onChange={(e) => setAnswerPrompt(e.target.value)}
-                placeholder="저장된 프롬프트가 없으면 여기 비워두고 저장 시 기본값이 사용됩니다. 수정 후 저장하면 여기 내용이 적용됩니다."
-                rows={14}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
-              />
-              <div className="mt-3 flex gap-2">
+        </div>
+
+        {/* Query/Answer Agent 프롬프트 편집 */}
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden mb-8">
+          <button
+            onClick={() => setPromptsExpanded(!promptsExpanded)}
+            className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+          >
+            <h2 className="text-lg font-semibold text-gray-800">봇 프롬프트 편집</h2>
+            <svg
+              className={`w-5 h-5 text-gray-500 transition-transform ${promptsExpanded ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          
+          {promptsExpanded && (
+            <div className="px-6 pb-6">
+              <p className="text-sm text-gray-500 mb-4">
+                Query Agent와 Answer Agent의 지시문입니다. 수정 후 저장하면 다음 사이클부터 적용됩니다. 비어 있으면 봇 기본값을 사용합니다.
+              </p>
+              {promptError && (
+                <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+                  {promptError}
+                </div>
+              )}
+              {promptLoading ? (
+                <div className="text-gray-500 text-sm">불러오는 중...</div>
+              ) : (
+                <div className="space-y-6">
+              {/* Query Agent 프롬프트 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Query Agent 프롬프트 (게시글 분석 및 함수 호출 생성)
+                </label>
+                <textarea
+                  value={queryPrompt}
+                  onChange={(e) => setQueryPrompt(e.target.value)}
+                  placeholder="비어 있으면 기본 Query Agent 프롬프트를 사용합니다. 여기서 수정하면 다음 사이클부터 반영됩니다."
+                  rows={16}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-xs"
+                />
+              </div>
+
+              {/* Answer Agent 프롬프트 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Answer Agent 프롬프트 (댓글 생성)
+                </label>
+                <textarea
+                  value={answerPrompt}
+                  onChange={(e) => setAnswerPrompt(e.target.value)}
+                  placeholder="비어 있으면 기본 Answer Agent 프롬프트를 사용합니다. 여기서 수정하면 다음 사이클부터 반영됩니다."
+                  rows={12}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-xs"
+                />
+              </div>
+
+              <div className="flex gap-2">
                 <button
                   onClick={fetchPrompts}
                   disabled={promptLoading}
@@ -478,14 +683,16 @@ export default function AutoReplyPage() {
                   다시 불러오기
                 </button>
                 <button
-                  onClick={handleSavePrompt}
+                  onClick={handleSavePrompts}
                   disabled={promptSaving}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
                 >
                   {promptSaving ? '저장 중...' : '프롬프트 저장'}
                 </button>
               </div>
-            </>
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -516,74 +723,44 @@ export default function AutoReplyPage() {
                 <tbody>
                   {comments.map((record, idx) => {
                     const isExpanded = expandedRows.has(idx)
-                    const raw = (s: string | undefined) => (s ?? '-').trim() || '-'
-                    const clip = (s: string, len: number) => s.length <= len ? s : s.slice(0, len) + '...'
                     return (
-                      <Fragment key={idx}>
-                        <tr
-                          onClick={() => {
-                            setExpandedRows(prev => {
-                              const next = new Set(prev)
-                              if (next.has(idx)) next.delete(idx)
-                              else next.add(idx)
-                              return next
-                            })
-                          }
-                          }
-                          className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
-                        >
-                          <td className="px-2 py-1.5 align-top">
-                            <span className="text-xs text-gray-700">{isExpanded ? raw(record.post_content) : clip(raw(record.post_content), 35)}</span>
-                          </td>
-                          <td className="px-2 py-1.5 align-top">
-                            <span className="text-xs font-mono text-gray-700 break-all">{isExpanded ? raw(record.query) : clip(raw(record.query), 40)}</span>
-                          </td>
-                          <td className="px-2 py-1.5 align-top">
-                            <span className="text-xs text-gray-700">{isExpanded ? raw(record.function_result) : clip(raw(record.function_result), 50)}</span>
-                          </td>
-                          <td className="px-2 py-1.5 align-top">
-                            <span className="text-xs text-gray-700">{isExpanded ? record.comment : clip(record.comment, 40)}</span>
-                          </td>
-                          <td className="px-2 py-1.5 align-top">
-                            <a
-                              href={record.post_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={e => e.stopPropagation()}
-                              className="text-xs text-blue-600 hover:underline truncate block"
-                            >
-                              {record.post_title || record.post_url || '(링크)'}
-                            </a>
-                          </td>
-                        </tr>
-                        {isExpanded && (
-                          <tr className="bg-gray-50 border-b border-gray-100">
-                            <td colSpan={5} className="px-4 py-3">
-                              <div className="grid grid-cols-1 gap-4 text-xs">
-                                <div>
-                                  <div className="font-semibold text-gray-600 mb-1">원글</div>
-                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-40 overflow-y-auto">{raw(record.post_content)}</pre>
-                                </div>
-                                <div>
-                                  <div className="font-semibold text-gray-600 mb-1">쿼리</div>
-                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-32 overflow-y-auto">{raw(record.query)}</pre>
-                                </div>
-                                <div>
-                                  <div className="font-semibold text-gray-600 mb-1">함수결과</div>
-                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-40 overflow-y-auto">{raw(record.function_result)}</pre>
-                                </div>
-                                <div>
-                                  <div className="font-semibold text-gray-600 mb-1">최종답변</div>
-                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-32 overflow-y-auto">{record.comment}</pre>
-                                </div>
-                                <div>
-                                  <a href={record.post_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all">{record.post_url}</a>
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
+                      <tr
+                        key={idx}
+                        onClick={() => {
+                          setExpandedRows(prev => {
+                            const next = new Set(prev)
+                            if (next.has(idx)) next.delete(idx)
+                            else next.add(idx)
+                            return next
+                          })
+                        }}
+                        className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                      >
+                        <td className="px-2 py-1.5 align-top">
+                          <ExpandableCell content={record.post_content || '-'} maxLength={35} isExpanded={isExpanded} />
+                        </td>
+                        <td className="px-2 py-1.5 align-top">
+                          <ExpandableCell content={record.query || '-'} maxLength={40} isExpanded={isExpanded} />
+                        </td>
+                        <td className="px-2 py-1.5 align-top">
+                          <ExpandableCell content={record.function_result || '-'} maxLength={50} isExpanded={isExpanded} />
+                        </td>
+                        <td className="px-2 py-1.5 align-top">
+                          <ExpandableCell content={record.comment} maxLength={40} isExpanded={isExpanded} />
+                        </td>
+                        <td className="px-2 py-1.5 align-top">
+                          <a
+                            href={record.post_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={e => e.stopPropagation()}
+                            className="text-xs text-blue-600 hover:underline block truncate"
+                            title={record.post_title || record.post_url}
+                          >
+                            {record.post_title || '링크'}
+                          </a>
+                        </td>
+                      </tr>
                     )
                   })}
                 </tbody>

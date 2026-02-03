@@ -109,8 +109,60 @@ class BotManager:
             "timestamp": datetime.now().isoformat()
         }
     
-    def start(self) -> Dict[str, Any]:
-        """봇 시작"""
+    def _cleanup_chrome_processes(self):
+        """기존 Chrome 프로세스 및 데이터 정리 (crash 방지)"""
+        try:
+            import shutil
+            import glob
+            
+            # 1. 모든 Chrome/ChromeDriver 프로세스 강제 종료 (절대 경로 사용)
+            try:
+                subprocess.run(["/usr/bin/pkill", "-9", "chrome"], capture_output=True)
+                subprocess.run(["/usr/bin/pkill", "-9", "chromedriver"], capture_output=True)
+                print("[BotManager] Chrome 프로세스 정리 완료")
+            except Exception as e:
+                print(f"[BotManager] Chrome 프로세스 종료 중 오류 (무시): {e}")
+            
+            # 2. bot_dir 내부의 모든 chrome_data_* 디렉토리 삭제
+            chrome_data_dirs = glob.glob(os.path.join(self.bot_dir, "chrome_data_*"))
+            for dir_path in chrome_data_dirs:
+                try:
+                    shutil.rmtree(dir_path)
+                    print(f"[BotManager] Chrome 데이터 정리: {dir_path}")
+                except Exception as e:
+                    print(f"[BotManager] Chrome 데이터 정리 실패: {e}")
+            
+            # 3. /tmp 내 Chrome 임시 파일 정리
+            tmp_patterns = [
+                "/tmp/com.google.Chrome.*",
+                "/tmp/.org.chromium.*",
+                "/tmp/org.chromium.*"
+            ]
+            for pattern in tmp_patterns:
+                for tmp_path in glob.glob(pattern):
+                    try:
+                        if os.path.isdir(tmp_path):
+                            shutil.rmtree(tmp_path)
+                        else:
+                            os.remove(tmp_path)
+                    except:
+                        pass
+            
+            # 4. 정리 후 잠시 대기 (프로세스 완전 종료 대기)
+            import time
+            time.sleep(2)
+            
+            print("[BotManager] Chrome 정리 완료")
+            
+        except Exception as e:
+            print(f"[BotManager] Chrome 프로세스 정리 중 오류: {e}")
+    
+    def start(self, dry_run: bool = False) -> Dict[str, Any]:
+        """봇 시작
+        
+        Args:
+            dry_run: True면 댓글을 실제로 달지 않고 생성만 함 (가실행 모드)
+        """
         status = self.get_status()
         
         if status["running"]:
@@ -125,6 +177,9 @@ class BotManager:
                 "success": False,
                 "message": "쿠키 파일이 없습니다. 로컬에서 get_cookies.py를 실행하세요."
             }
+        
+        # Chrome 프로세스 정리 (crash 방지)
+        self._cleanup_chrome_processes()
         
         # 정지 플래그 제거
         if os.path.exists(self.stop_flag_file):
@@ -143,13 +198,32 @@ class BotManager:
             # 환경 변수 설정
             env = os.environ.copy()
             env["HEADLESS"] = "true"
+            env["PYTHONUNBUFFERED"] = "1"  # 로그 실시간 출력 (버퍼링 해제)
+            if dry_run:
+                env["DRY_RUN"] = "true"
+            
+            # 시스템 PATH 추가 (venv 환경에서 실행 시 Chrome 등 시스템 바이너리 접근 필요)
+            system_paths = "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin"
+            if "PATH" in env:
+                env["PATH"] = f"{system_paths}:{env['PATH']}"
+            else:
+                env["PATH"] = system_paths
+            
+            # DISPLAY 환경변수 제거 (headless 모드에서 불필요)
+            env.pop("DISPLAY", None)
             
             # 백그라운드 프로세스로 시작 (봇 로그는 bot_dir/bot.log에 기록)
-            python_cmd = "python3" if os.path.exists("/usr/bin/python3") else "python"
+            # 시스템 python3 명시적 사용 (selenium 등 시스템 패키지 사용)
+            python_cmd = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else "python3"
             bot_log = os.path.join(self.bot_dir, "bot.log")
             logf = open(bot_log, "a", encoding="utf-8")
             logf.write(f"\n===== 봇 시작 {datetime.now().isoformat()} =====\n")
             logf.flush()
+            
+            # DRY_RUN 모드 설정
+            if env.get("DRY_RUN") == "true":
+                logf.write("[DRY RUN MODE] 댓글을 실제로 달지 않고 생성만 합니다.\n")
+            
             self._process = subprocess.Popen(
                 [python_cmd, main_py],
                 cwd=self.bot_dir,
@@ -163,10 +237,12 @@ class BotManager:
             # PID 저장
             self._write_pid_file(self._process.pid)
             
+            mode_msg = " (가실행 모드)" if dry_run else ""
             return {
                 "success": True,
-                "message": "봇이 시작되었습니다.",
-                "pid": self._process.pid
+                "message": f"봇이 시작되었습니다.{mode_msg}",
+                "pid": self._process.pid,
+                "dry_run": dry_run
             }
             
         except Exception as e:
@@ -180,6 +256,8 @@ class BotManager:
         status = self.get_status()
         
         if not status["running"]:
+            # 실행 중이 아니어도 Chrome 정리는 수행
+            self._cleanup_chrome_processes()
             return {
                 "success": False,
                 "message": "봇이 실행 중이 아닙니다."
@@ -208,6 +286,9 @@ class BotManager:
             
             self._process = None
             self._remove_pid_file()
+            
+            # Chrome 프로세스 정리
+            self._cleanup_chrome_processes()
             
             return {
                 "success": True,
@@ -290,23 +371,44 @@ class BotManager:
         }
 
     def get_prompts(self) -> Dict[str, Any]:
-        """봇 프롬프트 조회 (Answer Agent용). 파일 없으면 빈 dict."""
+        """봇 프롬프트 조회 (Query/Answer Agent용). 파일 없으면 빈 dict."""
         if not os.path.exists(self.prompts_file):
-            return {"answer_prompt": ""}
+            return {"query_prompt": "", "answer_prompt": ""}
         try:
             with open(self.prompts_file, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                return {
+                    "query_prompt": data.get("query_prompt", ""),
+                    "answer_prompt": data.get("answer_prompt", "")
+                }
         except Exception:
-            return {"answer_prompt": ""}
+            return {"query_prompt": "", "answer_prompt": ""}
 
     def update_prompts(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """봇 프롬프트 저장. answer_prompt만 저장."""
-        prompt = data.get("answer_prompt")
-        if prompt is None:
-            return {"success": False, "message": "answer_prompt 필드가 필요합니다."}
+        """봇 프롬프트 저장. query_prompt와 answer_prompt 둘 다 저장."""
+        query_prompt = data.get("query_prompt")
+        answer_prompt = data.get("answer_prompt")
+        
+        if query_prompt is None and answer_prompt is None:
+            return {"success": False, "message": "query_prompt 또는 answer_prompt 필드가 필요합니다."}
+        
+        # 기존 파일 읽어서 업데이트
+        current = {"query_prompt": "", "answer_prompt": ""}
+        if os.path.exists(self.prompts_file):
+            try:
+                with open(self.prompts_file, "r", encoding="utf-8") as f:
+                    current = json.load(f)
+            except:
+                pass
+        
+        if query_prompt is not None:
+            current["query_prompt"] = query_prompt
+        if answer_prompt is not None:
+            current["answer_prompt"] = answer_prompt
+        
         try:
             with open(self.prompts_file, "w", encoding="utf-8") as f:
-                json.dump({"answer_prompt": prompt}, f, ensure_ascii=False, indent=2)
+                json.dump(current, f, ensure_ascii=False, indent=2)
             return {"success": True, "message": "프롬프트가 저장되었습니다."}
         except Exception as e:
             return {"success": False, "message": str(e)}
