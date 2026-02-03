@@ -22,9 +22,9 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 # 업로드와 동일한 임베딩 모델 사용 (768차원, DB vector(768)와 일치)
 try:
     from config import embedding_settings as embedding_config
-    _DEFAULT_EMBEDDING_MODEL = getattr(embedding_config, "DEFAULT_EMBEDDING_MODEL", "models/text-embedding-004")
+    _DEFAULT_EMBEDDING_MODEL = getattr(embedding_config, "DEFAULT_EMBEDDING_MODEL", "models/embedding-001")
 except Exception:
-    _DEFAULT_EMBEDDING_MODEL = "models/text-embedding-004"
+    _DEFAULT_EMBEDDING_MODEL = "models/embedding-001"
 
 
 def _school_name_search_variants(university: str) -> List[str]:
