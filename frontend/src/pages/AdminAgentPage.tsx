@@ -12,9 +12,10 @@ import {
 
 // Admin Agent 평가 함수 (백그라운드에서 비동기 실행, 백엔드 API 호출)
 async function evaluateLog(log: ExecutionLog): Promise<void> {
-  // 평가 중단 상태 확인
+  // 평가 중단 상태 확인 - 평가만 스킵하고 로그는 유지
   if (log.evaluation?.skipped) {
-    // 평가가 이미 중단되었으면 스킵
+    // 평가가 중단되었으면 평가 API 호출 없이 반환
+    // 로그는 그대로 유지됨
     return
   }
   
@@ -181,7 +182,6 @@ function getStatusBgColor(status: string): string {
     case 'ok': return 'bg-green-50'
     case 'warning': return 'bg-yellow-50'
     case 'error': return 'bg-red-50'
-    case 'skipped': return 'bg-gray-50'
     case 'pending': return 'bg-blue-50'
     default: return ''
   }
@@ -408,13 +408,13 @@ export default function AdminAgentPage() {
 
   // 평가 중단
   const handleSkipEvaluation = async (log: ExecutionLog) => {
-    // 평가 상태를 모두 'skipped'로 설정
+    // 평가 중단 플래그만 설정 (로그는 유지)
     const skippedEvaluation: ExecutionLog['evaluation'] = {
-      routerStatus: 'skipped',
-      functionStatus: 'skipped',
-      answerStatus: 'skipped',
-      timeStatus: 'skipped',
-      skipped: true
+      routerStatus: 'pending',
+      functionStatus: 'pending',
+      answerStatus: 'pending',
+      timeStatus: 'ok',
+      skipped: true  // 평가 중단 플래그
     }
     
     await updateLogEvaluation(log.id, skippedEvaluation)
@@ -660,7 +660,7 @@ export default function AdminAgentPage() {
                               ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
                               : 'bg-red-100 text-red-700 hover:bg-red-200'
                           }`}
-                          title={log.evaluation?.skipped ? '평가가 중단되었습니다' : '평가 중단'}
+                          title={log.evaluation?.skipped ? '평가가 중단되었습니다. 로그는 유지됩니다.' : '평가 중단 (로그는 유지)'}
                         >
                           {log.evaluation?.skipped ? '중단됨' : '중단'}
                         </button>
