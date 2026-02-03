@@ -12,6 +12,12 @@ import {
 
 // Admin Agent 평가 함수 (백그라운드에서 비동기 실행, 백엔드 API 호출)
 async function evaluateLog(log: ExecutionLog): Promise<void> {
+  // 평가 중단 상태 확인
+  if (log.evaluation?.skipped) {
+    // 평가가 이미 중단되었으면 스킵
+    return
+  }
+  
   const evaluation: ExecutionLog['evaluation'] = {
     routerStatus: 'pending',
     functionStatus: 'pending',
@@ -175,6 +181,8 @@ function getStatusBgColor(status: string): string {
     case 'ok': return 'bg-green-50'
     case 'warning': return 'bg-yellow-50'
     case 'error': return 'bg-red-50'
+    case 'skipped': return 'bg-gray-50'
+    case 'pending': return 'bg-blue-50'
     default: return ''
   }
 }
@@ -398,6 +406,21 @@ export default function AdminAgentPage() {
     setLogs(getLogs())
   }
 
+  // 평가 중단
+  const handleSkipEvaluation = async (log: ExecutionLog) => {
+    // 평가 상태를 모두 'skipped'로 설정
+    const skippedEvaluation: ExecutionLog['evaluation'] = {
+      routerStatus: 'skipped',
+      functionStatus: 'skipped',
+      answerStatus: 'skipped',
+      timeStatus: 'skipped',
+      skipped: true
+    }
+    
+    await updateLogEvaluation(log.id, skippedEvaluation)
+    setLogs(getLogs())
+  }
+
   // 전체 삭제 핸들러
   const handleClearLogs = async () => {
     if (confirm('모든 로그를 삭제하시겠습니까?')) {
@@ -609,22 +632,39 @@ export default function AdminAgentPage() {
                       )}
                     </td>
                     
-                    {/* 재평가 */}
+                    {/* 재평가 / 평가 중단 */}
                     <td className="px-2 py-1.5 align-middle text-center">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleReEvaluate(log)
-                        }}
-                        disabled={isEvaluating}
-                        className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
-                          isEvaluating 
-                            ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
-                            : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
-                        }`}
-                      >
-                        {isEvaluating ? '...' : '재평가'}
-                      </button>
+                      <div className="flex gap-1 justify-center">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleReEvaluate(log)
+                          }}
+                          disabled={isEvaluating}
+                          className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
+                            isEvaluating 
+                              ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                              : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                          }`}
+                        >
+                          {isEvaluating ? '...' : '재평가'}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleSkipEvaluation(log)
+                          }}
+                          disabled={isEvaluating || log.evaluation?.skipped}
+                          className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
+                            isEvaluating || log.evaluation?.skipped
+                              ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
+                              : 'bg-red-100 text-red-700 hover:bg-red-200'
+                          }`}
+                          title={log.evaluation?.skipped ? '평가가 중단되었습니다' : '평가 중단'}
+                        >
+                          {log.evaluation?.skipped ? '중단됨' : '중단'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 )

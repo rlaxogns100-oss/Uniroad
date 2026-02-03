@@ -22,14 +22,15 @@ export interface ExecutionLog {
   
   // Admin Agent 평가 결과
   evaluation?: {
-    routerStatus: 'ok' | 'warning' | 'error' | 'pending'
-    functionStatus: 'ok' | 'warning' | 'error' | 'pending'
-    answerStatus: 'ok' | 'warning' | 'error' | 'pending'
-    timeStatus: 'ok' | 'warning' | 'error' | 'pending'
+    routerStatus: 'ok' | 'warning' | 'error' | 'pending' | 'skipped'
+    functionStatus: 'ok' | 'warning' | 'error' | 'pending' | 'skipped'
+    answerStatus: 'ok' | 'warning' | 'error' | 'pending' | 'skipped'
+    timeStatus: 'ok' | 'warning' | 'error' | 'pending' | 'skipped'
     routerComment?: string
     functionComment?: string
     answerComment?: string
     timeComment?: string
+    skipped?: boolean  // 평가 중단 여부
   }
 }
 
