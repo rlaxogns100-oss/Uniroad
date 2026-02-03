@@ -3,7 +3,7 @@
 Gemini Vision 기반 PDF 섹션 전처리 및 벡터스토어 생성
 """
 from PyPDF2 import PdfReader, PdfWriter
-from langchain.docstore.document import Document
+from langchain_core.documents import Document
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from .vision_processor import VisionProcessor

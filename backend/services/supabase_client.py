@@ -6,7 +6,7 @@ from config import settings
 from config import embedding_settings as embedding_config
 from typing import Optional, Dict, Any, List
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain.docstore.document import Document
+from langchain_core.documents import Document
 import os
 
 
