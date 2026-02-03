@@ -106,14 +106,7 @@ function App() {
               </AdminRoute>
             }
           />
-          <Route
-            path="/auto-reply"
-            element={
-              <AdminRoute>
-                <AutoReplyPage />
-              </AdminRoute>
-            }
-          />
+          <Route path="/auto-reply" element={<AutoReplyPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

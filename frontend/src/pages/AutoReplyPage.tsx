@@ -11,9 +11,9 @@ interface BotStatus {
 }
 
 interface BotConfig {
-  max_comments_per_minute: number
   min_delay_seconds: number
-  max_delay_seconds: number
+  comments_per_hour_min: number
+  comments_per_hour_max: number
   rest_minutes: number
 }
 
@@ -37,6 +37,9 @@ const API_BASE = '/api/auto-reply'
 
 export default function AutoReplyPage() {
   const navigate = useNavigate()
+  const [authenticated, setAuthenticated] = useState(false)
+  const [password, setPassword] = useState('')
+  const [authError, setAuthError] = useState('')
   const [status, setStatus] = useState<BotStatus | null>(null)
   const [comments, setComments] = useState<CommentRecord[]>([])
   const [totalComments, setTotalComments] = useState(0)
@@ -46,9 +49,20 @@ export default function AutoReplyPage() {
   
   // 설정 상태
   const [minDelay, setMinDelay] = useState(50)
-  const [maxDelay, setMaxDelay] = useState(80)
+  const [commentsPerHourMin, setCommentsPerHourMin] = useState(5)
+  const [commentsPerHourMax, setCommentsPerHourMax] = useState(10)
   const [restMinutes, setRestMinutes] = useState(3)
   const [configChanged, setConfigChanged] = useState(false)
+
+  const handlePasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (password === '123456') {
+      setAuthenticated(true)
+      setAuthError('')
+    } else {
+      setAuthError('비밀번호가 올바르지 않습니다.')
+    }
+  }
 
   const fetchStatus = useCallback(async () => {
     try {
@@ -56,9 +70,10 @@ export default function AutoReplyPage() {
       if (!res.ok) throw new Error('상태 조회 실패')
       const data: BotStatus = await res.json()
       setStatus(data)
-      setMinDelay(data.config.min_delay_seconds)
-      setMaxDelay(data.config.max_delay_seconds)
-      setRestMinutes(data.config.rest_minutes)
+      setMinDelay(data.config.min_delay_seconds ?? 50)
+      setCommentsPerHourMin(data.config.comments_per_hour_min ?? 5)
+      setCommentsPerHourMax(data.config.comments_per_hour_max ?? 10)
+      setRestMinutes(data.config.rest_minutes ?? 3)
       setConfigChanged(false)
     } catch (e) {
       setError('봇 상태를 불러올 수 없습니다.')
@@ -133,7 +148,8 @@ export default function AutoReplyPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           min_delay_seconds: minDelay,
-          max_delay_seconds: maxDelay,
+          comments_per_hour_min: commentsPerHourMin,
+          comments_per_hour_max: commentsPerHourMax,
           rest_minutes: restMinutes
         })
       })
@@ -156,6 +172,40 @@ export default function AutoReplyPage() {
       hour: '2-digit',
       minute: '2-digit'
     })
+  }
+
+  if (!authenticated) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="bg-white rounded-xl shadow-lg p-8 max-w-md w-full">
+          <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">봇 관리자 인증</h2>
+          <form onSubmit={handlePasswordSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                비밀번호
+              </label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="비밀번호를 입력하세요"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                autoFocus
+              />
+            </div>
+            {authError && (
+              <div className="text-red-600 text-sm">{authError}</div>
+            )}
+            <button
+              type="submit"
+              className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors"
+            >
+              접속
+            </button>
+          </form>
+        </div>
+      </div>
+    )
   }
 
   if (loading) {
@@ -285,22 +335,43 @@ export default function AutoReplyPage() {
                 />
               </div>
               
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">
-                  최대 딜레이 (초)
-                </label>
-                <input
-                  type="number"
-                  value={maxDelay}
-                  onChange={(e) => {
-                    setMaxDelay(Number(e.target.value))
-                    setConfigChanged(true)
-                  }}
-                  min={10}
-                  max={300}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">
+                    시간당 댓글 수 (최소)
+                  </label>
+                  <input
+                    type="number"
+                    value={commentsPerHourMin}
+                    onChange={(e) => {
+                      setCommentsPerHourMin(Number(e.target.value))
+                      setConfigChanged(true)
+                    }}
+                    min={1}
+                    max={60}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-600 mb-1">
+                    시간당 댓글 수 (최대)
+                  </label>
+                  <input
+                    type="number"
+                    value={commentsPerHourMax}
+                    onChange={(e) => {
+                      setCommentsPerHourMax(Number(e.target.value))
+                      setConfigChanged(true)
+                    }}
+                    min={1}
+                    max={60}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                  />
+                </div>
               </div>
+              <p className="text-xs text-gray-500 -mt-1">
+                예: 5~10이면 시간당 약 5~10개, 댓글 사이에 랜덤 딜레이 적용
+              </p>
               
               <div>
                 <label className="block text-sm text-gray-600 mb-1">
@@ -328,9 +399,7 @@ export default function AutoReplyPage() {
               </button>
 
               <p className="text-sm text-gray-500">
-                분당 최대 댓글 수는 딜레이 설정으로 자동 조절됩니다.
-                <br />
-                예: 60초 딜레이 = 분당 1개
+                최소 딜레이 이상으로, 시간당 댓글 수 범위에 맞춰 댓글과 댓글 사이에 랜덤 딜레이가 적용됩니다.
               </p>
             </div>
           </div>

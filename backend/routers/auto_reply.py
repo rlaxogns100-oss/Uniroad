@@ -11,9 +11,9 @@ router = APIRouter()
 
 class BotConfigUpdate(BaseModel):
     """봇 설정 업데이트 요청"""
-    max_comments_per_minute: Optional[int] = None
     min_delay_seconds: Optional[int] = None
-    max_delay_seconds: Optional[int] = None
+    comments_per_hour_min: Optional[int] = None
+    comments_per_hour_max: Optional[int] = None
     rest_minutes: Optional[int] = None
 
 

@@ -144,8 +144,10 @@ class BotManager:
             env["HEADLESS"] = "true"
             
             # 백그라운드 프로세스로 시작
+            # python3 사용 (Ubuntu 서버 호환)
+            python_cmd = "python3" if os.path.exists("/usr/bin/python3") else "python"
             self._process = subprocess.Popen(
-                ["python", main_py],
+                [python_cmd, main_py],
                 cwd=self.bot_dir,
                 env=env,
                 stdout=subprocess.PIPE,
@@ -216,9 +218,9 @@ class BotManager:
     def get_config(self) -> Dict[str, Any]:
         """봇 설정 조회"""
         default_config = {
-            "max_comments_per_minute": 1,
             "min_delay_seconds": 50,
-            "max_delay_seconds": 80,
+            "comments_per_hour_min": 5,
+            "comments_per_hour_max": 10,
             "rest_minutes": 3
         }
         
