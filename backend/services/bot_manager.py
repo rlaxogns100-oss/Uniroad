@@ -201,6 +201,16 @@ class BotManager:
             if dry_run:
                 env["DRY_RUN"] = "true"
             
+            # 시스템 PATH 추가 (venv 환경에서 실행 시 Chrome 등 시스템 바이너리 접근 필요)
+            system_paths = "/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin"
+            if "PATH" in env:
+                env["PATH"] = f"{system_paths}:{env['PATH']}"
+            else:
+                env["PATH"] = system_paths
+            
+            # DISPLAY 환경변수 제거 (headless 모드에서 불필요)
+            env.pop("DISPLAY", None)
+            
             # 백그라운드 프로세스로 시작 (봇 로그는 bot_dir/bot.log에 기록)
             # 시스템 python3 명시적 사용 (selenium 등 시스템 패키지 사용)
             python_cmd = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else "python3"
