@@ -290,23 +290,44 @@ class BotManager:
         }
 
     def get_prompts(self) -> Dict[str, Any]:
-        """봇 프롬프트 조회 (Answer Agent용). 파일 없으면 빈 dict."""
+        """봇 프롬프트 조회 (Query/Answer Agent용). 파일 없으면 빈 dict."""
         if not os.path.exists(self.prompts_file):
-            return {"answer_prompt": ""}
+            return {"query_prompt": "", "answer_prompt": ""}
         try:
             with open(self.prompts_file, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+                return {
+                    "query_prompt": data.get("query_prompt", ""),
+                    "answer_prompt": data.get("answer_prompt", "")
+                }
         except Exception:
-            return {"answer_prompt": ""}
+            return {"query_prompt": "", "answer_prompt": ""}
 
     def update_prompts(self, data: Dict[str, Any]) -> Dict[str, Any]:
-        """봇 프롬프트 저장. answer_prompt만 저장."""
-        prompt = data.get("answer_prompt")
-        if prompt is None:
-            return {"success": False, "message": "answer_prompt 필드가 필요합니다."}
+        """봇 프롬프트 저장. query_prompt와 answer_prompt 둘 다 저장."""
+        query_prompt = data.get("query_prompt")
+        answer_prompt = data.get("answer_prompt")
+        
+        if query_prompt is None and answer_prompt is None:
+            return {"success": False, "message": "query_prompt 또는 answer_prompt 필드가 필요합니다."}
+        
+        # 기존 파일 읽어서 업데이트
+        current = {"query_prompt": "", "answer_prompt": ""}
+        if os.path.exists(self.prompts_file):
+            try:
+                with open(self.prompts_file, "r", encoding="utf-8") as f:
+                    current = json.load(f)
+            except:
+                pass
+        
+        if query_prompt is not None:
+            current["query_prompt"] = query_prompt
+        if answer_prompt is not None:
+            current["answer_prompt"] = answer_prompt
+        
         try:
             with open(self.prompts_file, "w", encoding="utf-8") as f:
-                json.dump({"answer_prompt": prompt}, f, ensure_ascii=False, indent=2)
+                json.dump(current, f, ensure_ascii=False, indent=2)
             return {"success": True, "message": "프롬프트가 저장되었습니다."}
         except Exception as e:
             return {"success": False, "message": str(e)}

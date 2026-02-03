@@ -129,14 +129,15 @@ async def get_comments(limit: int = 100, offset: int = 0):
 
 class PromptsUpdate(BaseModel):
     """프롬프트 업데이트 요청"""
-    answer_prompt: str
+    query_prompt: Optional[str] = None
+    answer_prompt: Optional[str] = None
 
 
 @router.get("/prompts")
 async def get_prompts():
     """
-    봇 Answer Agent 프롬프트 조회.
-    bot_prompts.json에 저장된 값 반환. 없으면 answer_prompt: "".
+    봇 Query/Answer Agent 프롬프트 조회.
+    bot_prompts.json에 저장된 값 반환. 없으면 빈 문자열.
     """
     manager = get_bot_manager()
     return manager.get_prompts()
@@ -145,11 +146,11 @@ async def get_prompts():
 @router.post("/prompts")
 async def update_prompts(body: PromptsUpdate):
     """
-    봇 Answer Agent 프롬프트 저장.
+    봇 Query/Answer Agent 프롬프트 저장.
     다음 사이클부터 봇이 이 프롬프트를 사용합니다.
     """
     manager = get_bot_manager()
-    result = manager.update_prompts({"answer_prompt": body.answer_prompt})
+    result = manager.update_prompts(body.model_dump(exclude_none=True))
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", "저장 실패"))
     return result

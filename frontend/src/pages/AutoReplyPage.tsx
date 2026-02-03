@@ -57,7 +57,8 @@ export default function AutoReplyPage() {
   const [restMinutes, setRestMinutes] = useState(3)
   const [configChanged, setConfigChanged] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
-  // 프롬프트 편집
+  // 프롬프트 편집 (Query + Answer 2개)
+  const [queryPrompt, setQueryPrompt] = useState('')
   const [answerPrompt, setAnswerPrompt] = useState('')
   const [promptLoading, setPromptLoading] = useState(false)
   const [promptSaving, setPromptSaving] = useState(false)
@@ -108,6 +109,7 @@ export default function AutoReplyPage() {
       const res = await fetch(`${API_BASE}/prompts`)
       if (!res.ok) throw new Error('프롬프트 조회 실패')
       const data = await res.json()
+      setQueryPrompt(data.query_prompt ?? '')
       setAnswerPrompt(data.answer_prompt ?? '')
     } catch (e: any) {
       setPromptError(e.message ?? '프롬프트를 불러올 수 없습니다.')
@@ -116,17 +118,21 @@ export default function AutoReplyPage() {
     }
   }, [])
 
-  const handleSavePrompt = async () => {
+  const handleSavePrompts = async () => {
     setPromptSaving(true)
     setPromptError(null)
     try {
       const res = await fetch(`${API_BASE}/prompts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ answer_prompt: answerPrompt })
+        body: JSON.stringify({
+          query_prompt: queryPrompt,
+          answer_prompt: answerPrompt
+        })
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || '저장 실패')
+      alert('프롬프트가 저장되었습니다.')
     } catch (e: any) {
       setPromptError(e.message ?? '저장 실패')
     } finally {
@@ -447,11 +453,11 @@ export default function AutoReplyPage() {
           </div>
         </div>
 
-        {/* Answer Agent 프롬프트 편집 */}
+        {/* Query/Answer Agent 프롬프트 편집 */}
         <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
-          <h2 className="text-lg font-semibold text-gray-800 mb-3">Answer Agent 프롬프트</h2>
-          <p className="text-sm text-gray-500 mb-3">
-            댓글 생성에 사용되는 지시문입니다. 수정 후 저장하면 다음 사이클부터 적용됩니다. 비어 있으면 봇 기본값을 사용합니다.
+          <h2 className="text-lg font-semibold text-gray-800 mb-3">봇 프롬프트 편집</h2>
+          <p className="text-sm text-gray-500 mb-4">
+            Query Agent와 Answer Agent의 지시문입니다. 수정 후 저장하면 다음 사이클부터 적용됩니다. 비어 있으면 봇 기본값을 사용합니다.
           </p>
           {promptError && (
             <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
@@ -461,15 +467,36 @@ export default function AutoReplyPage() {
           {promptLoading ? (
             <div className="text-gray-500 text-sm">불러오는 중...</div>
           ) : (
-            <>
-              <textarea
-                value={answerPrompt}
-                onChange={(e) => setAnswerPrompt(e.target.value)}
-                placeholder="저장된 프롬프트가 없으면 여기 비워두고 저장 시 기본값이 사용됩니다. 수정 후 저장하면 여기 내용이 적용됩니다."
-                rows={14}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
-              />
-              <div className="mt-3 flex gap-2">
+            <div className="space-y-6">
+              {/* Query Agent 프롬프트 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Query Agent 프롬프트 (게시글 분석 및 함수 호출 생성)
+                </label>
+                <textarea
+                  value={queryPrompt}
+                  onChange={(e) => setQueryPrompt(e.target.value)}
+                  placeholder="비어 있으면 기본 Query Agent 프롬프트를 사용합니다. 여기서 수정하면 다음 사이클부터 반영됩니다."
+                  rows={16}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-xs"
+                />
+              </div>
+
+              {/* Answer Agent 프롬프트 */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Answer Agent 프롬프트 (댓글 생성)
+                </label>
+                <textarea
+                  value={answerPrompt}
+                  onChange={(e) => setAnswerPrompt(e.target.value)}
+                  placeholder="비어 있으면 기본 Answer Agent 프롬프트를 사용합니다. 여기서 수정하면 다음 사이클부터 반영됩니다."
+                  rows={12}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-xs"
+                />
+              </div>
+
+              <div className="flex gap-2">
                 <button
                   onClick={fetchPrompts}
                   disabled={promptLoading}
@@ -478,14 +505,14 @@ export default function AutoReplyPage() {
                   다시 불러오기
                 </button>
                 <button
-                  onClick={handleSavePrompt}
+                  onClick={handleSavePrompts}
                   disabled={promptSaving}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
                 >
                   {promptSaving ? '저장 중...' : '프롬프트 저장'}
                 </button>
               </div>
-            </>
+            </div>
           )}
         </div>
 
@@ -528,21 +555,20 @@ export default function AutoReplyPage() {
                               else next.add(idx)
                               return next
                             })
-                          }
-                          }
+                          }}
                           className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
                         >
                           <td className="px-2 py-1.5 align-top">
-                            <span className="text-xs text-gray-700">{isExpanded ? raw(record.post_content) : clip(raw(record.post_content), 35)}</span>
+                            <span className="text-xs text-gray-700">{clip(raw(record.post_content), 35)}</span>
                           </td>
                           <td className="px-2 py-1.5 align-top">
-                            <span className="text-xs font-mono text-gray-700 break-all">{isExpanded ? raw(record.query) : clip(raw(record.query), 40)}</span>
+                            <span className="text-xs font-mono text-gray-700 break-all">{clip(raw(record.query), 40)}</span>
                           </td>
                           <td className="px-2 py-1.5 align-top">
-                            <span className="text-xs text-gray-700">{isExpanded ? raw(record.function_result) : clip(raw(record.function_result), 50)}</span>
+                            <span className="text-xs text-gray-700">{clip(raw(record.function_result), 50)}</span>
                           </td>
                           <td className="px-2 py-1.5 align-top">
-                            <span className="text-xs text-gray-700">{isExpanded ? record.comment : clip(record.comment, 40)}</span>
+                            <span className="text-xs text-gray-700">{clip(record.comment, 40)}</span>
                           </td>
                           <td className="px-2 py-1.5 align-top">
                             <a
@@ -562,22 +588,23 @@ export default function AutoReplyPage() {
                               <div className="grid grid-cols-1 gap-4 text-xs">
                                 <div>
                                   <div className="font-semibold text-gray-600 mb-1">원글</div>
-                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-40 overflow-y-auto">{raw(record.post_content)}</pre>
+                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-40 overflow-y-auto text-xs">{raw(record.post_content)}</pre>
                                 </div>
                                 <div>
-                                  <div className="font-semibold text-gray-600 mb-1">쿼리</div>
-                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-32 overflow-y-auto">{raw(record.query)}</pre>
+                                  <div className="font-semibold text-gray-600 mb-1">쿼리 (Query Agent 출력)</div>
+                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-32 overflow-y-auto text-xs">{raw(record.query)}</pre>
                                 </div>
                                 <div>
-                                  <div className="font-semibold text-gray-600 mb-1">함수결과</div>
-                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-40 overflow-y-auto">{raw(record.function_result)}</pre>
+                                  <div className="font-semibold text-gray-600 mb-1">함수결과 (RAG 컨텍스트)</div>
+                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-40 overflow-y-auto text-xs">{raw(record.function_result)}</pre>
                                 </div>
                                 <div>
-                                  <div className="font-semibold text-gray-600 mb-1">최종답변</div>
-                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-32 overflow-y-auto">{record.comment}</pre>
+                                  <div className="font-semibold text-gray-600 mb-1">최종답변 (Answer Agent 출력)</div>
+                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-32 overflow-y-auto text-xs">{record.comment}</pre>
                                 </div>
                                 <div>
-                                  <a href={record.post_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all">{record.post_url}</a>
+                                  <div className="font-semibold text-gray-600 mb-1">링크</div>
+                                  <a href={record.post_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all text-xs">{record.post_url}</a>
                                 </div>
                               </div>
                             </td>
