@@ -115,10 +115,10 @@ class BotManager:
             import shutil
             import glob
             
-            # 1. 모든 Chrome/ChromeDriver 프로세스 강제 종료
+            # 1. 모든 Chrome/ChromeDriver 프로세스 강제 종료 (절대 경로 사용)
             try:
-                subprocess.run(["pkill", "-9", "chrome"], capture_output=True)
-                subprocess.run(["pkill", "-9", "chromedriver"], capture_output=True)
+                subprocess.run(["/usr/bin/pkill", "-9", "chrome"], capture_output=True)
+                subprocess.run(["/usr/bin/pkill", "-9", "chromedriver"], capture_output=True)
                 print("[BotManager] Chrome 프로세스 정리 완료")
             except Exception as e:
                 print(f"[BotManager] Chrome 프로세스 종료 중 오류 (무시): {e}")
