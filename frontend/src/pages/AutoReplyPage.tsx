@@ -149,7 +149,7 @@ export default function AutoReplyPage() {
       setRestMinutes(data.config.rest_minutes ?? 3)
       const loadedKeywords = data.config.keywords ?? []
       setKeywords(loadedKeywords)
-      setKeywordsText(loadedKeywords.join('\n'))
+      setKeywordsText(loadedKeywords.join(', '))
       setConfigChanged(false)
     } catch (e) {
       setError('봇 상태를 불러올 수 없습니다.')
@@ -322,8 +322,8 @@ export default function AutoReplyPage() {
 
   const handleKeywordsChange = (text: string) => {
     setKeywordsText(text)
-    // 줄바꿈으로 분리하고 빈 줄 제거
-    const newKeywords = text.split('\n').map(k => k.trim()).filter(k => k.length > 0)
+    // 콤마로 분리하고 빈 값 제거
+    const newKeywords = text.split(',').map(k => k.trim()).filter(k => k.length > 0)
     setKeywords(newKeywords)
     setConfigChanged(true)
   }
@@ -635,20 +635,20 @@ export default function AutoReplyPage() {
           {keywordsExpanded && (
             <div className="px-6 pb-6">
               <p className="text-sm text-gray-500 mb-4">
-                봇이 검색할 키워드 목록입니다. 한 줄에 하나씩 입력하세요. 수정 후 '설정 저장' 버튼을 눌러야 적용됩니다.
+                봇이 검색할 키워드 목록입니다. 콤마(,)로 구분하여 입력하세요. 비어있으면 기본 키워드를 사용합니다.
               </p>
               
-              <textarea
+              <input
+                type="text"
                 value={keywordsText}
                 onChange={(e) => handleKeywordsChange(e.target.value)}
-                placeholder="정시&#10;표점&#10;백분위&#10;서울대&#10;..."
-                rows={12}
+                placeholder="정시, 표점, 백분위, 서울대, 연세대, ..."
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
               />
               
               <div className="mt-3 flex items-center justify-between">
                 <span className="text-sm text-gray-500">
-                  현재 {keywords.length}개 키워드
+                  현재 {keywords.length}개 키워드 {keywords.length === 0 && '(기본값 사용)'}
                 </span>
                 <button
                   onClick={handleSaveConfig}
@@ -658,6 +658,15 @@ export default function AutoReplyPage() {
                   {actionLoading ? '저장 중...' : '설정 저장'}
                 </button>
               </div>
+              
+              {keywords.length === 0 && (
+                <div className="mt-3 p-3 bg-gray-50 rounded-lg">
+                  <p className="text-xs text-gray-600 mb-1 font-medium">기본 키워드:</p>
+                  <p className="text-xs text-gray-500">
+                    정시, 표점, 표준점수, 환산점수, 백분위, 추합, 예비, 최초합, 전찬, 추가합격, 상향, 소신, 안정, 하향, 스나, 빵꾸, 인서울, 수도권, 지거국, 대학 라인, 어디가, 건동홍, 국숭세단, 광명상가, 인가경, 한서삼, 서울대, 연세대, 고려대, 성균관대, 한양대, 중앙대, 건국대, 한국외대, 중대, 경희대, 동국대, 명지대, 서강대, 광운대, 선리대, 숭실대, 이화여대
+                  </p>
+                </div>
+              )}
             </div>
           )}
         </div>

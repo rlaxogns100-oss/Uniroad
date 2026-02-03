@@ -8,6 +8,7 @@ import json
 import subprocess
 import signal
 import requests
+import asyncio
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 from pathlib import Path
@@ -514,22 +515,20 @@ class BotManager:
                     "answer": "[PASS] 도움이 필요하지 않은 게시글입니다."
                 }
             
-            # 2. RAG API 호출
-            backend_url = getattr(bot_config, 'BACKEND_URL', 'http://localhost:8000')
+            # 2. RAG API 호출 (직접 함수 호출)
             rag_context = ""
             
             try:
-                rag_response = requests.post(
-                    f"{backend_url}/api/functions/execute",
-                    json={"function_calls": function_calls},
-                    timeout=30
-                )
-                
-                if rag_response.status_code == 200:
-                    rag_result = rag_response.json()
-                    if rag_result.get("success"):
-                        rag_results = rag_result.get("results", {})
+                from services.multi_agent.functions import execute_function_calls
+                # async 함수를 동기적으로 실행
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    rag_results = loop.run_until_complete(execute_function_calls(function_calls))
+                    if rag_results:
                         rag_context = self._format_rag_context(rag_results)
+                finally:
+                    loop.close()
             except Exception as e:
                 rag_context = f"[RAG 오류: {str(e)}]"
             
