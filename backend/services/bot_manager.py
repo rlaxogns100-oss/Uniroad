@@ -198,6 +198,7 @@ class BotManager:
             # 환경 변수 설정
             env = os.environ.copy()
             env["HEADLESS"] = "true"
+            env["PYTHONUNBUFFERED"] = "1"  # 로그 실시간 출력 (버퍼링 해제)
             if dry_run:
                 env["DRY_RUN"] = "true"
             
