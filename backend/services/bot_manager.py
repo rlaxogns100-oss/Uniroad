@@ -36,6 +36,7 @@ class BotManager:
         
         self.config_file = os.path.join(self.bot_dir, "bot_config.json")
         self.history_file = os.path.join(self.bot_dir, "comment_history.json")
+        self.prompts_file = os.path.join(self.bot_dir, "bot_prompts.json")
         self.stop_flag_file = os.path.join(self.bot_dir, ".stop_bot")
         self.pid_file = os.path.join(self.bot_dir, ".bot_pid")
         
@@ -143,17 +144,21 @@ class BotManager:
             env = os.environ.copy()
             env["HEADLESS"] = "true"
             
-            # 백그라운드 프로세스로 시작
-            # python3 사용 (Ubuntu 서버 호환)
+            # 백그라운드 프로세스로 시작 (봇 로그는 bot_dir/bot.log에 기록)
             python_cmd = "python3" if os.path.exists("/usr/bin/python3") else "python"
+            bot_log = os.path.join(self.bot_dir, "bot.log")
+            logf = open(bot_log, "a", encoding="utf-8")
+            logf.write(f"\n===== 봇 시작 {datetime.now().isoformat()} =====\n")
+            logf.flush()
             self._process = subprocess.Popen(
                 [python_cmd, main_py],
                 cwd=self.bot_dir,
                 env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=logf,
+                stderr=subprocess.STDOUT,
                 start_new_session=True  # 부모 프로세스와 분리
             )
+            logf.close()  # 자식이 fd 상속했으므로 부모만 닫음
             
             # PID 저장
             self._write_pid_file(self._process.pid)
@@ -283,6 +288,28 @@ class BotManager:
             "limit": limit,
             "offset": offset
         }
+
+    def get_prompts(self) -> Dict[str, Any]:
+        """봇 프롬프트 조회 (Answer Agent용). 파일 없으면 빈 dict."""
+        if not os.path.exists(self.prompts_file):
+            return {"answer_prompt": ""}
+        try:
+            with open(self.prompts_file, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {"answer_prompt": ""}
+
+    def update_prompts(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """봇 프롬프트 저장. answer_prompt만 저장."""
+        prompt = data.get("answer_prompt")
+        if prompt is None:
+            return {"success": False, "message": "answer_prompt 필드가 필요합니다."}
+        try:
+            with open(self.prompts_file, "w", encoding="utf-8") as f:
+                json.dump({"answer_prompt": prompt}, f, ensure_ascii=False, indent=2)
+            return {"success": True, "message": "프롬프트가 저장되었습니다."}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
 
 
 # 모듈 로드 시 인스턴스 생성하지 않음 (경로 문제 방지)

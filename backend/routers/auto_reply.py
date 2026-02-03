@@ -113,7 +113,7 @@ async def get_comments(limit: int = 100, offset: int = 0):
         offset: 시작 위치 (기본 0)
     
     Returns:
-        comments: 댓글 기록 리스트
+        comments: 댓글 기록 리스트 (원글/쿼리/함수결과 포함)
         total: 전체 개수
     """
     if limit > 500:
@@ -125,3 +125,31 @@ async def get_comments(limit: int = 100, offset: int = 0):
     
     manager = get_bot_manager()
     return manager.get_comments(limit=limit, offset=offset)
+
+
+class PromptsUpdate(BaseModel):
+    """프롬프트 업데이트 요청"""
+    answer_prompt: str
+
+
+@router.get("/prompts")
+async def get_prompts():
+    """
+    봇 Answer Agent 프롬프트 조회.
+    bot_prompts.json에 저장된 값 반환. 없으면 answer_prompt: "".
+    """
+    manager = get_bot_manager()
+    return manager.get_prompts()
+
+
+@router.post("/prompts")
+async def update_prompts(body: PromptsUpdate):
+    """
+    봇 Answer Agent 프롬프트 저장.
+    다음 사이클부터 봇이 이 프롬프트를 사용합니다.
+    """
+    manager = get_bot_manager()
+    result = manager.update_prompts({"answer_prompt": body.answer_prompt})
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "저장 실패"))
+    return result

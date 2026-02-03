@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, Fragment } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 interface BotStatus {
@@ -23,6 +23,9 @@ interface CommentRecord {
   post_title: string
   comment: string
   success: boolean
+  post_content?: string
+  query?: string
+  function_result?: string
 }
 
 interface CommentsResponse {
@@ -53,6 +56,12 @@ export default function AutoReplyPage() {
   const [commentsPerHourMax, setCommentsPerHourMax] = useState(10)
   const [restMinutes, setRestMinutes] = useState(3)
   const [configChanged, setConfigChanged] = useState(false)
+  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
+  // 프롬프트 편집
+  const [answerPrompt, setAnswerPrompt] = useState('')
+  const [promptLoading, setPromptLoading] = useState(false)
+  const [promptSaving, setPromptSaving] = useState(false)
+  const [promptError, setPromptError] = useState<string | null>(null)
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -92,10 +101,43 @@ export default function AutoReplyPage() {
     }
   }, [])
 
+  const fetchPrompts = useCallback(async () => {
+    setPromptLoading(true)
+    setPromptError(null)
+    try {
+      const res = await fetch(`${API_BASE}/prompts`)
+      if (!res.ok) throw new Error('프롬프트 조회 실패')
+      const data = await res.json()
+      setAnswerPrompt(data.answer_prompt ?? '')
+    } catch (e: any) {
+      setPromptError(e.message ?? '프롬프트를 불러올 수 없습니다.')
+    } finally {
+      setPromptLoading(false)
+    }
+  }, [])
+
+  const handleSavePrompt = async () => {
+    setPromptSaving(true)
+    setPromptError(null)
+    try {
+      const res = await fetch(`${API_BASE}/prompts`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer_prompt: answerPrompt })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '저장 실패')
+    } catch (e: any) {
+      setPromptError(e.message ?? '저장 실패')
+    } finally {
+      setPromptSaving(false)
+    }
+  }
+
   useEffect(() => {
     const load = async () => {
       setLoading(true)
-      await Promise.all([fetchStatus(), fetchComments()])
+      await Promise.all([fetchStatus(), fetchComments(), fetchPrompts()])
       setLoading(false)
     }
     load()
@@ -107,7 +149,7 @@ export default function AutoReplyPage() {
     }, 10000)
 
     return () => clearInterval(interval)
-  }, [fetchStatus, fetchComments])
+  }, [fetchStatus, fetchComments, fetchPrompts])
 
   const handleStart = async () => {
     setActionLoading(true)
@@ -405,7 +447,49 @@ export default function AutoReplyPage() {
           </div>
         </div>
 
-        {/* 댓글 기록 */}
+        {/* Answer Agent 프롬프트 편집 */}
+        <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
+          <h2 className="text-lg font-semibold text-gray-800 mb-3">Answer Agent 프롬프트</h2>
+          <p className="text-sm text-gray-500 mb-3">
+            댓글 생성에 사용되는 지시문입니다. 수정 후 저장하면 다음 사이클부터 적용됩니다. 비어 있으면 봇 기본값을 사용합니다.
+          </p>
+          {promptError && (
+            <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+              {promptError}
+            </div>
+          )}
+          {promptLoading ? (
+            <div className="text-gray-500 text-sm">불러오는 중...</div>
+          ) : (
+            <>
+              <textarea
+                value={answerPrompt}
+                onChange={(e) => setAnswerPrompt(e.target.value)}
+                placeholder="저장된 프롬프트가 없으면 여기 비워두고 저장 시 기본값이 사용됩니다. 수정 후 저장하면 여기 내용이 적용됩니다."
+                rows={14}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+              />
+              <div className="mt-3 flex gap-2">
+                <button
+                  onClick={fetchPrompts}
+                  disabled={promptLoading}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium disabled:opacity-50"
+                >
+                  다시 불러오기
+                </button>
+                <button
+                  onClick={handleSavePrompt}
+                  disabled={promptSaving}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium disabled:opacity-50"
+                >
+                  {promptSaving ? '저장 중...' : '프롬프트 저장'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* 댓글 기록 - 5열 (원글/쿼리/함수결과/최종답변/링크) + 행 클릭 펼치기 */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100">
             <h2 className="text-lg font-semibold text-gray-800">
@@ -419,55 +503,89 @@ export default function AutoReplyPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      시간
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      게시글
-                    </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      댓글 내용
-                    </th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      상태
-                    </th>
+              <table className="w-full bg-white border border-gray-200 table-fixed">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-200">
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '18%' }}>원글</th>
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '18%' }}>쿼리</th>
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '22%' }}>함수결과</th>
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '22%' }}>최종답변</th>
+                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '20%' }}>링크</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {comments.map((record, idx) => (
-                    <tr key={idx} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-600">
-                        {formatTime(record.timestamp)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <a
-                          href={record.post_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-sm text-blue-600 hover:underline line-clamp-1"
+                <tbody>
+                  {comments.map((record, idx) => {
+                    const isExpanded = expandedRows.has(idx)
+                    const raw = (s: string | undefined) => (s ?? '-').trim() || '-'
+                    const clip = (s: string, len: number) => s.length <= len ? s : s.slice(0, len) + '...'
+                    return (
+                      <Fragment key={idx}>
+                        <tr
+                          onClick={() => {
+                            setExpandedRows(prev => {
+                              const next = new Set(prev)
+                              if (next.has(idx)) next.delete(idx)
+                              else next.add(idx)
+                              return next
+                            })
+                          }
+                          }
+                          className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
                         >
-                          {record.post_title || '(제목 없음)'}
-                        </a>
-                      </td>
-                      <td className="px-4 py-3">
-                        <p className="text-sm text-gray-700 line-clamp-2">
-                          {record.comment}
-                        </p>
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className={`inline-flex px-2 py-1 text-xs font-medium rounded-full ${
-                          record.success
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-red-100 text-red-800'
-                        }`}>
-                          {record.success ? '성공' : '실패'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                          <td className="px-2 py-1.5 align-top">
+                            <span className="text-xs text-gray-700">{isExpanded ? raw(record.post_content) : clip(raw(record.post_content), 35)}</span>
+                          </td>
+                          <td className="px-2 py-1.5 align-top">
+                            <span className="text-xs font-mono text-gray-700 break-all">{isExpanded ? raw(record.query) : clip(raw(record.query), 40)}</span>
+                          </td>
+                          <td className="px-2 py-1.5 align-top">
+                            <span className="text-xs text-gray-700">{isExpanded ? raw(record.function_result) : clip(raw(record.function_result), 50)}</span>
+                          </td>
+                          <td className="px-2 py-1.5 align-top">
+                            <span className="text-xs text-gray-700">{isExpanded ? record.comment : clip(record.comment, 40)}</span>
+                          </td>
+                          <td className="px-2 py-1.5 align-top">
+                            <a
+                              href={record.post_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={e => e.stopPropagation()}
+                              className="text-xs text-blue-600 hover:underline truncate block"
+                            >
+                              {record.post_title || record.post_url || '(링크)'}
+                            </a>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr className="bg-gray-50 border-b border-gray-100">
+                            <td colSpan={5} className="px-4 py-3">
+                              <div className="grid grid-cols-1 gap-4 text-xs">
+                                <div>
+                                  <div className="font-semibold text-gray-600 mb-1">원글</div>
+                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-40 overflow-y-auto">{raw(record.post_content)}</pre>
+                                </div>
+                                <div>
+                                  <div className="font-semibold text-gray-600 mb-1">쿼리</div>
+                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-32 overflow-y-auto">{raw(record.query)}</pre>
+                                </div>
+                                <div>
+                                  <div className="font-semibold text-gray-600 mb-1">함수결과</div>
+                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-40 overflow-y-auto">{raw(record.function_result)}</pre>
+                                </div>
+                                <div>
+                                  <div className="font-semibold text-gray-600 mb-1">최종답변</div>
+                                  <pre className="whitespace-pre-wrap font-mono bg-white p-2 rounded max-h-32 overflow-y-auto">{record.comment}</pre>
+                                </div>
+                                <div>
+                                  <a href={record.post_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline break-all">{record.post_url}</a>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
