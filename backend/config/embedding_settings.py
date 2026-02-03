@@ -27,7 +27,7 @@ if UPSTAGE_API_KEY:
 
 # 기본 모델 설정 (임베딩_기반과 동일)
 DEFAULT_LLM_MODEL = os.getenv("GEMINI_LLM_MODEL", "gemini-3-flash-preview")
-DEFAULT_EMBEDDING_MODEL = "models/embedding-001"  # 768차원 (임시: 벡터 차원 불일치 해결)
+DEFAULT_EMBEDDING_MODEL = "models/gemini-embedding-001"  # 3072차원
 
 # 청킹 설정
 CHUNK_SIZE_TOKENS = 800
