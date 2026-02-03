@@ -15,6 +15,7 @@ interface BotConfig {
   comments_per_hour_min: number
   comments_per_hour_max: number
   rest_minutes: number
+  keywords?: string[]
 }
 
 interface CommentRecord {
@@ -96,6 +97,9 @@ export default function AutoReplyPage() {
   const [commentsPerHourMin, setCommentsPerHourMin] = useState(5)
   const [commentsPerHourMax, setCommentsPerHourMax] = useState(10)
   const [restMinutes, setRestMinutes] = useState(3)
+  const [keywords, setKeywords] = useState<string[]>([])
+  const [keywordsText, setKeywordsText] = useState('')  // 텍스트 입력용
+  const [keywordsExpanded, setKeywordsExpanded] = useState(false)
   const [configChanged, setConfigChanged] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
   // 프롬프트 편집 (Query + Answer 2개)
@@ -110,6 +114,18 @@ export default function AutoReplyPage() {
   const [logs, setLogs] = useState<string[]>([])
   const [logsExpanded, setLogsExpanded] = useState(false)
   const [autoScroll, setAutoScroll] = useState(true)
+
+  // 테스트 댓글 기록
+  const [testCommentsOpen, setTestCommentsOpen] = useState(true)
+  const [testInput, setTestInput] = useState('')
+  const [testLoading, setTestLoading] = useState(false)
+  const [testResults, setTestResults] = useState<Array<{
+    post_content: string
+    query: string
+    function_result: string
+    answer: string
+  }>>([])
+  const [testExpandedRows, setTestExpandedRows] = useState<Set<number>>(new Set())
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -131,6 +147,9 @@ export default function AutoReplyPage() {
       setCommentsPerHourMin(data.config.comments_per_hour_min ?? 5)
       setCommentsPerHourMax(data.config.comments_per_hour_max ?? 10)
       setRestMinutes(data.config.rest_minutes ?? 3)
+      const loadedKeywords = data.config.keywords ?? []
+      setKeywords(loadedKeywords)
+      setKeywordsText(loadedKeywords.join('\n'))
       setConfigChanged(false)
     } catch (e) {
       setError('봇 상태를 불러올 수 없습니다.')
@@ -286,7 +305,8 @@ export default function AutoReplyPage() {
           min_delay_seconds: minDelay,
           comments_per_hour_min: commentsPerHourMin,
           comments_per_hour_max: commentsPerHourMax,
-          rest_minutes: restMinutes
+          rest_minutes: restMinutes,
+          keywords: keywords
         })
       })
       const data = await res.json()
@@ -300,6 +320,14 @@ export default function AutoReplyPage() {
     }
   }
 
+  const handleKeywordsChange = (text: string) => {
+    setKeywordsText(text)
+    // 줄바꿈으로 분리하고 빈 줄 제거
+    const newKeywords = text.split('\n').map(k => k.trim()).filter(k => k.length > 0)
+    setKeywords(newKeywords)
+    setConfigChanged(true)
+  }
+
   const formatTime = (isoString: string) => {
     const date = new Date(isoString)
     return date.toLocaleString('ko-KR', {
@@ -308,6 +336,39 @@ export default function AutoReplyPage() {
       hour: '2-digit',
       minute: '2-digit'
     })
+  }
+
+  const handleTestRun = async () => {
+    if (!testInput.trim()) {
+      alert('테스트할 게시글 내용을 입력해주세요.')
+      return
+    }
+    
+    setTestLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ post_content: testInput })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '테스트 실행 실패')
+      
+      // 결과를 테이블에 추가
+      setTestResults(prev => [{
+        post_content: testInput,
+        query: data.query || '',
+        function_result: data.function_result || '',
+        answer: data.answer || ''
+      }, ...prev])
+      
+      // 입력 초기화
+      setTestInput('')
+    } catch (e: any) {
+      alert(`테스트 실패: ${e.message}`)
+    } finally {
+      setTestLoading(false)
+    }
   }
 
   if (!authenticated) {
@@ -549,6 +610,56 @@ export default function AutoReplyPage() {
               </p>
             </div>
           </div>
+        </div>
+
+        {/* 검색 키워드 설정 */}
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden mb-8">
+          <button
+            onClick={() => setKeywordsExpanded(!keywordsExpanded)}
+            className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-gray-800">검색 키워드 설정</h2>
+              <span className="text-sm text-gray-500">({keywords.length}개)</span>
+            </div>
+            <svg
+              className={`w-5 h-5 text-gray-500 transition-transform ${keywordsExpanded ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          
+          {keywordsExpanded && (
+            <div className="px-6 pb-6">
+              <p className="text-sm text-gray-500 mb-4">
+                봇이 검색할 키워드 목록입니다. 한 줄에 하나씩 입력하세요. 수정 후 '설정 저장' 버튼을 눌러야 적용됩니다.
+              </p>
+              
+              <textarea
+                value={keywordsText}
+                onChange={(e) => handleKeywordsChange(e.target.value)}
+                placeholder="정시&#10;표점&#10;백분위&#10;서울대&#10;..."
+                rows={12}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+              />
+              
+              <div className="mt-3 flex items-center justify-between">
+                <span className="text-sm text-gray-500">
+                  현재 {keywords.length}개 키워드
+                </span>
+                <button
+                  onClick={handleSaveConfig}
+                  disabled={!configChanged || actionLoading}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white font-medium rounded-lg transition-colors"
+                >
+                  {actionLoading ? '저장 중...' : '설정 저장'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 실시간 로그 뷰어 */}
@@ -877,6 +988,118 @@ export default function AutoReplyPage() {
                 </div>
               )}
             </>
+          )}
+        </div>
+
+        {/* 테스트 댓글 기록 */}
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden mt-6">
+          <div 
+            className="px-6 py-4 border-b border-gray-100 flex items-center justify-between cursor-pointer hover:bg-gray-50"
+            onClick={() => setTestCommentsOpen(!testCommentsOpen)}
+          >
+            <h2 className="text-lg font-semibold text-gray-800">
+              테스트 댓글 기록 <span className="text-gray-400 font-normal">({testResults.length}개)</span>
+            </h2>
+            <svg 
+              className={`w-5 h-5 text-gray-500 transition-transform ${testCommentsOpen ? 'rotate-180' : ''}`}
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+          
+          {testCommentsOpen && (
+            <div className="p-6">
+              <p className="text-sm text-gray-500 mb-4">
+                게시글 내용을 직접 입력하여 Query Agent → RAG → Answer Agent 파이프라인을 테스트합니다. (첫 줄: 제목, 나머지: 본문)
+              </p>
+              
+              <div className="overflow-x-auto">
+                <table className="w-full bg-white border border-gray-200 table-fixed">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '22%' }}>원글 (입력)</th>
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '18%' }}>쿼리</th>
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '22%' }}>함수결과</th>
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '22%' }}>최종답변</th>
+                      <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '16%' }}>실행</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {/* 입력 행 */}
+                    <tr className="border-b border-gray-200 bg-blue-50">
+                      <td className="px-2 py-2 align-top">
+                        <textarea
+                          value={testInput}
+                          onChange={(e) => setTestInput(e.target.value)}
+                          placeholder="제목&#10;본문 내용..."
+                          rows={4}
+                          className="w-full px-2 py-1.5 text-xs border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none"
+                        />
+                      </td>
+                      <td className="px-2 py-2 align-top text-xs text-gray-400">-</td>
+                      <td className="px-2 py-2 align-top text-xs text-gray-400">-</td>
+                      <td className="px-2 py-2 align-top text-xs text-gray-400">-</td>
+                      <td className="px-2 py-2 align-top">
+                        <button
+                          onClick={handleTestRun}
+                          disabled={testLoading || !testInput.trim()}
+                          className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white text-xs font-medium rounded transition-colors"
+                        >
+                          {testLoading ? '실행 중...' : '실행'}
+                        </button>
+                      </td>
+                    </tr>
+                    
+                    {/* 결과 행들 */}
+                    {testResults.map((result, idx) => {
+                      const isExpanded = testExpandedRows.has(idx)
+                      return (
+                        <tr
+                          key={idx}
+                          onClick={() => {
+                            setTestExpandedRows(prev => {
+                              const next = new Set(prev)
+                              if (next.has(idx)) next.delete(idx)
+                              else next.add(idx)
+                              return next
+                            })
+                          }}
+                          className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                        >
+                          <td className="px-2 py-1.5 align-top">
+                            <ExpandableCell content={result.post_content || '-'} maxLength={35} isExpanded={isExpanded} />
+                          </td>
+                          <td className="px-2 py-1.5 align-top">
+                            <ExpandableCell content={result.query || '-'} maxLength={40} isExpanded={isExpanded} />
+                          </td>
+                          <td className="px-2 py-1.5 align-top">
+                            <ExpandableCell content={result.function_result || '-'} maxLength={50} isExpanded={isExpanded} />
+                          </td>
+                          <td className="px-2 py-1.5 align-top">
+                            <ExpandableCell content={result.answer || '-'} maxLength={40} isExpanded={isExpanded} />
+                          </td>
+                          <td className="px-2 py-1.5 align-top text-xs text-gray-400">완료</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              
+              {testResults.length > 0 && (
+                <div className="mt-3 flex justify-end">
+                  <button
+                    onClick={() => setTestResults([])}
+                    className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                  >
+                    결과 지우기
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
 

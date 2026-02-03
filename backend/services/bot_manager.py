@@ -7,9 +7,11 @@ import os
 import json
 import subprocess
 import signal
+import requests
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 from pathlib import Path
+import google.generativeai as genai
 
 
 class BotManager:
@@ -308,7 +310,8 @@ class BotManager:
             "min_delay_seconds": 50,
             "comments_per_hour_min": 5,
             "comments_per_hour_max": 10,
-            "rest_minutes": 3
+            "rest_minutes": 3,
+            "keywords": []  # 검색 키워드 목록
         }
         
         if os.path.exists(self.config_file):
@@ -420,6 +423,216 @@ class BotManager:
             return {"success": True, "message": "프롬프트가 저장되었습니다."}
         except Exception as e:
             return {"success": False, "message": str(e)}
+
+    def test_generate_reply(self, post_content: str) -> Dict[str, Any]:
+        """
+        테스트용 댓글 생성 (Query Agent -> RAG -> Answer Agent 파이프라인)
+        
+        Args:
+            post_content: 테스트할 게시글 내용 (제목 + 본문)
+            
+        Returns:
+            dict: query, function_result, answer 포함
+        """
+        try:
+            # config.py에서 API 키 로드
+            config_py = os.path.join(self.bot_dir, "config.py")
+            if not os.path.exists(config_py):
+                return {"success": False, "message": "config.py 파일이 없습니다."}
+            
+            # config.py 동적 로드
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("bot_config", config_py)
+            bot_config = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(bot_config)
+            
+            # Gemini API 설정
+            genai.configure(api_key=bot_config.GEMINI_API_KEY)
+            
+            # Query Agent 모델 초기화
+            try:
+                query_agent = genai.GenerativeModel('gemini-2.5-flash-lite')
+            except:
+                query_agent = genai.GenerativeModel('gemini-2.0-flash')
+            
+            # Answer Agent 모델 초기화
+            try:
+                answer_agent = genai.GenerativeModel('gemini-3-flash-preview')
+            except:
+                answer_agent = genai.GenerativeModel('gemini-2.5-flash')
+            
+            # 프롬프트 로드
+            prompts = self.get_prompts()
+            query_prompt = prompts.get("query_prompt", "").strip()
+            answer_prompt = prompts.get("answer_prompt", "").strip()
+            
+            # 기본 Query Agent 프롬프트 (프롬프트가 비어있으면 사용)
+            if not query_prompt:
+                query_prompt = self._get_default_query_prompt()
+            
+            if not answer_prompt:
+                answer_prompt = self._get_default_answer_prompt()
+            
+            # 제목과 본문 분리 (첫 줄을 제목으로)
+            lines = post_content.strip().split('\n', 1)
+            title = lines[0] if lines else ""
+            content = lines[1] if len(lines) > 1 else ""
+            
+            # 1. Query Agent 실행
+            query_full_prompt = f"""{query_prompt}
+
+[게시글]
+제목: {title}
+본문: {content[:1000]}
+
+위 게시글을 분석하여 function_calls를 JSON 형식으로 생성하세요.
+"""
+            
+            generation_config = {
+                "temperature": 0.0,
+                "max_output_tokens": 2048,
+                "response_mime_type": "application/json"
+            }
+            
+            response = query_agent.generate_content(query_full_prompt, generation_config=generation_config)
+            result_text = response.text.strip()
+            
+            # JSON 파싱
+            try:
+                result = json.loads(result_text)
+                function_calls = result.get("function_calls", [])
+            except json.JSONDecodeError:
+                function_calls = []
+            
+            query_result = json.dumps(function_calls, ensure_ascii=False, indent=2)
+            
+            if not function_calls:
+                return {
+                    "success": True,
+                    "query": query_result,
+                    "function_result": "",
+                    "answer": "[PASS] 도움이 필요하지 않은 게시글입니다."
+                }
+            
+            # 2. RAG API 호출
+            backend_url = getattr(bot_config, 'BACKEND_URL', 'http://localhost:8000')
+            rag_context = ""
+            
+            try:
+                rag_response = requests.post(
+                    f"{backend_url}/api/functions/execute",
+                    json={"function_calls": function_calls},
+                    timeout=30
+                )
+                
+                if rag_response.status_code == 200:
+                    rag_result = rag_response.json()
+                    if rag_result.get("success"):
+                        rag_results = rag_result.get("results", {})
+                        rag_context = self._format_rag_context(rag_results)
+            except Exception as e:
+                rag_context = f"[RAG 오류: {str(e)}]"
+            
+            # 3. Answer Agent 실행
+            rag_section = ""
+            if rag_context:
+                rag_section = f"""
+[📚 관련 입시 정보 (RAG)]
+아래는 게시글과 관련된 공식 입시 정보입니다. 답변 시 참고하세요.
+{rag_context}
+"""
+            
+            answer_full_prompt = f"""
+당신은 수만휘 입시 커뮤니티의 입시 멘토입니다.
+게시글을 읽고 도움이 되는 댓글을 작성하세요.
+
+[게시글 정보]
+제목: {title}
+본문: {content[:1000]}
+{rag_section}
+{answer_prompt}
+"""
+            
+            answer_response = answer_agent.generate_content(answer_full_prompt)
+            answer_text = (answer_response.text or "").strip()
+            answer_text = answer_text.replace('"', '').replace("'", "").strip()
+            
+            if not answer_text or len(answer_text) <= 20:
+                final_answer = "[PASS] 할 말이 없거나 너무 짧습니다."
+            else:
+                final_answer = f"""수험생 전문 ai에 물어보니까 이러네요
+
+{answer_text}
+
+구글에 uni2road 검색해서 써 보세요"""
+            
+            return {
+                "success": True,
+                "query": query_result,
+                "function_result": rag_context,
+                "answer": final_answer
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"테스트 실행 실패: {str(e)}",
+                "query": "",
+                "function_result": "",
+                "answer": ""
+            }
+    
+    def _format_rag_context(self, rag_results: Dict) -> str:
+        """RAG 결과를 문자열로 포맷팅"""
+        if not rag_results:
+            return ""
+        
+        context_parts = []
+        
+        for key, result in rag_results.items():
+            chunks = result.get("chunks", [])
+            if not chunks:
+                continue
+            
+            context_parts.append(f"\n=== 관련 입시 정보 ({result.get('university', '전체')}) ===")
+            
+            for i, chunk in enumerate(chunks[:10], 1):
+                content = chunk.get("content", "")
+                context_parts.append(f"[{i}] {content}")
+        
+        return "\n".join(context_parts) if context_parts else ""
+    
+    def _get_default_query_prompt(self) -> str:
+        """기본 Query Agent 프롬프트 반환"""
+        return """당신은 대학 입시 커뮤니티 게시글을 분석하는 **Query Agent**입니다.
+
+## 정체성
+당신의 역할은 정보 검색을 위한 json 형식의 함수 호출입니다.
+
+## 출력 형식
+반드시 아래 JSON 형식으로만 응답하세요:
+{
+  "function_calls": [
+    {
+      "function": "univ" 또는 "consult",
+      "params": { ... }
+    }
+  ]
+}
+
+도움이 필요 없는 게시글이면 빈 배열을 반환하세요:
+{"function_calls": []}
+"""
+    
+    def _get_default_answer_prompt(self) -> str:
+        """기본 Answer Agent 프롬프트 반환"""
+        return """## 답변 작성 가이드라인
+
+1. **말투:** "~해요"체 사용하되, 자신감 있고 확신에 찬 어조.
+2. **길이:** 3~4문장. (서론 빼고 본론만 딱.)
+3. **출력 형식:** 댓글 내용만 출력하세요.
+   - 마크다운 형식 사용 금지. 평문만 사용.
+"""
 
 
 # 모듈 로드 시 인스턴스 생성하지 않음 (경로 문제 방지)

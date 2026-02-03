@@ -4,7 +4,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import asyncio
 import os
 from services.bot_manager import get_bot_manager
@@ -18,6 +18,7 @@ class BotConfigUpdate(BaseModel):
     comments_per_hour_min: Optional[int] = None
     comments_per_hour_max: Optional[int] = None
     rest_minutes: Optional[int] = None
+    keywords: Optional[List[str]] = None
 
 
 class BotActionResponse(BaseModel):
@@ -139,6 +140,11 @@ class PromptsUpdate(BaseModel):
     answer_prompt: Optional[str] = None
 
 
+class TestRequest(BaseModel):
+    """테스트 요청"""
+    post_content: str
+
+
 @router.get("/prompts")
 async def get_prompts():
     """
@@ -159,6 +165,34 @@ async def update_prompts(body: PromptsUpdate):
     result = manager.update_prompts(body.model_dump(exclude_none=True))
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", "저장 실패"))
+    return result
+
+
+@router.post("/test")
+async def test_generate_reply(body: TestRequest):
+    """
+    테스트용 댓글 생성 (Query Agent -> RAG -> Answer Agent 파이프라인)
+    
+    원글을 입력받아 전체 파이프라인을 실행하고 결과를 반환합니다.
+    실제 댓글을 달지 않고 결과만 확인할 수 있습니다.
+    
+    Args:
+        post_content: 테스트할 게시글 내용 (첫 줄: 제목, 나머지: 본문)
+    
+    Returns:
+        query: Query Agent가 생성한 function_calls
+        function_result: RAG 검색 결과
+        answer: Answer Agent가 생성한 최종 답변
+    """
+    if not body.post_content or not body.post_content.strip():
+        raise HTTPException(status_code=400, detail="게시글 내용을 입력해주세요.")
+    
+    manager = get_bot_manager()
+    result = manager.test_generate_reply(body.post_content)
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("message", "테스트 실행 실패"))
+    
     return result
 
 
