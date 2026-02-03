@@ -41,6 +41,7 @@ class BotManager:
         self.history_file = os.path.join(self.bot_dir, "comment_history.json")
         self.dry_run_history_file = os.path.join(self.bot_dir, "dry_run_history.json")
         self.prompts_file = os.path.join(self.bot_dir, "bot_prompts.json")
+        self.skip_links_file = os.path.join(self.bot_dir, "skip_links.json")
         self.stop_flag_file = os.path.join(self.bot_dir, ".stop_bot")
         self.pid_file = os.path.join(self.bot_dir, ".bot_pid")
         
@@ -632,6 +633,102 @@ class BotManager:
 3. **출력 형식:** 댓글 내용만 출력하세요.
    - 마크다운 형식 사용 금지. 평문만 사용.
 """
+
+    def _extract_article_id(self, url: str) -> Optional[str]:
+        """URL에서 article ID 추출 (다양한 형식 지원)"""
+        import re
+        # f-e 형식: /articles/29429119
+        match = re.search(r'/articles/(\d+)', url)
+        if match:
+            return match.group(1)
+        
+        # 일반 형식: /카페명/29429119 또는 /카페명/29429119?...
+        match = re.search(r'/([a-zA-Z0-9_]+)/(\d+)(?:\?|$)', url)
+        if match:
+            return match.group(2)
+        
+        return None
+
+    def get_skip_links(self) -> Dict[str, Any]:
+        """수동 스킵 링크 목록 조회"""
+        skip_links = []
+        
+        if os.path.exists(self.skip_links_file):
+            try:
+                with open(self.skip_links_file, "r", encoding="utf-8") as f:
+                    skip_links = json.load(f)
+            except:
+                pass
+        
+        return {
+            "success": True,
+            "links": skip_links,
+            "total": len(skip_links)
+        }
+
+    def add_skip_link(self, url: str) -> Dict[str, Any]:
+        """수동 스킵 링크 추가"""
+        # article ID 추출
+        article_id = self._extract_article_id(url)
+        if not article_id:
+            return {"success": False, "message": "유효한 네이버 카페 URL이 아닙니다."}
+        
+        # 기존 목록 로드
+        skip_links = []
+        if os.path.exists(self.skip_links_file):
+            try:
+                with open(self.skip_links_file, "r", encoding="utf-8") as f:
+                    skip_links = json.load(f)
+            except:
+                pass
+        
+        # 중복 체크
+        for link in skip_links:
+            if link.get("article_id") == article_id:
+                return {"success": False, "message": "이미 등록된 링크입니다."}
+        
+        # 추가
+        skip_links.append({
+            "url": url,
+            "article_id": article_id,
+            "added_at": datetime.now().isoformat()
+        })
+        
+        try:
+            with open(self.skip_links_file, "w", encoding="utf-8") as f:
+                json.dump(skip_links, f, ensure_ascii=False, indent=2)
+            return {"success": True, "message": f"링크가 추가되었습니다. (Article ID: {article_id})"}
+        except Exception as e:
+            return {"success": False, "message": f"저장 실패: {str(e)}"}
+
+    def remove_skip_link(self, url: str) -> Dict[str, Any]:
+        """수동 스킵 링크 삭제"""
+        article_id = self._extract_article_id(url)
+        if not article_id:
+            return {"success": False, "message": "유효한 네이버 카페 URL이 아닙니다."}
+        
+        if not os.path.exists(self.skip_links_file):
+            return {"success": False, "message": "등록된 링크가 없습니다."}
+        
+        try:
+            with open(self.skip_links_file, "r", encoding="utf-8") as f:
+                skip_links = json.load(f)
+        except:
+            return {"success": False, "message": "파일 읽기 실패"}
+        
+        # 삭제
+        original_len = len(skip_links)
+        skip_links = [link for link in skip_links if link.get("article_id") != article_id]
+        
+        if len(skip_links) == original_len:
+            return {"success": False, "message": "해당 링크를 찾을 수 없습니다."}
+        
+        try:
+            with open(self.skip_links_file, "w", encoding="utf-8") as f:
+                json.dump(skip_links, f, ensure_ascii=False, indent=2)
+            return {"success": True, "message": "링크가 삭제되었습니다."}
+        except Exception as e:
+            return {"success": False, "message": f"저장 실패: {str(e)}"}
 
 
 # 모듈 로드 시 인스턴스 생성하지 않음 (경로 문제 방지)

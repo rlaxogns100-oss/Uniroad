@@ -196,6 +196,58 @@ async def test_generate_reply(body: TestRequest):
     return result
 
 
+class SkipLinkRequest(BaseModel):
+    """스킵 링크 추가/삭제 요청"""
+    url: str
+
+
+@router.get("/skip-links")
+async def get_skip_links():
+    """
+    수동 스킵 링크 목록 조회
+    """
+    manager = get_bot_manager()
+    return manager.get_skip_links()
+
+
+@router.post("/skip-links")
+async def add_skip_link(body: SkipLinkRequest):
+    """
+    수동 스킵 링크 추가 (중복 댓글 방지용)
+    
+    브라우저 URL 형식도 지원합니다:
+    - https://cafe.naver.com/suhui/29429119
+    - https://cafe.naver.com/f-e/cafes/10197921/articles/29429119
+    """
+    if not body.url or not body.url.strip():
+        raise HTTPException(status_code=400, detail="URL을 입력해주세요.")
+    
+    manager = get_bot_manager()
+    result = manager.add_skip_link(body.url.strip())
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "추가 실패"))
+    
+    return result
+
+
+@router.delete("/skip-links")
+async def remove_skip_link(body: SkipLinkRequest):
+    """
+    수동 스킵 링크 삭제
+    """
+    if not body.url or not body.url.strip():
+        raise HTTPException(status_code=400, detail="URL을 입력해주세요.")
+    
+    manager = get_bot_manager()
+    result = manager.remove_skip_link(body.url.strip())
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "삭제 실패"))
+    
+    return result
+
+
 @router.get("/logs/stream")
 async def stream_logs():
     """

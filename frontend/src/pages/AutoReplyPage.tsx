@@ -127,6 +127,12 @@ export default function AutoReplyPage() {
   }>>([])
   const [testExpandedRows, setTestExpandedRows] = useState<Set<number>>(new Set())
 
+  // 스킵 링크 관리
+  const [skipLinksOpen, setSkipLinksOpen] = useState(false)
+  const [skipLinks, setSkipLinks] = useState<Array<{url: string, article_id: string, added_at: string}>>([])
+  const [skipLinkInput, setSkipLinkInput] = useState('')
+  const [skipLinkLoading, setSkipLinkLoading] = useState(false)
+
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (password === '123456') {
@@ -209,7 +215,7 @@ export default function AutoReplyPage() {
   useEffect(() => {
     const load = async () => {
       setLoading(true)
-      await Promise.all([fetchStatus(), fetchComments(), fetchPrompts()])
+      await Promise.all([fetchStatus(), fetchComments(), fetchPrompts(), fetchSkipLinks()])
       setLoading(false)
     }
     load()
@@ -221,7 +227,7 @@ export default function AutoReplyPage() {
     }, 10000)
 
     return () => clearInterval(interval)
-  }, [fetchStatus, fetchComments, fetchPrompts])
+  }, [fetchStatus, fetchComments, fetchPrompts, fetchSkipLinks])
 
   // 실시간 로그 스트리밍
   useEffect(() => {
@@ -368,6 +374,62 @@ export default function AutoReplyPage() {
       alert(`테스트 실패: ${e.message}`)
     } finally {
       setTestLoading(false)
+    }
+  }
+
+  // 스킵 링크 관련 함수들
+  const fetchSkipLinks = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/skip-links`)
+      if (!res.ok) throw new Error('스킵 링크 조회 실패')
+      const data = await res.json()
+      setSkipLinks(data.links || [])
+    } catch (e) {
+      console.error('스킵 링크 조회 에러:', e)
+    }
+  }, [])
+
+  const handleAddSkipLink = async () => {
+    if (!skipLinkInput.trim()) {
+      alert('URL을 입력해주세요.')
+      return
+    }
+    
+    setSkipLinkLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/skip-links`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: skipLinkInput })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '추가 실패')
+      
+      setSkipLinkInput('')
+      await fetchSkipLinks()
+      alert(data.message)
+    } catch (e: any) {
+      alert(`추가 실패: ${e.message}`)
+    } finally {
+      setSkipLinkLoading(false)
+    }
+  }
+
+  const handleRemoveSkipLink = async (url: string) => {
+    if (!confirm('이 링크를 삭제하시겠습니까?')) return
+    
+    try {
+      const res = await fetch(`${API_BASE}/skip-links`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '삭제 실패')
+      
+      await fetchSkipLinks()
+    } catch (e: any) {
+      alert(`삭제 실패: ${e.message}`)
     }
   }
 
@@ -1106,6 +1168,84 @@ export default function AutoReplyPage() {
                   >
                     결과 지우기
                   </button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 스킵 링크 관리 */}
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden mt-6">
+          <div 
+            className="px-6 py-4 border-b border-gray-100 flex items-center justify-between cursor-pointer hover:bg-gray-50"
+            onClick={() => setSkipLinksOpen(!skipLinksOpen)}
+          >
+            <h2 className="text-lg font-semibold text-gray-800">
+              수동 스킵 링크 <span className="text-gray-400 font-normal">({skipLinks.length}개)</span>
+            </h2>
+            <svg 
+              className={`w-5 h-5 text-gray-500 transition-transform ${skipLinksOpen ? 'rotate-180' : ''}`}
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+          
+          {skipLinksOpen && (
+            <div className="p-6">
+              <p className="text-sm text-gray-500 mb-4">
+                수동으로 댓글을 단 글의 URL을 추가하면 봇이 해당 글을 건너뜁니다. 브라우저 주소창의 URL을 그대로 복사해서 붙여넣으세요.
+              </p>
+              
+              <div className="flex gap-2 mb-4">
+                <input
+                  type="text"
+                  value={skipLinkInput}
+                  onChange={(e) => setSkipLinkInput(e.target.value)}
+                  placeholder="https://cafe.naver.com/suhui/29429119"
+                  className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddSkipLink()}
+                />
+                <button
+                  onClick={handleAddSkipLink}
+                  disabled={skipLinkLoading || !skipLinkInput.trim()}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors text-sm"
+                >
+                  {skipLinkLoading ? '추가 중...' : '추가'}
+                </button>
+              </div>
+              
+              {skipLinks.length === 0 ? (
+                <div className="text-center text-gray-500 py-4">
+                  등록된 스킵 링크가 없습니다.
+                </div>
+              ) : (
+                <div className="space-y-2 max-h-64 overflow-y-auto">
+                  {skipLinks.map((link, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-2 bg-gray-50 rounded-lg">
+                      <div className="flex-1 min-w-0">
+                        <a
+                          href={link.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sm text-blue-600 hover:underline truncate block"
+                        >
+                          {link.url}
+                        </a>
+                        <span className="text-xs text-gray-400">
+                          Article ID: {link.article_id} | {new Date(link.added_at).toLocaleString('ko-KR')}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => handleRemoveSkipLink(link.url)}
+                        className="ml-2 px-2 py-1 text-xs text-red-600 hover:bg-red-50 rounded transition-colors"
+                      >
+                        삭제
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
