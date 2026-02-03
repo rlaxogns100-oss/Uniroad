@@ -60,6 +60,10 @@ function SchoolFolderCard({
   }, [school])
   const handleSave = () => {
     const v = value.trim()
+    if (!v) {
+      alert('학교명을 입력해주세요')
+      return
+    }
     if (v && v !== school) onRename(v)
     setEditing(false)
   }
@@ -73,13 +77,14 @@ function SchoolFolderCard({
               value={value}
               onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSave()}
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg"
+              placeholder="예: 연세대학교, 고려대학교"
+              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm"
               autoFocus
             />
-            <button onClick={handleSave} className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm">
+            <button onClick={handleSave} className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm whitespace-nowrap">
               저장
             </button>
-            <button onClick={() => { setValue(school); setEditing(false) }} className="px-3 py-2 bg-gray-200 rounded-lg text-sm">
+            <button onClick={() => { setValue(school); setEditing(false) }} className="px-3 py-2 bg-gray-200 rounded-lg text-sm whitespace-nowrap">
               취소
             </button>
           </div>
@@ -87,6 +92,7 @@ function SchoolFolderCard({
           <button
             onClick={() => setEditing(true)}
             className="text-left flex-1 font-medium text-gray-900 hover:bg-gray-100 rounded px-2 py-1 -ml-2"
+            title="클릭하여 학교명 수정"
           >
             🏫 {school}
           </button>
@@ -99,6 +105,9 @@ function SchoolFolderCard({
         {files.length}개 PDF
         {files.slice(0, 3).map((f) => f.name).join(', ')}
         {files.length > 3 && ` 외 ${files.length - 3}개`}
+      </div>
+      <div className="text-xs text-blue-600 mt-2 pl-2">
+        💡 학교명을 클릭하여 정확한 학교명으로 수정해주세요 (예: 연세대학교)
       </div>
     </div>
   )
@@ -645,6 +654,16 @@ export default function AdminUploadPage() {
               {/* 학교별 파일 목록 (학교명 편집 가능) */}
               {Object.keys(schoolFiles).length > 0 && (
                 <div className="mb-6 space-y-4">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <h3 className="text-sm font-semibold text-blue-900 mb-2">⚠️ 중요: 학교명 확인</h3>
+                    <p className="text-xs text-blue-800">
+                      각 학교명을 클릭하여 정확한 학교명으로 수정해주세요. 
+                      <br />
+                      예: "연세대" → "연세대학교", "고려대" → "고려대학교"
+                      <br />
+                      정확한 학교명이 저장되어야 채팅에서 자료를 검색할 수 있습니다.
+                    </p>
+                  </div>
                   <h3 className="text-sm font-semibold text-gray-700">🏫 학교별 파일 (클릭하여 학교명 수정)</h3>
                   {Object.entries(schoolFiles)
                     .sort(([a], [b]) => a.localeCompare(b, 'ko'))

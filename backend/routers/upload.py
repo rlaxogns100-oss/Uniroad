@@ -42,7 +42,19 @@ async def upload_document(
         if len(file_bytes) > MAX_SIZE:
             raise HTTPException(400, "파일 크기는 50MB 이하여야 합니다.")
         
-        safe_school_name = school_name or "미분류"
+        # 학교명 검증 및 정규화
+        if not school_name or not school_name.strip():
+            raise HTTPException(400, "학교명을 입력해주세요. (예: 연세대학교, 고려대학교)")
+        
+        safe_school_name = school_name.strip()
+        
+        # 학교명이 너무 짧으면 경고
+        if len(safe_school_name) < 2:
+            raise HTTPException(400, "학교명이 너무 짧습니다. (최소 2글자)")
+        
+        # 학교명이 너무 길면 경고
+        if len(safe_school_name) > 50:
+            raise HTTPException(400, "학교명이 너무 깁니다. (최대 50글자)")
 
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
             tmp_file.write(file_bytes)
