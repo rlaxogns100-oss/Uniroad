@@ -36,6 +36,7 @@ class BotManager:
         
         self.config_file = os.path.join(self.bot_dir, "bot_config.json")
         self.history_file = os.path.join(self.bot_dir, "comment_history.json")
+        self.dry_run_history_file = os.path.join(self.bot_dir, "dry_run_history.json")
         self.prompts_file = os.path.join(self.bot_dir, "bot_prompts.json")
         self.stop_flag_file = os.path.join(self.bot_dir, ".stop_bot")
         self.pid_file = os.path.join(self.bot_dir, ".bot_pid")
@@ -341,26 +342,33 @@ class BotManager:
             }
     
     def get_comments(self, limit: int = 100, offset: int = 0) -> Dict[str, Any]:
-        """댓글 기록 조회"""
-        comments = []
+        """댓글 기록 조회 (실제 댓글 + 가실행 댓글 통합)"""
+        all_comments = []
         
+        # 1. 실제 댓글 기록 로드
         if os.path.exists(self.history_file):
             try:
                 with open(self.history_file, "r", encoding="utf-8") as f:
-                    all_comments = json.load(f)
-                    # 최신순 정렬
-                    all_comments.reverse()
-                    total = len(all_comments)
-                    comments = all_comments[offset:offset + limit]
+                    comments = json.load(f)
+                    all_comments.extend(comments)
             except Exception as e:
-                return {
-                    "success": False,
-                    "message": f"기록 조회 실패: {str(e)}",
-                    "comments": [],
-                    "total": 0
-                }
-        else:
-            total = 0
+                print(f"[BotManager] 실제 댓글 기록 로드 실패: {e}")
+        
+        # 2. 가실행 댓글 기록 로드
+        if os.path.exists(self.dry_run_history_file):
+            try:
+                with open(self.dry_run_history_file, "r", encoding="utf-8") as f:
+                    dry_run_comments = json.load(f)
+                    all_comments.extend(dry_run_comments)
+            except Exception as e:
+                print(f"[BotManager] 가실행 댓글 기록 로드 실패: {e}")
+        
+        # 3. 시간순 정렬 (최신순)
+        if all_comments:
+            all_comments.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        
+        total = len(all_comments)
+        comments = all_comments[offset:offset + limit]
         
         return {
             "success": True,
