@@ -99,6 +99,12 @@ export default function AutoReplyPage() {
   const [promptLoading, setPromptLoading] = useState(false)
   const [promptSaving, setPromptSaving] = useState(false)
   const [promptError, setPromptError] = useState<string | null>(null)
+  const [promptsExpanded, setPromptsExpanded] = useState(false)
+  
+  // 실시간 로그
+  const [logs, setLogs] = useState<string[]>([])
+  const [logsExpanded, setLogsExpanded] = useState(false)
+  const [autoScroll, setAutoScroll] = useState(true)
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -192,6 +198,43 @@ export default function AutoReplyPage() {
 
     return () => clearInterval(interval)
   }, [fetchStatus, fetchComments, fetchPrompts])
+
+  // 실시간 로그 스트리밍
+  useEffect(() => {
+    if (!status?.running) {
+      // 봇이 실행 중이 아니면 연결 안 함
+      return
+    }
+
+    const eventSource = new EventSource(`${API_BASE}/logs/stream`)
+    
+    eventSource.onmessage = (event) => {
+      setLogs(prev => {
+        const newLogs = [...prev, event.data]
+        // 최근 500줄만 유지
+        return newLogs.slice(-500)
+      })
+    }
+    
+    eventSource.onerror = (error) => {
+      console.error('로그 스트림 오류:', error)
+      eventSource.close()
+    }
+    
+    return () => {
+      eventSource.close()
+    }
+  }, [status?.running])
+
+  // 자동 스크롤
+  useEffect(() => {
+    if (autoScroll && logsExpanded) {
+      const logContainer = document.getElementById('log-container')
+      if (logContainer) {
+        logContainer.scrollTop = logContainer.scrollHeight
+      }
+    }
+  }, [logs, autoScroll, logsExpanded])
 
   const handleStart = async (dryRun: boolean = false) => {
     setActionLoading(true)
@@ -503,21 +546,106 @@ export default function AutoReplyPage() {
           </div>
         </div>
 
-        {/* Query/Answer Agent 프롬프트 편집 */}
-        <div className="bg-white rounded-xl shadow-sm p-6 mb-8">
-          <h2 className="text-lg font-semibold text-gray-800 mb-3">봇 프롬프트 편집</h2>
-          <p className="text-sm text-gray-500 mb-4">
-            Query Agent와 Answer Agent의 지시문입니다. 수정 후 저장하면 다음 사이클부터 적용됩니다. 비어 있으면 봇 기본값을 사용합니다.
-          </p>
-          {promptError && (
-            <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
-              {promptError}
+        {/* 실시간 로그 뷰어 */}
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden mb-8">
+          <button
+            onClick={() => setLogsExpanded(!logsExpanded)}
+            className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-gray-800">실시간 봇 로그</h2>
+              {status?.running && (
+                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse mr-1.5"></span>
+                  실행 중
+                </span>
+              )}
+              <span className="text-sm text-gray-500">({logs.length}줄)</span>
+            </div>
+            <svg
+              className={`w-5 h-5 text-gray-500 transition-transform ${logsExpanded ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          
+          {logsExpanded && (
+            <div className="px-6 pb-6">
+              <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={autoScroll}
+                      onChange={(e) => setAutoScroll(e.target.checked)}
+                      className="rounded border-gray-300"
+                    />
+                    자동 스크롤
+                  </label>
+                </div>
+                <button
+                  onClick={() => setLogs([])}
+                  className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  로그 지우기
+                </button>
+              </div>
+              
+              <div
+                id="log-container"
+                className="bg-gray-900 text-gray-100 rounded-lg p-4 font-mono text-xs overflow-y-auto"
+                style={{ maxHeight: '500px' }}
+              >
+                {logs.length === 0 ? (
+                  <div className="text-gray-500">
+                    {status?.running ? '로그를 불러오는 중...' : '봇을 시작하면 로그가 표시됩니다.'}
+                  </div>
+                ) : (
+                  logs.map((log, idx) => (
+                    <div key={idx} className="whitespace-pre-wrap break-words">
+                      {log}
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           )}
-          {promptLoading ? (
-            <div className="text-gray-500 text-sm">불러오는 중...</div>
-          ) : (
-            <div className="space-y-6">
+        </div>
+
+        {/* Query/Answer Agent 프롬프트 편집 */}
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden mb-8">
+          <button
+            onClick={() => setPromptsExpanded(!promptsExpanded)}
+            className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+          >
+            <h2 className="text-lg font-semibold text-gray-800">봇 프롬프트 편집</h2>
+            <svg
+              className={`w-5 h-5 text-gray-500 transition-transform ${promptsExpanded ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          
+          {promptsExpanded && (
+            <div className="px-6 pb-6">
+              <p className="text-sm text-gray-500 mb-4">
+                Query Agent와 Answer Agent의 지시문입니다. 수정 후 저장하면 다음 사이클부터 적용됩니다. 비어 있으면 봇 기본값을 사용합니다.
+              </p>
+              {promptError && (
+                <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+                  {promptError}
+                </div>
+              )}
+              {promptLoading ? (
+                <div className="text-gray-500 text-sm">불러오는 중...</div>
+              ) : (
+                <div className="space-y-6">
               {/* Query Agent 프롬프트 */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -562,6 +690,8 @@ export default function AutoReplyPage() {
                   {promptSaving ? '저장 중...' : '프롬프트 저장'}
                 </button>
               </div>
+                </div>
+              )}
             </div>
           )}
         </div>

@@ -2,8 +2,11 @@
 자동 댓글 봇 관리 API 라우터
 """
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any
+import asyncio
+import os
 from services.bot_manager import get_bot_manager
 
 router = APIRouter()
@@ -157,3 +160,60 @@ async def update_prompts(body: PromptsUpdate):
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", "저장 실패"))
     return result
+
+
+@router.get("/logs/stream")
+async def stream_logs():
+    """
+    실시간 로그 스트리밍 (Server-Sent Events)
+    
+    봇이 실행 중일 때 bot.log 파일의 새로운 내용을 실시간으로 스트리밍합니다.
+    
+    Returns:
+        StreamingResponse: text/event-stream 형식의 실시간 로그
+    """
+    async def log_generator():
+        manager = get_bot_manager()
+        bot_log_file = os.path.join(manager.bot_dir, "bot.log")
+        last_position = 0
+        
+        # 파일이 없으면 생성될 때까지 대기
+        while not os.path.exists(bot_log_file):
+            await asyncio.sleep(1)
+        
+        # 기존 로그 전체 전송
+        try:
+            with open(bot_log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                lines = f.readlines()
+                last_position = f.tell()
+                for line in lines[-100:]:  # 최근 100줄만
+                    yield f"data: {line.rstrip()}\n\n"
+        except Exception as e:
+            yield f"data: [로그 읽기 오류: {e}]\n\n"
+        
+        # 새로운 로그 실시간 스트리밍
+        while True:
+            try:
+                if os.path.exists(bot_log_file):
+                    with open(bot_log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        f.seek(last_position)
+                        new_lines = f.readlines()
+                        last_position = f.tell()
+                        
+                        for line in new_lines:
+                            yield f"data: {line.rstrip()}\n\n"
+                
+                await asyncio.sleep(0.5)  # 0.5초마다 체크
+            except Exception as e:
+                yield f"data: [스트리밍 오류: {e}]\n\n"
+                await asyncio.sleep(1)
+    
+    return StreamingResponse(
+        log_generator(), 
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no"  # nginx buffering 비활성화
+        }
+    )

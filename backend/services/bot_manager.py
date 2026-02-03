@@ -109,6 +109,28 @@ class BotManager:
             "timestamp": datetime.now().isoformat()
         }
     
+    def _cleanup_chrome_processes(self):
+        """기존 Chrome 프로세스 정리 (crash 방지)"""
+        try:
+            # bot_dir 내부의 chrome_data_* 디렉토리 찾기
+            import glob
+            chrome_data_dirs = glob.glob(os.path.join(self.bot_dir, "chrome_data_*"))
+            
+            # 오래된 chrome_data_* 디렉토리 정리 (7일 이상)
+            import time
+            current_time = time.time()
+            for dir_path in chrome_data_dirs:
+                try:
+                    dir_age = current_time - os.path.getmtime(dir_path)
+                    if dir_age > 7 * 24 * 3600:  # 7일
+                        import shutil
+                        shutil.rmtree(dir_path)
+                        print(f"[BotManager] 오래된 Chrome 데이터 정리: {dir_path}")
+                except Exception as e:
+                    print(f"[BotManager] Chrome 데이터 정리 실패: {e}")
+        except Exception as e:
+            print(f"[BotManager] Chrome 프로세스 정리 중 오류: {e}")
+    
     def start(self, dry_run: bool = False) -> Dict[str, Any]:
         """봇 시작
         
@@ -129,6 +151,9 @@ class BotManager:
                 "success": False,
                 "message": "쿠키 파일이 없습니다. 로컬에서 get_cookies.py를 실행하세요."
             }
+        
+        # Chrome 프로세스 정리 (crash 방지)
+        self._cleanup_chrome_processes()
         
         # 정지 플래그 제거
         if os.path.exists(self.stop_flag_file):
