@@ -110,24 +110,50 @@ class BotManager:
         }
     
     def _cleanup_chrome_processes(self):
-        """기존 Chrome 프로세스 정리 (crash 방지)"""
+        """기존 Chrome 프로세스 및 데이터 정리 (crash 방지)"""
         try:
-            # bot_dir 내부의 chrome_data_* 디렉토리 찾기
+            import shutil
             import glob
-            chrome_data_dirs = glob.glob(os.path.join(self.bot_dir, "chrome_data_*"))
             
-            # 오래된 chrome_data_* 디렉토리 정리 (7일 이상)
-            import time
-            current_time = time.time()
+            # 1. 모든 Chrome/ChromeDriver 프로세스 강제 종료
+            try:
+                subprocess.run(["pkill", "-9", "chrome"], capture_output=True)
+                subprocess.run(["pkill", "-9", "chromedriver"], capture_output=True)
+                print("[BotManager] Chrome 프로세스 정리 완료")
+            except Exception as e:
+                print(f"[BotManager] Chrome 프로세스 종료 중 오류 (무시): {e}")
+            
+            # 2. bot_dir 내부의 모든 chrome_data_* 디렉토리 삭제
+            chrome_data_dirs = glob.glob(os.path.join(self.bot_dir, "chrome_data_*"))
             for dir_path in chrome_data_dirs:
                 try:
-                    dir_age = current_time - os.path.getmtime(dir_path)
-                    if dir_age > 7 * 24 * 3600:  # 7일
-                        import shutil
-                        shutil.rmtree(dir_path)
-                        print(f"[BotManager] 오래된 Chrome 데이터 정리: {dir_path}")
+                    shutil.rmtree(dir_path)
+                    print(f"[BotManager] Chrome 데이터 정리: {dir_path}")
                 except Exception as e:
                     print(f"[BotManager] Chrome 데이터 정리 실패: {e}")
+            
+            # 3. /tmp 내 Chrome 임시 파일 정리
+            tmp_patterns = [
+                "/tmp/com.google.Chrome.*",
+                "/tmp/.org.chromium.*",
+                "/tmp/org.chromium.*"
+            ]
+            for pattern in tmp_patterns:
+                for tmp_path in glob.glob(pattern):
+                    try:
+                        if os.path.isdir(tmp_path):
+                            shutil.rmtree(tmp_path)
+                        else:
+                            os.remove(tmp_path)
+                    except:
+                        pass
+            
+            # 4. 정리 후 잠시 대기 (프로세스 완전 종료 대기)
+            import time
+            time.sleep(2)
+            
+            print("[BotManager] Chrome 정리 완료")
+            
         except Exception as e:
             print(f"[BotManager] Chrome 프로세스 정리 중 오류: {e}")
     
@@ -219,6 +245,8 @@ class BotManager:
         status = self.get_status()
         
         if not status["running"]:
+            # 실행 중이 아니어도 Chrome 정리는 수행
+            self._cleanup_chrome_processes()
             return {
                 "success": False,
                 "message": "봇이 실행 중이 아닙니다."
@@ -247,6 +275,9 @@ class BotManager:
             
             self._process = None
             self._remove_pid_file()
+            
+            # Chrome 프로세스 정리
+            self._cleanup_chrome_processes()
             
             return {
                 "success": True,
