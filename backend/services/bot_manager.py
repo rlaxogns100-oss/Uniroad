@@ -109,8 +109,12 @@ class BotManager:
             "timestamp": datetime.now().isoformat()
         }
     
-    def start(self) -> Dict[str, Any]:
-        """봇 시작"""
+    def start(self, dry_run: bool = False) -> Dict[str, Any]:
+        """봇 시작
+        
+        Args:
+            dry_run: True면 댓글을 실제로 달지 않고 생성만 함 (가실행 모드)
+        """
         status = self.get_status()
         
         if status["running"]:
@@ -143,13 +147,21 @@ class BotManager:
             # 환경 변수 설정
             env = os.environ.copy()
             env["HEADLESS"] = "true"
+            if dry_run:
+                env["DRY_RUN"] = "true"
             
             # 백그라운드 프로세스로 시작 (봇 로그는 bot_dir/bot.log에 기록)
-            python_cmd = "python3" if os.path.exists("/usr/bin/python3") else "python"
+            # 시스템 python3 명시적 사용 (selenium 등 시스템 패키지 사용)
+            python_cmd = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else "python3"
             bot_log = os.path.join(self.bot_dir, "bot.log")
             logf = open(bot_log, "a", encoding="utf-8")
             logf.write(f"\n===== 봇 시작 {datetime.now().isoformat()} =====\n")
             logf.flush()
+            
+            # DRY_RUN 모드 설정
+            if env.get("DRY_RUN") == "true":
+                logf.write("[DRY RUN MODE] 댓글을 실제로 달지 않고 생성만 합니다.\n")
+            
             self._process = subprocess.Popen(
                 [python_cmd, main_py],
                 cwd=self.bot_dir,
@@ -163,10 +175,12 @@ class BotManager:
             # PID 저장
             self._write_pid_file(self._process.pid)
             
+            mode_msg = " (가실행 모드)" if dry_run else ""
             return {
                 "success": True,
-                "message": "봇이 시작되었습니다.",
-                "pid": self._process.pid
+                "message": f"봇이 시작되었습니다.{mode_msg}",
+                "pid": self._process.pid,
+                "dry_run": dry_run
             }
             
         except Exception as e:

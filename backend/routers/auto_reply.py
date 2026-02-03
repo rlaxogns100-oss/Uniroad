@@ -40,14 +40,17 @@ async def get_bot_status():
 
 
 @router.post("/start", response_model=BotActionResponse)
-async def start_bot():
+async def start_bot(dry_run: bool = False):
     """
     봇 시작
+    
+    Args:
+        dry_run: True면 가실행 모드 (댓글 생성만 하고 실제로 달지 않음)
     
     쿠키 파일이 존재해야 시작 가능합니다.
     """
     manager = get_bot_manager()
-    result = manager.start()
+    result = manager.start(dry_run=dry_run)
     
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result["message"])

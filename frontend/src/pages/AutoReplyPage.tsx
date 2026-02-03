@@ -193,14 +193,18 @@ export default function AutoReplyPage() {
     return () => clearInterval(interval)
   }, [fetchStatus, fetchComments, fetchPrompts])
 
-  const handleStart = async () => {
+  const handleStart = async (dryRun: boolean = false) => {
     setActionLoading(true)
     setError(null)
     try {
-      const res = await fetch(`${API_BASE}/start`, { method: 'POST' })
+      const url = `${API_BASE}/start${dryRun ? '?dry_run=true' : ''}`
+      const res = await fetch(url, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || '시작 실패')
       await fetchStatus()
+      if (dryRun) {
+        alert('가실행 모드로 봇이 시작되었습니다. (댓글을 실제로 달지 않습니다)')
+      }
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -380,13 +384,23 @@ export default function AutoReplyPage() {
                   {actionLoading ? '처리 중...' : '봇 중지'}
                 </button>
               ) : (
-                <button
-                  onClick={handleStart}
-                  disabled={actionLoading || !status?.cookie_exists}
-                  className="flex-1 py-2.5 px-4 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors"
-                >
-                  {actionLoading ? '처리 중...' : '봇 시작'}
-                </button>
+                <>
+                  <button
+                    onClick={() => handleStart(false)}
+                    disabled={actionLoading || !status?.cookie_exists}
+                    className="flex-1 py-2.5 px-4 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors"
+                  >
+                    {actionLoading ? '처리 중...' : '봇 시작'}
+                  </button>
+                  <button
+                    onClick={() => handleStart(true)}
+                    disabled={actionLoading || !status?.cookie_exists}
+                    className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors"
+                    title="댓글을 실제로 달지 않고 생성만 테스트합니다"
+                  >
+                    {actionLoading ? '처리 중...' : '가실행'}
+                  </button>
+                </>
               )}
             </div>
 
