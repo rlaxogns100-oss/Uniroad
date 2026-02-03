@@ -2,9 +2,25 @@ import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { uploadDocument, getDocuments, deleteDocument, Document } from '../api/client'
 
+/** API 오류에서 사용자에게 보여줄 메시지 추출 (FastAPI detail, 배열/문자열/plain text 모두 처리) */
+function getUploadErrorMessage(error: any): string {
+  if (!error) return '알 수 없는 오류'
+  const data = error.response?.data
+  if (data != null) {
+    if (typeof data === 'string') return data.trim() || '서버 오류. 백엔드 터미널 로그를 확인하세요.'
+    if (typeof data.detail === 'string') return data.detail.trim() || '서버 오류. 백엔드 터미널 로그를 확인하세요.'
+    if (Array.isArray(data.detail)) return data.detail.map((e: any) => e?.msg ?? String(e)).join(', ') || '서버 오류.'
+    if (data.detail != null && typeof data.detail === 'object') return JSON.stringify(data.detail)
+    if (data.message) return String(data.message).trim() || '서버 오류.'
+  }
+  const fallback = error.message || '요청 처리 중 오류가 발생했습니다.'
+  return (typeof fallback === 'string' ? fallback.trim() : String(fallback)) || '서버 오류. 백엔드 터미널에서 [process_pdf] 또는 [전역 예외] 로그를 확인하세요.'
+}
+
 interface UploadTask {
   id: string
   file: File
+  schoolName: string
   status: 'waiting' | 'uploading' | 'success' | 'error'
   progress: string
   logs: string[]
@@ -22,16 +38,92 @@ interface UploadResult {
   pages: number
   chunks: number
   time: string
+  errorMessage?: string
+}
+
+// 학교 폴더 카드 (이름 편집 가능)
+function SchoolFolderCard({
+  school,
+  files,
+  onRename,
+  onRemove,
+}: {
+  school: string
+  files: File[]
+  onRename: (newName: string) => void
+  onRemove: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(school)
+  useEffect(() => {
+    setValue(school)
+  }, [school])
+  const handleSave = () => {
+    const v = value.trim()
+    if (v && v !== school) onRename(v)
+    setEditing(false)
+  }
+  return (
+    <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+      <div className="flex items-center justify-between mb-2">
+        {editing ? (
+          <div className="flex gap-2 flex-1">
+            <input
+              type="text"
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSave()}
+              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg"
+              autoFocus
+            />
+            <button onClick={handleSave} className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm">
+              저장
+            </button>
+            <button onClick={() => { setValue(school); setEditing(false) }} className="px-3 py-2 bg-gray-200 rounded-lg text-sm">
+              취소
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setEditing(true)}
+            className="text-left flex-1 font-medium text-gray-900 hover:bg-gray-100 rounded px-2 py-1 -ml-2"
+          >
+            🏫 {school}
+          </button>
+        )}
+        <button onClick={onRemove} className="text-red-600 hover:text-red-700 text-sm">
+          ✕ 제거
+        </button>
+      </div>
+      <div className="text-xs text-gray-500 pl-2">
+        {files.length}개 PDF
+        {files.slice(0, 3).map((f) => f.name).join(', ')}
+        {files.length > 3 && ` 외 ${files.length - 3}개`}
+      </div>
+    </div>
+  )
+}
+
+// 폴더 내 파일 → 학교별 그룹 (파일의 상위 폴더명 = 학교명)
+function groupFilesBySchool(files: File[]): Record<string, File[]> {
+  const grouped: Record<string, File[]> = {}
+  for (const file of files) {
+    const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || ''
+    const parts = path.split('/').filter(Boolean)
+    // "고려대/파일.pdf" → 고려대, "Parent/고려대/파일.pdf" → 고려대 (직접 상위 폴더)
+    const school = parts.length > 1 ? parts[parts.length - 2] : '기타'
+    if (!grouped[school]) grouped[school] = []
+    grouped[school].push(file)
+  }
+  return grouped
 }
 
 export default function AdminUploadPage() {
   const navigate = useNavigate()
   
-  // 설정
-  const [schoolName, setSchoolName] = useState('고려대학교')
+  // 학교별 파일: { 학교명: File[] }
+  const [schoolFiles, setSchoolFiles] = useState<Record<string, File[]>>({})
   
-  // 파일 업로드
-  const [files, setFiles] = useState<File[]>([])
   const [uploadQueue, setUploadQueue] = useState<UploadTask[]>([])
   const [isUploading, setIsUploading] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
@@ -109,6 +201,7 @@ export default function AdminUploadPage() {
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
     setIsDragging(true)
   }
 
@@ -116,179 +209,233 @@ export default function AdminUploadPage() {
     setIsDragging(false)
   }
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragging(false)
-
-    const droppedFiles = Array.from(e.dataTransfer.files).filter(
-      (file) => file.type === 'application/pdf'
-    )
-    
-    if (droppedFiles.length === 0) {
-      alert('PDF 파일만 업로드 가능합니다.')
+    const items = e.dataTransfer?.items
+    if (!items) return
+    const pathToFiles: Record<string, File[]> = {}
+    const readEntries = async (reader: FileSystemDirectoryReader, prefix: string): Promise<void> => {
+      const entries = await new Promise<FileSystemEntry[]>((res, rej) =>
+        reader.readEntries(res, rej)
+      )
+      for (const entry of entries) {
+        if (entry.isDirectory) {
+          const dirReader = (entry as FileSystemDirectoryEntry).createReader()
+          await readEntries(dirReader, prefix ? `${prefix}/${entry.name}` : entry.name)
+        } else if (entry.isFile) {
+          const file = await new Promise<File>((res, rej) =>
+            (entry as FileSystemFileEntry).file(res, rej)
+          )
+          if (file.type === 'application/pdf') {
+            const relPath = prefix ? `${prefix}/${entry.name}` : entry.name
+            ;(file as File & { webkitRelativePath?: string }).webkitRelativePath = relPath
+            const parts = relPath.split('/').filter(Boolean)
+            const school = parts.length > 1 ? parts[parts.length - 2] : prefix || '기타'
+            if (!pathToFiles[school]) pathToFiles[school] = []
+            pathToFiles[school].push(file)
+          }
+        }
+      }
+    }
+    for (let i = 0; i < items.length; i++) {
+      const entry = items[i].webkitGetAsEntry()
+      if (entry?.isDirectory) {
+        const reader = (entry as FileSystemDirectoryEntry).createReader()
+        await readEntries(reader, entry.name)
+      } else if (entry?.isFile) {
+        const file = items[i].getAsFile()
+        if (file?.type === 'application/pdf') {
+          if (!pathToFiles['기타']) pathToFiles['기타'] = []
+          pathToFiles['기타'].push(file)
+        }
+      }
+    }
+    const files = Object.values(pathToFiles).flat()
+    if (files.length === 0) {
+      alert('PDF 파일이 포함된 폴더를 선택해주세요.')
       return
     }
-    
-    setFiles((prev) => [...prev, ...droppedFiles])
+    setSchoolFiles((prev) => {
+      const merged = { ...prev }
+      for (const [school, flist] of Object.entries(pathToFiles)) {
+        merged[school] = [...(merged[school] || []), ...flist]
+      }
+      return merged
+    })
   }
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      const selectedFiles = Array.from(e.target.files).filter(
-        (file) => file.type === 'application/pdf'
-      )
-      setFiles((prev) => [...prev, ...selectedFiles])
+  const handleFolderChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files
+    if (!selected || selected.length === 0) return
+    const files = Array.from(selected).filter((f) => f.type === 'application/pdf')
+    if (files.length === 0) {
+      alert('선택한 폴더에 PDF 파일이 없습니다.')
+      return
     }
+    const grouped = groupFilesBySchool(files)
+    setSchoolFiles((prev) => ({ ...prev, ...grouped }))
+    e.target.value = ''
   }
 
-  const removeFile = (index: number) => {
-    setFiles((prev) => prev.filter((_, i) => i !== index))
+  const updateSchoolName = (oldName: string, newName: string) => {
+    const trimmed = newName.trim()
+    if (!trimmed || oldName === trimmed) return
+    setSchoolFiles((prev) => {
+      const next = { ...prev }
+      const files = next[oldName] || []
+      next[trimmed] = [...(next[trimmed] || []), ...files]
+      delete next[oldName]
+      return next
+    })
   }
+
+  const removeSchool = (school: string) => {
+    setSchoolFiles((prev) => {
+      const next = { ...prev }
+      delete next[school]
+      return next
+    })
+  }
+
+  const totalFiles = Object.values(schoolFiles).flat().length
 
   const handleUpload = async () => {
-    if (files.length === 0) {
-      alert('파일을 선택해주세요.')
-      return
-    }
-
-    if (!schoolName.trim()) {
-      alert('학교 이름을 입력해주세요.')
+    if (totalFiles === 0) {
+      alert('폴더를 선택해주세요.')
       return
     }
 
     setIsUploading(true)
     
-    // 업로드 큐 생성
-    const tasks: UploadTask[] = files.map((file) => ({
-      id: `${Date.now()}-${Math.random()}`,
-      file,
-      status: 'waiting',
-      progress: '대기 중...',
-      logs: []
-    }))
+    // 학교별 순서대로 태스크 생성 (학교명 가나다순)
+    const sortedSchools = Object.keys(schoolFiles).sort((a, b) => a.localeCompare(b, 'ko'))
+    const tasks: UploadTask[] = []
+    for (const school of sortedSchools) {
+      for (const file of schoolFiles[school]) {
+        tasks.push({
+          id: `${Date.now()}-${Math.random()}`,
+          file,
+          schoolName: school,
+          status: 'waiting',
+          progress: '대기 중...',
+          logs: []
+        })
+      }
+    }
     
     setUploadQueue(tasks)
 
-    // 순차 업로드
-    for (let i = 0; i < tasks.length; i++) {
-      const task = tasks[i]
-      
-      // 상태 업데이트: uploading
-      setUploadQueue((prev) =>
-        prev.map((t) =>
-          t.id === task.id
-            ? { 
-                ...t, 
-                status: 'uploading', 
-                progress: '업로드 중...', 
-                logs: [
-                  '📦 모델 초기화 중...',
-                  `🏫 학교: ${schoolName}`,
-                  `📄 파일: ${task.file.name}`
-                ] 
-              }
-            : t
-        )
-      )
-
-      try {
-        // PDF 처리 시작 로그
-        setUploadQueue((prev) =>
-          prev.map((t) =>
-            t.id === task.id
-              ? { 
-                  ...t, 
-                  logs: [
-                    ...t.logs,
-                    '📝 PDF → Markdown 변환 중...'
-                  ] 
-                }
-              : t
-          )
-        )
-
-        // 실제 업로드
-        const result = await uploadDocument(task.file, schoolName)
-        
-        // 상태 업데이트: success
-        setUploadQueue((prev) =>
-          prev.map((t) =>
-            t.id === task.id
-              ? {
-                  ...t,
-                  status: 'success',
-                  progress: '완료',
-                  logs: [
-                    ...t.logs,
-                    '✅ Markdown 변환 완료',
-                    '📝 요약 + 출처 + 해시태그 추출 중...',
-                    '✅ 메타데이터 추출 완료',
-                    '🔢 임베딩 생성 중...',
-                    '✅ 임베딩 생성 완료',
-                    '📤 Supabase 저장 중...',
-                    '✅ Supabase 저장 완료',
-                    `🎉 처리 완료! (${result.stats.processingTime})`,
-                    `   📄 ${result.stats.totalPages}페이지`,
-                    `   📦 ${result.stats.chunksTotal}개 청크`
-                  ],
-                  result: {
-                    totalPages: result.stats.totalPages,
-                    chunksTotal: result.stats.chunksTotal,
-                    processingTime: result.stats.processingTime
+    // 학교별로 순서대로 처리, 같은 학교 내 파일은 병렬 업로드
+    const processSchoolFiles = async (school: string) => {
+      const schoolTasks = tasks.filter((t) => t.schoolName === school)
+      await Promise.all(
+        schoolTasks.map(async (task) => {
+          setUploadQueue((prev) =>
+            prev.map((t) =>
+              t.id === task.id
+                ? {
+                    ...t,
+                    status: 'uploading',
+                    progress: '업로드 중...',
+                    logs: [
+                      '📦 모델 초기화 중...',
+                      `🏫 학교: ${task.schoolName}`,
+                      `📄 파일: ${task.file.name}`
+                    ]
                   }
-                }
-              : t
+                : t
+            )
           )
-        )
 
-        // 결과 추가
-        setUploadResults((prev) => [
-          ...prev,
-          {
-            filename: task.file.name,
-            schoolName,
-            status: '성공',
-            pages: result.stats.totalPages,
-            chunks: result.stats.chunksTotal,
-            time: result.stats.processingTime
-          }
-        ])
-      } catch (error: any) {
-        // 상태 업데이트: error
-        setUploadQueue((prev) =>
-          prev.map((t) =>
-            t.id === task.id
-              ? {
-                  ...t,
-                  status: 'error',
-                  progress: '실패',
-                  logs: [
-                    ...t.logs,
-                    `❌ 오류: ${error.response?.data?.detail || error.message}`
-                  ]
-                }
-              : t
-          )
-        )
+          try {
+            setUploadQueue((prev) =>
+              prev.map((t) =>
+                t.id === task.id ? { ...t, logs: [...t.logs, '📝 PDF → Markdown 변환 중...'] } : t
+              )
+            )
 
-        // 결과 추가
-        setUploadResults((prev) => [
-          ...prev,
-          {
-            filename: task.file.name,
-            schoolName,
-            status: '실패',
-            pages: 0,
-            chunks: 0,
-            time: '-'
+            const result = await uploadDocument(task.file, task.schoolName)
+
+            setUploadQueue((prev) =>
+              prev.map((t) =>
+                t.id === task.id
+                  ? {
+                      ...t,
+                      status: 'success',
+                      progress: '완료',
+                      logs: [
+                        ...t.logs,
+                        '✅ Markdown 변환 완료',
+                        '📝 요약 + 출처 + 해시태그 추출 중...',
+                        '✅ 메타데이터 추출 완료',
+                        '🔢 임베딩 생성 중...',
+                        '✅ 임베딩 생성 완료',
+                        '📤 Supabase 저장 중...',
+                        '✅ Supabase 저장 완료',
+                        `🎉 처리 완료! (${result.stats.processingTime})`,
+                        `   📄 ${result.stats.totalPages}페이지`,
+                        `   📦 ${result.stats.chunksTotal}개 청크`
+                      ],
+                      result: {
+                        totalPages: result.stats.totalPages,
+                        chunksTotal: result.stats.chunksTotal,
+                        processingTime: result.stats.processingTime
+                      }
+                    }
+                  : t
+              )
+            )
+
+            setUploadResults((prev) => [
+              ...prev,
+              {
+                filename: task.file.name,
+                schoolName: task.schoolName,
+                status: '성공',
+                pages: result.stats.totalPages,
+                chunks: result.stats.chunksTotal,
+                time: result.stats.processingTime
+              }
+            ])
+          } catch (error: any) {
+            const errorMessage = getUploadErrorMessage(error)
+            setUploadQueue((prev) =>
+              prev.map((t) =>
+                t.id === task.id
+                  ? {
+                      ...t,
+                      status: 'error',
+                      progress: '실패',
+                      logs: [...t.logs, `❌ 오류: ${errorMessage}`]
+                    }
+                  : t
+              )
+            )
+
+            setUploadResults((prev) => [
+              ...prev,
+              {
+                filename: task.file.name,
+                schoolName: task.schoolName,
+                status: '실패',
+                pages: 0,
+                chunks: 0,
+                time: '-',
+                errorMessage
+              }
+            ])
           }
-        ])
-      }
+        })
+      )
     }
 
-    // 완료 후 정리
+    for (const school of sortedSchools) {
+      await processSchoolFiles(school)
+    }
+
     setIsUploading(false)
-    setFiles([])
+    setSchoolFiles({})
     await loadDocuments()
   }
 
@@ -327,23 +474,6 @@ export default function AdminUploadPage() {
           <p className="text-sm text-gray-600">문서를 처리하고 Supabase에 업로드</p>
         </div>
 
-        {/* 설정 */}
-        <div className="mb-6">
-          <h2 className="text-sm font-semibold text-gray-700 mb-3">⚙️ 설정</h2>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              🏫 학교 이름
-            </label>
-            <input
-              type="text"
-              value={schoolName}
-              onChange={(e) => setSchoolName(e.target.value)}
-              placeholder="예: 고려대학교, 서울대학교"
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        </div>
-
         <div className="border-t border-gray-200 my-4"></div>
 
         {/* 사용 방법 */}
@@ -352,9 +482,9 @@ export default function AdminUploadPage() {
             💡 <strong>사용 방법</strong>
           </p>
           <ol className="text-sm text-blue-700 mt-2 space-y-1 list-decimal list-inside">
-            <li>PDF 파일을 업로드</li>
-            <li>학교 이름 입력</li>
-            <li>업로드 버튼 클릭</li>
+            <li>폴더 선택 또는 드래그 (폴더명 = 학교명)</li>
+            <li>하위 폴더 구조: 학교폴더/파일.pdf</li>
+            <li>학교명 수정 후 업로드</li>
           </ol>
         </div>
 
@@ -413,10 +543,10 @@ export default function AdminUploadPage() {
         {/* 네비게이션 */}
         <div className="border-t border-gray-200 pt-4 mt-4 space-y-2">
           <button
-            onClick={() => navigate('/admin')}
+            onClick={() => navigate('/chat/admin')}
             className="w-full py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors text-sm"
           >
-            📚 문서 관리 페이지
+            📚 관리자 페이지
           </button>
           <button
             onClick={() => navigate('/')}
@@ -457,9 +587,9 @@ export default function AdminUploadPage() {
           <div className="space-y-6">
             {/* 업로드 영역 */}
             <div className="bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
-              <h2 className="text-xl font-bold text-gray-900 mb-6">📄 PDF 파일 선택</h2>
+              <h2 className="text-xl font-bold text-gray-900 mb-6">📁 폴더 선택 (폴더명 = 학교명)</h2>
 
-              {/* 파일 드래그 앤 드롭 */}
+              {/* 폴더 드래그 앤 드롭 */}
               <div
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
@@ -467,62 +597,44 @@ export default function AdminUploadPage() {
                 className={`border-2 border-dashed rounded-xl p-8 mb-6 text-center transition-all ${
                   isDragging
                     ? 'border-blue-500 bg-blue-50'
-                    : files.length > 0
+                    : totalFiles > 0
                     ? 'border-green-500 bg-green-50'
                     : 'border-gray-300 hover:border-gray-400'
                 }`}
               >
-                {files.length > 0 ? (
+                {totalFiles > 0 ? (
                   <div>
                     <div className="text-6xl mb-2">✅</div>
                     <p className="text-lg font-semibold text-green-700 mb-3">
-                      {files.length}개 파일 선택됨
+                      {Object.keys(schoolFiles).length}개 학교, {totalFiles}개 파일
                     </p>
-                    <div className="max-h-40 overflow-y-auto space-y-2 mb-3">
-                      {files.map((file, index) => (
-                        <div
-                          key={index}
-                          className="flex items-center justify-between bg-white px-3 py-2 rounded-lg"
-                        >
-                          <div className="flex-1 text-left">
-                            <p className="text-sm font-medium text-gray-700">{file.name}</p>
-                            <p className="text-xs text-gray-500">
-                              {(file.size / 1024 / 1024).toFixed(2)}MB
-                            </p>
-                          </div>
-                          <button
-                            onClick={() => removeFile(index)}
-                            className="ml-2 text-red-600 hover:text-red-700 font-bold"
-                          >
-                            ✕
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                    <label className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition-colors">
-                      + 파일 추가
+                    <label className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition-colors mr-2">
+                      + 폴더 추가
                       <input
                         type="file"
-                        accept="application/pdf"
+                        {...({ webkitdirectory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
                         multiple
-                        onChange={handleFileChange}
+                        onChange={handleFolderChange}
                         className="hidden"
                       />
                     </label>
                   </div>
                 ) : (
                   <div>
-                    <div className="text-6xl mb-2">📄</div>
+                    <div className="text-6xl mb-2">📁</div>
                     <p className="text-lg font-semibold text-gray-700 mb-2">
-                      PDF 파일을 드래그하거나 클릭하여 선택 (여러 개 가능)
+                      폴더를 드래그하거나 클릭하여 선택
+                    </p>
+                    <p className="text-sm text-gray-500 mb-4">
+                      하위 구조: 학교폴더/파일.pdf (폴더명이 학교명으로 사용됨)
                     </p>
                     <label className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition-colors">
-                      파일 선택
+                      폴더 선택
                       <input
                         type="file"
-                        accept="application/pdf"
+                        {...({ webkitdirectory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
                         multiple
-                        onChange={handleFileChange}
+                        onChange={handleFolderChange}
                         className="hidden"
                       />
                     </label>
@@ -530,22 +642,31 @@ export default function AdminUploadPage() {
                 )}
               </div>
 
-              {/* 선택된 학교 표시 */}
-              {schoolName && (
-                <div className="mb-6 p-4 bg-indigo-50 border border-indigo-200 rounded-lg">
-                  <p className="text-sm text-indigo-800">
-                    🏫 <strong>학교:</strong> {schoolName}
-                  </p>
+              {/* 학교별 파일 목록 (학교명 편집 가능) */}
+              {Object.keys(schoolFiles).length > 0 && (
+                <div className="mb-6 space-y-4">
+                  <h3 className="text-sm font-semibold text-gray-700">🏫 학교별 파일 (클릭하여 학교명 수정)</h3>
+                  {Object.entries(schoolFiles)
+                    .sort(([a], [b]) => a.localeCompare(b, 'ko'))
+                    .map(([school, flist]) => (
+                      <SchoolFolderCard
+                        key={school}
+                        school={school}
+                        files={flist}
+                        onRename={(newName) => updateSchoolName(school, newName)}
+                        onRemove={() => removeSchool(school)}
+                      />
+                    ))}
                 </div>
               )}
 
               {/* 업로드 버튼 */}
               <button
                 onClick={handleUpload}
-                disabled={isUploading || files.length === 0 || !schoolName.trim()}
+                disabled={isUploading || totalFiles === 0}
                 className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg font-semibold hover:from-blue-700 hover:to-indigo-700 disabled:from-gray-400 disabled:to-gray-400 disabled:cursor-not-allowed transition-all transform hover:scale-[1.02] shadow-lg"
               >
-                {isUploading ? '⏳ 처리 중...' : `🚀 순차 업로드 시작 (${files.length}개)`}
+                {isUploading ? '⏳ 처리 중...' : `🚀 학교별 병렬 업로드 (${totalFiles}개)`}
               </button>
             </div>
 
@@ -594,7 +715,10 @@ export default function AdminUploadPage() {
                       {task.logs.length > 0 && (
                         <div className="bg-gray-900 rounded-lg p-3 font-mono text-xs max-h-40 overflow-y-auto">
                           {task.logs.map((log, idx) => (
-                            <p key={idx} className="text-green-400">
+                            <p
+                              key={idx}
+                              className={log.startsWith('❌') ? 'text-red-400 font-semibold' : 'text-green-400'}
+                            >
                               {log}
                             </p>
                           ))}
@@ -642,6 +766,7 @@ export default function AdminUploadPage() {
                         <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">페이지</th>
                         <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">청크</th>
                         <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">소요시간</th>
+                        <th className="px-4 py-2 text-left text-sm font-semibold text-gray-700">오류 사유</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -663,6 +788,9 @@ export default function AdminUploadPage() {
                           <td className="px-4 py-3 text-sm text-gray-600">{result.pages}</td>
                           <td className="px-4 py-3 text-sm text-gray-600">{result.chunks}</td>
                           <td className="px-4 py-3 text-sm text-gray-600">{result.time}</td>
+                          <td className="px-4 py-3 text-sm text-red-600 max-w-md">
+                            {result.status === '실패' && result.errorMessage ? result.errorMessage : '-'}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

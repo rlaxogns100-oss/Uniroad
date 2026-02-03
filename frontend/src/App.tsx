@@ -52,7 +52,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   }
   
   if (user?.name !== '김도균') {
-    return <Navigate to="/" replace />
+    return <Navigate to="/chat" replace />
   }
   
   return <>{children}</>
@@ -65,15 +65,16 @@ function App() {
         <Routes>
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/" element={<LandingPage />} />
-          <Route path="/chat" element={<ChatPage />} />
+          {/* /chat/admin 먼저 정의 (더 구체적 경로) */}
           <Route
-            path="/admin"
+            path="/chat/admin"
             element={
               <AdminRoute>
                 <AdminPage />
               </AdminRoute>
             }
           />
+          <Route path="/chat" element={<ChatPage />} />
           <Route
             path="/upload"
             element={

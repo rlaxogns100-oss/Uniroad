@@ -217,10 +217,10 @@ class UniversityAgent(SubAgentBase):
             client = supabase_service.get_client()
 
             # ============================================================
-            # 1단계: 해시태그로 1차 탐색
+            # 1단계: 학교명 기반 문서 탐색
             # ============================================================
             _log("")
-            _log(f"📋 [1단계] 해시태그 검색: #{self.university_name}")
+            _log(f"📋 [1단계] 학교명 검색: {self.university_name}")
             
             if timing_logger:
                 timing_logger.mark_agent(self.name, "db_query_start")
@@ -233,7 +233,9 @@ class UniversityAgent(SubAgentBase):
                 metadata_response_data = cached_metadata
             else:
                 _log(f"   🔍 캐시 미스: DB 조회 중...")
-                metadata_response = client.table('documents_metadata').select('*').execute()
+                metadata_response = client.table('documents')\
+                    .select('id, school_name, filename, summary, file_url, metadata')\
+                    .execute()
                 metadata_response_data = metadata_response.data
                 
                 # 캐시에 저장
@@ -249,44 +251,20 @@ class UniversityAgent(SubAgentBase):
                     "citations": []
                 }
 
-            # 해시태그 필터링
-            required_univ_tag = f"#{self.university_name}"
-            
-            # 추가 해시태그 추출 (연도, 전형 등)
-            optional_tags = []
-            year_match = re.search(r'(2024|2025|2026|2027|2028)', query)
-            if year_match:
-                optional_tags.append(f"#{year_match.group()}")
-            
-            if '수시' in query:
-                optional_tags.append('#수시')
-            if '정시' in query:
-                optional_tags.append('#정시')
-            if any(word in query for word in ['요강', '모집']):
-                optional_tags.append('#모집요강')
-            if any(word in query for word in ['입결', '경쟁률', '커트']):
-                optional_tags.append('#입결통계')
+            # 학교명 필터링
+            relevant_docs = [
+                doc for doc in metadata_response_data
+                if doc.get('school_name') and self.university_name in doc.get('school_name')
+            ]
 
-            # 필터링
-            relevant_docs = []
-            for doc in metadata_response_data:
-                doc_hashtags = doc.get('hashtags', []) or []
-                
-                # 필수 조건: 대학 태그 포함
-                if required_univ_tag not in doc_hashtags:
-                    continue
-                
-                # 점수 계산
-                score = 10  # 대학 태그 일치 기본 점수
-                for tag in optional_tags:
-                    if tag in doc_hashtags:
-                        score += 5
-                
-                relevant_docs.append((score, doc))
-            
-            # 점수순 정렬
-            relevant_docs.sort(key=lambda x: x[0], reverse=True)
-            relevant_docs = [doc for score, doc in relevant_docs]
+            # 학교명 매칭이 없으면 파일명/메타데이터 title 기반으로 fallback
+            if not relevant_docs:
+                relevant_docs = []
+                for doc in metadata_response_data:
+                    metadata = doc.get('metadata', {}) or {}
+                    title = metadata.get('title') or doc.get('filename', '')
+                    if self.university_name in title:
+                        relevant_docs.append(doc)
             
             _log(f"   {self.university_name} 관련 문서: {len(relevant_docs)}개")
             
@@ -308,11 +286,11 @@ class UniversityAgent(SubAgentBase):
             
             docs_summary_list = []
             for idx, doc in enumerate(relevant_docs[:10], 1):  # 최대 10개
-                title = doc.get('title', '제목 없음')
+                metadata = doc.get('metadata', {}) or {}
+                title = metadata.get('title') or doc.get('filename', '제목 없음')
                 summary = doc.get('summary', '요약 없음')[:500]
-                hashtags = doc.get('hashtags', [])
                 docs_summary_list.append(
-                    f"{idx}. 제목: {title}\n   해시태그: {', '.join(hashtags) if hashtags else '없음'}\n   요약: {summary}"
+                    f"{idx}. 제목: {title}\n   요약: {summary}"
                 )
             
             docs_summary_text = "\n\n".join(docs_summary_list)
@@ -367,8 +345,9 @@ class UniversityAgent(SubAgentBase):
             citations = []
             
             for doc in selected_docs:
-                filename = doc['file_name']
-                title = doc['title']
+                doc_id = doc.get('id')
+                metadata = doc.get('metadata', {}) or {}
+                title = metadata.get('title') or doc.get('filename', '제목 없음')
                 file_url = doc.get('file_url') or ''
                 
                 sources.append(title)
@@ -377,7 +356,7 @@ class UniversityAgent(SubAgentBase):
                 _log(f"   📄 {title}")
                 
                 # 캐시 확인 (파일별)
-                cached_chunks = cache_get("chunks", filename=filename)
+                cached_chunks = cache_get("chunks", filename=str(doc_id))
                 
                 if cached_chunks:
                     _log(f"       ✅ 캐시 히트: 청크 데이터 ({len(cached_chunks)}개)")
@@ -385,19 +364,20 @@ class UniversityAgent(SubAgentBase):
                 else:
                     _log(f"       🔍 캐시 미스: 청크 조회 중...")
                     # 청크 가져오기
-                    chunks_response = client.table('policy_documents')\
-                        .select('id, content, metadata')\
-                        .eq('metadata->>fileName', filename)\
+                    chunks_response = client.table('document_chunks')\
+                        .select('id, content, raw_data, page_number, chunk_type, section_id')\
+                        .eq('document_id', int(doc_id))\
+                        .order('page_number')\
                         .execute()
                     chunks_data = chunks_response.data
                     
                     # 캐시에 저장
-                    cache_set("chunks", chunks_data, filename=filename)
+                    cache_set("chunks", chunks_data, filename=str(doc_id))
                 
                 if chunks_data:
                     sorted_chunks = sorted(
                         chunks_data,
-                        key=lambda x: x.get('metadata', {}).get('chunkIndex', 0)
+                        key=lambda x: x.get('page_number', 0)
                     )
                     
                     full_content += f"\n\n{'='*60}\n"
@@ -406,7 +386,7 @@ class UniversityAgent(SubAgentBase):
                     
                     # 청크 정보 저장 (답변 추적용)
                     for chunk in sorted_chunks:
-                        chunk_content = chunk['content']
+                        chunk_content = chunk.get('raw_data') or chunk.get('content', '')
                         full_content += chunk_content
                         full_content += "\n\n"
                         
@@ -416,9 +396,13 @@ class UniversityAgent(SubAgentBase):
                             "id": chunk.get('id'),
                             "content": chunk_content,
                             "title": title,
-                            "source": doc.get('source', ''),
+                            "source": metadata.get('source', ''),
                             "file_url": file_url,
-                            "metadata": chunk.get('metadata', {})
+                            "metadata": {
+                                "page_number": chunk.get('page_number'),
+                                "chunk_type": chunk.get('chunk_type'),
+                                "section_id": chunk.get('section_id')
+                            }
                         }
                         citations.append({
                             "chunk": chunk_info,
@@ -1866,8 +1850,10 @@ class ConsultingAgent(SubAgentBase):
         try:
             client = supabase_service.get_client()
             
-            # documents_metadata에서 전형결과 문서 조회
-            metadata_response = client.table('documents_metadata').select('*').execute()
+            # documents에서 전형결과 문서 조회
+            metadata_response = client.table('documents')\
+                .select('id, school_name, filename, summary, file_url, metadata')\
+                .execute()
             
             if not metadata_response.data:
                 return {
@@ -1897,20 +1883,23 @@ class ConsultingAgent(SubAgentBase):
             relevant_docs = []
             
             for doc in metadata_response.data:
-                source = doc.get('source', '') or ''
-                docu_cat = doc.get('docu_cat', '') or ''
-                title = doc.get('title', '') or ''
+                metadata = doc.get('metadata', {}) or {}
+                source = metadata.get('source', '') or ''
+                docu_cat = metadata.get('docu_cat', '') or ''
+                title = metadata.get('title') or doc.get('filename', '') or ''
+                summary_text = doc.get('summary', '') or ''
+                combined_text = f"{docu_cat} {title} {summary_text}"
                 
-                # 1단계: docu_cat이 "전형결과"로 끝나는지 확인
-                docu_cat_ends_with = docu_cat.strip().endswith('전형결과')
+                # 1단계: 전형결과 관련 문서인지 확인
+                docu_cat_ends_with = "전형결과" in combined_text
                 if not docu_cat_ends_with:
                     continue
                 
                 # 2단계: docu_cat에서 전형 유형(수시/정시) 추출
                 doc_type = None
-                if '수시' in docu_cat:
+                if '수시' in combined_text:
                     doc_type = '수시'
-                elif '정시' in docu_cat:
+                elif '정시' in combined_text:
                     doc_type = '정시'
                 
                 if not doc_type:
@@ -1936,9 +1925,9 @@ class ConsultingAgent(SubAgentBase):
                 
                 # 4단계: 캠퍼스 정보 확인
                 doc_campus = None
-                if "용인" in docu_cat or "용인" in title or "국제캠" in docu_cat or "국제캠" in title:
+                if "용인" in combined_text or "국제캠" in combined_text:
                     doc_campus = "용인캠"
-                elif "서울" in docu_cat or "서울" in title or "서울캠" in docu_cat or "서울캠" in title:
+                elif "서울" in combined_text or "서울캠" in combined_text:
                     doc_campus = "서울캠"
                 
                 # 5단계: 대학명 매칭
@@ -1987,10 +1976,11 @@ class ConsultingAgent(SubAgentBase):
                 doc_type = item["type"]
                 campus = item.get("campus")
                 
-                filename = doc['file_name']
-                title = doc['title']
+                doc_id = doc.get('id')
+                metadata = doc.get('metadata', {}) or {}
+                title = metadata.get('title') or doc.get('filename', '')
                 file_url = doc.get('file_url') or ''
-                docu_cat = doc.get('docu_cat', '') or ''
+                docu_cat = metadata.get('docu_cat', '') or ''
                 
                 # docu_cat에서 연도 추출
                 doc_year = year
@@ -2009,30 +1999,36 @@ class ConsultingAgent(SubAgentBase):
                 _log(f"   📄 {source_name}")
                 
                 # 청크 가져오기
-                chunks_response = client.table('policy_documents')\
-                    .select('id, content, metadata')\
-                    .eq('metadata->>fileName', filename)\
+                chunks_response = client.table('document_chunks')\
+                    .select('id, content, raw_data, page_number, chunk_type, section_id')\
+                    .eq('document_id', int(doc_id))\
+                    .order('page_number')\
                     .execute()
                 
                 if chunks_response.data:
                     sorted_chunks = sorted(
                         chunks_response.data,
-                        key=lambda x: x.get('metadata', {}).get('chunkIndex', 0)
+                        key=lambda x: x.get('page_number', 0)
                     )
                     
                     # 청크 내용 합치기
                     full_content = ""
                     for chunk in sorted_chunks:
-                        full_content += chunk['content'] + "\n\n"
+                        chunk_content = chunk.get('raw_data') or chunk.get('content', '')
+                        full_content += chunk_content + "\n\n"
                         
                         # citations 추가
                         chunk_info = {
                             "id": chunk.get('id'),
-                            "content": chunk['content'],
+                            "content": chunk_content,
                             "title": title,
-                            "source": doc.get('source', ''),
+                            "source": metadata.get('source', ''),
                             "file_url": file_url,
-                            "metadata": chunk.get('metadata', {})
+                            "metadata": {
+                                "page_number": chunk.get('page_number'),
+                                "chunk_type": chunk.get('chunk_type'),
+                                "section_id": chunk.get('section_id')
+                            }
                         }
                         admission_results["citations"].append({
                             "chunk": chunk_info,

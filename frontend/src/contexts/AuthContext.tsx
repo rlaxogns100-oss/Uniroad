@@ -12,8 +12,8 @@ interface AuthContextType {
   user: User | null
   accessToken: string | null
   loading: boolean
-  signIn: (email: string, password: string) => Promise<void>
-  signUp: (email: string, password: string, name?: string) => Promise<void>
+  signIn: (email: string, password: string) => Promise<User | null>
+  signUp: (email: string, password: string, name?: string) => Promise<User | null>
   signInWithGoogle: () => Promise<void>
   signInWithKakao: () => Promise<void>
   quickSignIn: (name: string) => void  // 비밀번호 없이 빠른 로그인
@@ -51,8 +51,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(userData)
           setLoading(false)
 
-          // OAuth 로그인 성공 시 /chat으로 리디렉션
-          window.location.href = '/chat'
+          // OAuth 로그인 성공 시: 관리자(김도균)는 /chat/admin, 그 외는 /chat
+          const isAdmin = userData?.name === '김도균'
+          window.location.href = isAdmin ? '/chat/admin' : '/chat'
           return
         } catch (error) {
           console.error('OAuth 콜백 처리 실패:', error)
@@ -91,7 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (email: string, password: string): Promise<User | null> => {
     try {
       const response = await axios.post('/api/auth/signin', { email, password })
       const { access_token, user: userData } = response.data
@@ -101,12 +102,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       localStorage.setItem('access_token', access_token)
       localStorage.setItem('user', JSON.stringify(userData))
+      return userData
     } catch (error: any) {
       throw new Error(error.response?.data?.detail || '로그인 실패')
     }
   }
 
-  const signUp = async (email: string, password: string, name?: string) => {
+  const signUp = async (email: string, password: string, name?: string): Promise<User | null> => {
     try {
       const response = await axios.post('/api/auth/signup', { email, password, name })
       const { access_token, user: userData } = response.data
@@ -116,6 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       localStorage.setItem('access_token', access_token)
       localStorage.setItem('user', JSON.stringify(userData))
+      return userData
     } catch (error: any) {
       throw new Error(error.response?.data?.detail || '회원가입 실패')
     }

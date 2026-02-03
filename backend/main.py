@@ -157,6 +157,20 @@ async def auto_reply_app(full_path: str = ""):
     return {"message": "개발 모드: http://localhost:5173/auto-reply 에서 프론트엔드를 확인하세요"}
 
 
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """미처리 예외 시에도 JSON 반환해 프론트에서 detail 표시 가능하도록"""
+    import traceback
+    from fastapi import HTTPException
+    from fastapi.responses import JSONResponse
+    print(f"\n❌ [전역 예외] {exc}\n{traceback.format_exc()}\n")
+    if isinstance(exc, HTTPException):
+        detail = exc.detail if exc.detail is not None and str(exc.detail).strip() else "오류"
+        return JSONResponse(status_code=exc.status_code, content={"detail": detail})
+    detail = str(exc).strip() if str(exc) else "서버 오류 (원인 미상)"
+    return JSONResponse(status_code=500, content={"detail": detail})
+
+
 @app.get("/api/health")
 async def health_check():
     """헬스 체크"""

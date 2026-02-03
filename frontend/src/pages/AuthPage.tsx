@@ -20,12 +20,14 @@ export default function AuthPage() {
     setLoading(true)
 
     try {
+      let user = null
       if (isSignUp) {
-        await signUp(email, password, name)
+        user = await signUp(email, password, name)
       } else {
-        await signIn(email, password)
+        user = await signIn(email, password)
       }
-      navigate('/')
+      // 관리자(김도균)는 관리자 페이지로, 그 외는 랜딩으로
+      navigate(user?.name === '김도균' ? '/chat/admin' : '/')
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -200,8 +202,9 @@ export default function AuthPage() {
                 type="button"
                 onClick={() => {
                   if (quickName.trim()) {
-                    quickSignIn(quickName.trim())
-                    navigate('/')
+                    const name = quickName.trim()
+                    quickSignIn(name)
+                    navigate(name === '김도균' ? '/chat/admin' : '/')
                   }
                 }}
                 className="px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"

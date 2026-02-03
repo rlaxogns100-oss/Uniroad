@@ -1484,7 +1484,7 @@ export default function ChatPage() {
                     Agent
                   </button>
                   <button
-                    onClick={() => navigate('/adminagent')}
+                    onClick={() => navigate('/chat/admin')}
                     className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium"
                   >
                     Admin

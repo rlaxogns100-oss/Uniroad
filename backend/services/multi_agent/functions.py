@@ -19,6 +19,30 @@ if os.getenv("GEMINI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
 from services.supabase_client import SupabaseService
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
+# 업로드와 동일한 임베딩 모델 사용 (768차원, DB vector(768)와 일치)
+try:
+    from config import embedding_settings as embedding_config
+    _DEFAULT_EMBEDDING_MODEL = getattr(embedding_config, "DEFAULT_EMBEDDING_MODEL", "models/text-embedding-004")
+except Exception:
+    _DEFAULT_EMBEDDING_MODEL = "models/text-embedding-004"
+
+
+def _school_name_search_variants(university: str) -> List[str]:
+    """검색 시 사용할 학교명 변형 목록 (업로드 시 폴더명 '연세대' vs 채팅 '연세대학교' 등 모두 매칭)"""
+    if not university or not university.strip():
+        return [university or "미분류"]
+    u = university.strip()
+    variants = [u]
+    if u.endswith("학교"):
+        short = u[:-2]  # 연세대학교 -> 연세대
+        if short and short not in variants:
+            variants.append(short)
+    else:
+        full = u + "학교"  # 연세대 -> 연세대학교
+        if full not in variants:
+            variants.append(full)
+    return variants
+
 
 class RAGFunctions:
     """RAG 검색 함수 클래스"""
@@ -28,7 +52,7 @@ class RAGFunctions:
     def __init__(self):
         self.supabase = SupabaseService.get_client()
         self.embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/gemini-embedding-001",
+            model=_DEFAULT_EMBEDDING_MODEL,
             request_timeout=60,
         )
     
@@ -39,42 +63,26 @@ class RAGFunctions:
             cls._instance = cls()
         return cls._instance
     
-    def _supabase_search(
-        self, 
-        query: str, 
-        school_name: str, 
+    def _supabase_search_rpc(
+        self,
+        query_embedding: List[float],
+        school_name: str,
         top_k: int = 30
-    ) -> Tuple[List[Dict], List[float]]:
-        """
-        Step 1-2: Supabase RPC로 벡터 검색
-        원본: uniroad_recommed_1/core/searcher.py (72-168줄)
-        
-        Returns:
-            Tuple[documents, query_embedding] - 문서 리스트와 쿼리 임베딩 (재사용 위해)
-        """
-        # 쿼리 임베딩 생성 (재사용을 위해 반환)
-        query_embedding = self.embeddings.embed_query(query)
-        
-        # RPC 호출
+    ) -> List[Dict]:
+        """RPC만 호출 (쿼리 임베딩은 외부에서 한 번만 생성). 학교명 하나에 대해 검색."""
         rpc_params = {
             "filter_school_name": school_name,
-            "filter_section_id": None,  # 전역 검색
+            "filter_section_id": None,
             "match_count": top_k,
             "match_threshold": 0.0,
             "query_embedding": query_embedding,
         }
-        
         response = self.supabase.rpc("match_document_chunks", rpc_params).execute()
-        
         if not response.data:
-            return [], query_embedding
-        
-        # Document 형태로 변환
+            return []
         documents = []
         for row in response.data:
-            # Context Swap: raw_data 우선 사용
             page_content = row.get("raw_data") or row.get("content", "")
-            
             documents.append({
                 "page_content": page_content,
                 "metadata": {
@@ -86,7 +94,21 @@ class RAGFunctions:
                     "document_id": row.get("document_id"),
                 }
             })
-        
+        return documents
+
+    def _supabase_search(
+        self, 
+        query: str, 
+        school_name: str, 
+        top_k: int = 30
+    ) -> Tuple[List[Dict], List[float]]:
+        """
+        Step 1-2: Supabase RPC로 벡터 검색 (단일 학교명).
+        Returns:
+            Tuple[documents, query_embedding] - 문서 리스트와 쿼리 임베딩 (재사용 위해)
+        """
+        query_embedding = self.embeddings.embed_query(query)
+        documents = self._supabase_search_rpc(query_embedding, school_name, top_k)
         return documents, query_embedding
     
     def _get_document_info(self, document_ids: List[int]) -> Dict[int, Dict]:
@@ -180,8 +202,19 @@ class RAGFunctions:
         """
         print(f"🔍 전역 검색: '{query}' (학교: {university})")
         
-        # Step 1-2: Supabase 벡터 검색 (30개) + 쿼리 임베딩 재사용
-        documents, query_embedding = self._supabase_search(query, university, top_k)
+        # 쿼리 임베딩 1회 생성 (업로드와 동일한 모델: text-embedding-004, 768차원)
+        query_embedding = self.embeddings.embed_query(query)
+        # 학교명 변형으로 검색 (연세대/연세대학교 등 업로드 폴더명·채팅 정식명 모두 매칭)
+        all_documents = []
+        seen_chunk_ids = set()
+        for school_name in _school_name_search_variants(university):
+            docs = self._supabase_search_rpc(query_embedding, school_name, top_k)
+            for doc in docs:
+                cid = doc["metadata"].get("chunk_id")
+                if cid and cid not in seen_chunk_ids:
+                    seen_chunk_ids.add(cid)
+                    all_documents.append(doc)
+        documents = all_documents
         
         if not documents:
             print("⚠️ 검색 결과 없음")

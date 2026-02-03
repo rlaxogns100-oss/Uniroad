@@ -419,7 +419,7 @@ export const uploadDocument = async (
     headers: {
       'Content-Type': 'multipart/form-data',
     },
-    timeout: 180000,
+    timeout: 600000, // 10분 (대형 PDF는 요약·목차·Vision·청킹·Supabase까지 오래 걸림)
   })
   return response.data
 }
