@@ -23,6 +23,7 @@ interface CommentRecord {
   post_title: string
   comment: string
   success: boolean
+  dry_run?: boolean  // 가실행 여부
   post_content?: string
   query?: string
   function_result?: string
@@ -85,6 +86,10 @@ export default function AutoReplyPage() {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  
+  // 드롭다운 상태
+  const [realCommentsOpen, setRealCommentsOpen] = useState(true)
+  const [dryRunCommentsOpen, setDryRunCommentsOpen] = useState(true)
   
   // 설정 상태
   const [minDelay, setMinDelay] = useState(50)
@@ -696,76 +701,182 @@ export default function AutoReplyPage() {
           )}
         </div>
 
-        {/* 댓글 기록 - 5열 (원글/쿼리/함수결과/최종답변/링크) + 행 클릭 펼치기 */}
+        {/* 댓글 기록 - 실제 댓글과 가실행 댓글 분리 */}
+        
+        {/* 실제 댓글 기록 */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100">
+          <div 
+            className="px-6 py-4 border-b border-gray-100 flex items-center justify-between cursor-pointer hover:bg-gray-50"
+            onClick={() => setRealCommentsOpen(!realCommentsOpen)}
+          >
             <h2 className="text-lg font-semibold text-gray-800">
-              댓글 기록 <span className="text-gray-400 font-normal">({totalComments}개)</span>
+              실제 댓글 기록 <span className="text-gray-400 font-normal">({comments.filter(c => !c.dry_run).length}개)</span>
             </h2>
+            <svg 
+              className={`w-5 h-5 text-gray-500 transition-transform ${realCommentsOpen ? 'rotate-180' : ''}`}
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
           </div>
           
-          {comments.length === 0 ? (
-            <div className="p-8 text-center text-gray-500">
-              아직 댓글 기록이 없습니다.
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full bg-white border border-gray-200 table-fixed">
-                <thead>
-                  <tr className="bg-gray-50 border-b border-gray-200">
-                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '18%' }}>원글</th>
-                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '18%' }}>쿼리</th>
-                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '22%' }}>함수결과</th>
-                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '22%' }}>최종답변</th>
-                    <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '20%' }}>링크</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {comments.map((record, idx) => {
-                    const isExpanded = expandedRows.has(idx)
-                    return (
-                      <tr
-                        key={idx}
-                        onClick={() => {
-                          setExpandedRows(prev => {
-                            const next = new Set(prev)
-                            if (next.has(idx)) next.delete(idx)
-                            else next.add(idx)
-                            return next
-                          })
-                        }}
-                        className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
-                      >
-                        <td className="px-2 py-1.5 align-top">
-                          <ExpandableCell content={record.post_content || '-'} maxLength={35} isExpanded={isExpanded} />
-                        </td>
-                        <td className="px-2 py-1.5 align-top">
-                          <ExpandableCell content={record.query || '-'} maxLength={40} isExpanded={isExpanded} />
-                        </td>
-                        <td className="px-2 py-1.5 align-top">
-                          <ExpandableCell content={record.function_result || '-'} maxLength={50} isExpanded={isExpanded} />
-                        </td>
-                        <td className="px-2 py-1.5 align-top">
-                          <ExpandableCell content={record.comment} maxLength={40} isExpanded={isExpanded} />
-                        </td>
-                        <td className="px-2 py-1.5 align-top">
-                          <a
-                            href={record.post_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={e => e.stopPropagation()}
-                            className="text-xs text-blue-600 hover:underline block truncate"
-                            title={record.post_title || record.post_url}
-                          >
-                            {record.post_title || '링크'}
-                          </a>
-                        </td>
+          {realCommentsOpen && (
+            <>
+              {comments.filter(c => !c.dry_run).length === 0 ? (
+                <div className="p-8 text-center text-gray-500">
+                  아직 실제 댓글 기록이 없습니다.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full bg-white border border-gray-200 table-fixed">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200">
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '18%' }}>원글</th>
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '18%' }}>쿼리</th>
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '22%' }}>함수결과</th>
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '22%' }}>최종답변</th>
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '20%' }}>링크</th>
                       </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      {comments.filter(c => !c.dry_run).map((record, idx) => {
+                        const isExpanded = expandedRows.has(idx)
+                        return (
+                          <tr
+                            key={idx}
+                            onClick={() => {
+                              setExpandedRows(prev => {
+                                const next = new Set(prev)
+                                if (next.has(idx)) next.delete(idx)
+                                else next.add(idx)
+                                return next
+                              })
+                            }}
+                            className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                          >
+                            <td className="px-2 py-1.5 align-top">
+                              <ExpandableCell content={record.post_content || '-'} maxLength={35} isExpanded={isExpanded} />
+                            </td>
+                            <td className="px-2 py-1.5 align-top">
+                              <ExpandableCell content={record.query || '-'} maxLength={40} isExpanded={isExpanded} />
+                            </td>
+                            <td className="px-2 py-1.5 align-top">
+                              <ExpandableCell content={record.function_result || '-'} maxLength={50} isExpanded={isExpanded} />
+                            </td>
+                            <td className="px-2 py-1.5 align-top">
+                              <ExpandableCell content={record.comment} maxLength={40} isExpanded={isExpanded} />
+                            </td>
+                            <td className="px-2 py-1.5 align-top">
+                              <a
+                                href={record.post_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={e => e.stopPropagation()}
+                                className="text-xs text-blue-600 hover:underline block truncate"
+                                title={record.post_title || record.post_url}
+                              >
+                                {record.post_title || '링크'}
+                              </a>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* 가실행 댓글 기록 */}
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div 
+            className="px-6 py-4 border-b border-gray-100 flex items-center justify-between cursor-pointer hover:bg-gray-50"
+            onClick={() => setDryRunCommentsOpen(!dryRunCommentsOpen)}
+          >
+            <h2 className="text-lg font-semibold text-gray-800">
+              가실행 댓글 기록 <span className="text-gray-400 font-normal">({comments.filter(c => c.dry_run).length}개)</span>
+            </h2>
+            <svg 
+              className={`w-5 h-5 text-gray-500 transition-transform ${dryRunCommentsOpen ? 'rotate-180' : ''}`}
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+          
+          {dryRunCommentsOpen && (
+            <>
+              {comments.filter(c => c.dry_run).length === 0 ? (
+                <div className="p-8 text-center text-gray-500">
+                  아직 가실행 댓글 기록이 없습니다.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full bg-white border border-gray-200 table-fixed">
+                    <thead>
+                      <tr className="bg-gray-50 border-b border-gray-200">
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '18%' }}>원글</th>
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '18%' }}>쿼리</th>
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '22%' }}>함수결과</th>
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '22%' }}>최종답변</th>
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '20%' }}>링크</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {comments.filter(c => c.dry_run).map((record, idx) => {
+                        const isExpanded = expandedRows.has(idx + 10000) // 다른 인덱스 사용
+                        return (
+                          <tr
+                            key={idx}
+                            onClick={() => {
+                              setExpandedRows(prev => {
+                                const next = new Set(prev)
+                                const rowId = idx + 10000
+                                if (next.has(rowId)) next.delete(rowId)
+                                else next.add(rowId)
+                                return next
+                              })
+                            }}
+                            className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
+                          >
+                            <td className="px-2 py-1.5 align-top">
+                              <ExpandableCell content={record.post_content || '-'} maxLength={35} isExpanded={isExpanded} />
+                            </td>
+                            <td className="px-2 py-1.5 align-top">
+                              <ExpandableCell content={record.query || '-'} maxLength={40} isExpanded={isExpanded} />
+                            </td>
+                            <td className="px-2 py-1.5 align-top">
+                              <ExpandableCell content={record.function_result || '-'} maxLength={50} isExpanded={isExpanded} />
+                            </td>
+                            <td className="px-2 py-1.5 align-top">
+                              <ExpandableCell content={record.comment} maxLength={40} isExpanded={isExpanded} />
+                            </td>
+                            <td className="px-2 py-1.5 align-top">
+                              <a
+                                href={record.post_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                onClick={e => e.stopPropagation()}
+                                className="text-xs text-blue-600 hover:underline block truncate"
+                                title={record.post_title || record.post_url}
+                              >
+                                {record.post_title || '링크'}
+                              </a>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
           )}
         </div>
 
