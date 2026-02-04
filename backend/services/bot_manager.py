@@ -34,7 +34,7 @@ ACCOUNTS = {
     "hao_yj": {
         "name": "수험생카페 계정 (hao_yj)",
         "naver_id": "hao_yj",
-        "nicknames": ["포만한"]
+        "nicknames": ["포만한", "사르르녹는초코칩"]
     },
     "herry0515": {
         "name": "맘카페 계정 (herry0515)",
