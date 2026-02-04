@@ -1,0 +1,12 @@
+{
+  "name": "ㅌ",
+  "agent_type": "final",
+  "description": "",
+  "data": {
+    "user_question": "2026년도 서울대 정시요강 알려줘",
+    "history": "ㅇ저둘",
+    "answer_structure": "[\n  121212\n]나어ㅜㄹ낭",
+    "sub_agent_results": "{}ㄹㅇ너ㅏ러"
+  },
+  "created_at": "2026-01-27T18:34:51.872531"
+}

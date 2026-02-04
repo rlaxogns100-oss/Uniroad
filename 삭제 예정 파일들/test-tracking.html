@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UTM 추적 테스트</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 30px;
+        }
+        .info-box {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .test-links {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin: 20px 0;
+        }
+        .test-link {
+            display: inline-block;
+            padding: 10px 20px;
+            background: #2196f3;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+            transition: background 0.3s;
+        }
+        .test-link:hover {
+            background: #1976d2;
+        }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 5px;
+            background: #f0f0f0;
+        }
+        .success {
+            background: #c8e6c9;
+            color: #2e7d32;
+        }
+        .error {
+            background: #ffcdd2;
+            color: #c62828;
+        }
+        .log-container {
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            background: white;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 UTM 추적 테스트 페이지</h1>
+        
+        <div class="info-box">
+            <h3>현재 페이지 정보</h3>
+            <p><strong>URL:</strong> <span id="current-url"></span></p>
+            <p><strong>세션 ID:</strong> <span id="session-id"></span></p>
+            <p><strong>UTM 파라미터:</strong></p>
+            <ul id="utm-params"></ul>
+        </div>
+
+        <h2>테스트 링크</h2>
+        <div class="test-links">
+            <a href="http://localhost:5173/?utm_source=instagram&utm_medium=post&utm_campaign=20260202_instagram_post" 
+               class="test-link" target="_blank">
+                📱 Instagram 포스트에서 방문
+            </a>
+            <a href="http://localhost:5173/?utm_source=facebook&utm_medium=ad&utm_campaign=winter_campaign&utm_content=banner_1" 
+               class="test-link" target="_blank">
+                📘 Facebook 광고에서 방문
+            </a>
+            <a href="http://localhost:5173/?utm_source=naver&utm_medium=search&utm_campaign=keyword_ad&utm_term=수능" 
+               class="test-link" target="_blank">
+                🔍 네이버 검색광고에서 방문
+            </a>
+            <a href="http://localhost:5173/?utm_source=google&utm_medium=cpc&utm_campaign=brand_search&utm_term=유니로드" 
+               class="test-link" target="_blank">
+                🔍 구글 검색광고에서 방문
+            </a>
+            <a href="http://localhost:5173/chat?utm_source=kakao&utm_medium=message&utm_campaign=friend_share" 
+               class="test-link" target="_blank">
+                💬 카카오톡 공유로 챗봇 직접 방문
+            </a>
+        </div>
+
+        <h2>추적 상태</h2>
+        <div id="status" class="status">
+            추적 시스템 확인 중...
+        </div>
+
+        <h2>실시간 로그</h2>
+        <div id="log-container" class="log-container">
+            <div class="log-entry">로그 대기 중...</div>
+        </div>
+
+        <button onclick="testTracking()">수동 추적 테스트</button>
+        <button onclick="clearLogs()">로그 지우기</button>
+    </div>
+
+    <script>
+        // 현재 URL 정보 표시
+        document.getElementById('current-url').textContent = window.location.href;
+        
+        // UTM 파라미터 파싱
+        const urlParams = new URLSearchParams(window.location.search);
+        const utmParams = {
+            utm_source: urlParams.get('utm_source'),
+            utm_medium: urlParams.get('utm_medium'),
+            utm_campaign: urlParams.get('utm_campaign'),
+            utm_content: urlParams.get('utm_content'),
+            utm_term: urlParams.get('utm_term')
+        };
+        
+        // UTM 파라미터 표시
+        const utmList = document.getElementById('utm-params');
+        Object.entries(utmParams).forEach(([key, value]) => {
+            if (value) {
+                const li = document.createElement('li');
+                li.textContent = `${key}: ${value}`;
+                utmList.appendChild(li);
+            }
+        });
+        
+        // 세션 ID 생성/가져오기
+        function getSessionId() {
+            let sessionId = sessionStorage.getItem('test_session_id');
+            if (!sessionId) {
+                sessionId = 'test-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                sessionStorage.setItem('test_session_id', sessionId);
+            }
+            return sessionId;
+        }
+        
+        const sessionId = getSessionId();
+        document.getElementById('session-id').textContent = sessionId;
+        
+        // 로그 추가 함수
+        function addLog(message, type = 'info') {
+            const logContainer = document.getElementById('log-container');
+            const logEntry = document.createElement('div');
+            logEntry.className = 'log-entry';
+            logEntry.style.color = type === 'error' ? '#c62828' : type === 'success' ? '#2e7d32' : '#333';
+            logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logContainer.insertBefore(logEntry, logContainer.firstChild);
+        }
+        
+        // 추적 테스트
+        async function testTracking() {
+            try {
+                addLog('페이지 뷰 추적 시작...', 'info');
+                
+                const response = await fetch('/api/tracking/page-view', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        page_type: 'test',
+                        page_path: '/test',
+                        page_title: 'UTM 추적 테스트',
+                        ...utmParams,
+                        referrer: document.referrer
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    addLog('✅ 페이지 뷰 추적 성공!', 'success');
+                    document.getElementById('status').className = 'status success';
+                    document.getElementById('status').textContent = '✅ 추적 시스템 정상 작동 중';
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+            } catch (error) {
+                addLog(`❌ 추적 실패: ${error.message}`, 'error');
+                document.getElementById('status').className = 'status error';
+                document.getElementById('status').textContent = `❌ 추적 시스템 오류: ${error.message}`;
+            }
+        }
+        
+        // 로그 지우기
+        function clearLogs() {
+            document.getElementById('log-container').innerHTML = '<div class="log-entry">로그 지워짐</div>';
+        }
+        
+        // 페이지 로드 시 자동 테스트
+        window.addEventListener('load', () => {
+            setTimeout(testTracking, 1000);
+        });
+    </script>
+</body>
+</html>

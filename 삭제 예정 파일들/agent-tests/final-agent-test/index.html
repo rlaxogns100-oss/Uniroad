@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Final Agent Test - 프롬프트 최적화</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            height: 100vh;
+            gap: 0;
+        }
+
+        /* 왼쪽: 입력 패널 */
+        .input-panel {
+            background: #1a1a2e;
+            color: #eee;
+            padding: 16px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .input-panel h1 {
+            color: #4ecca3;
+            font-size: 18px;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .input-panel p.desc {
+            color: #888;
+            font-size: 11px;
+            margin-bottom: 8px;
+        }
+
+        .api-status {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+        }
+
+        .api-status.ok {
+            background: rgba(78, 204, 163, 0.2);
+            color: #4ecca3;
+        }
+
+        .api-status.error {
+            background: rgba(233, 69, 96, 0.2);
+            color: #e94560;
+        }
+
+        .api-status .dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+        }
+
+        .api-status.ok .dot {
+            background: #4ecca3;
+        }
+
+        .api-status.error .dot {
+            background: #e94560;
+        }
+
+        /* 섹션 */
+        .section-card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 12px;
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .section-title {
+            color: #4ecca3;
+            font-size: 13px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .section-title .badge {
+            background: #e94560;
+            color: white;
+            font-size: 9px;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+
+        .section-actions {
+            display: flex;
+            gap: 4px;
+        }
+
+        .input-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .input-group label {
+            color: #888;
+            font-size: 11px;
+        }
+
+        .input-group textarea {
+            background: #0f0f23;
+            border: 1px solid #333;
+            border-radius: 6px;
+            padding: 8px;
+            color: #eee;
+            font-size: 11px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            resize: vertical;
+            min-height: 60px;
+            line-height: 1.4;
+        }
+
+        .input-group textarea:focus {
+            outline: none;
+            border-color: #4ecca3;
+        }
+
+        .input-group textarea.large {
+            min-height: 100px;
+        }
+
+        .input-group textarea.xlarge {
+            min-height: 180px;
+        }
+
+        .input-group select {
+            background: #0f0f23;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 6px 8px;
+            color: #eee;
+            font-size: 11px;
+        }
+
+        /* 버튼 스타일 */
+        .btn {
+            border: none;
+            border-radius: 4px;
+            padding: 5px 10px;
+            font-size: 11px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #4ecca3;
+            color: #1a1a2e;
+        }
+
+        .btn-primary:hover {
+            background: #3bb892;
+        }
+
+        .btn-secondary {
+            background: #2a2a4a;
+            color: #888;
+            border: 1px solid #333;
+        }
+
+        .btn-secondary:hover {
+            background: #3a3a5a;
+            color: #eee;
+        }
+
+        .btn-danger {
+            background: transparent;
+            color: #e94560;
+            border: 1px solid #e94560;
+        }
+
+        .btn-danger:hover {
+            background: #e94560;
+            color: white;
+        }
+
+        .btn-run {
+            background: #4ecca3;
+            color: #1a1a2e;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 8px;
+            transition: all 0.2s;
+            width: 100%;
+        }
+
+        .btn-run:hover {
+            background: #3bb892;
+            transform: translateY(-1px);
+        }
+
+        .btn-run:disabled {
+            background: #333;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* 오른쪽: 출력 패널 */
+        .output-panel {
+            background: white;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .output-header {
+            background: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+            padding: 12px 16px;
+        }
+
+        .output-header h2 {
+            font-size: 15px;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .output-header .stats {
+            font-size: 11px;
+            color: #888;
+            display: flex;
+            gap: 12px;
+        }
+
+        .output-tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .output-tab {
+            padding: 8px 16px;
+            background: transparent;
+            border: none;
+            color: #666;
+            font-size: 12px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .output-tab:hover {
+            color: #333;
+        }
+
+        .output-tab.active {
+            color: #4ecca3;
+            border-bottom-color: #4ecca3;
+        }
+
+        .output-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .tab-panel {
+            display: none;
+        }
+
+        .tab-panel.active {
+            display: block;
+        }
+
+        /* 채팅 말풍선 스타일 */
+        .chat-bubble {
+            max-width: 100%;
+            background: #f3f4f6;
+            border-radius: 16px;
+            padding: 16px 20px;
+            color: #1f2937;
+            line-height: 1.7;
+        }
+
+        .chat-bubble .section {
+            margin-bottom: 16px;
+        }
+
+        .chat-bubble .section:last-child {
+            margin-bottom: 0;
+        }
+
+        .chat-bubble .title {
+            font-weight: 700;
+            color: #111827;
+            font-size: 17px;
+            margin-bottom: 8px;
+            line-height: 1.4;
+        }
+
+        .chat-bubble .content {
+            font-size: 14px;
+        }
+
+        .chat-bubble .content ul {
+            margin: 0;
+            padding-left: 0;
+            list-style: none;
+        }
+
+        .chat-bubble .content li {
+            position: relative;
+            padding-left: 16px;
+            margin-bottom: 4px;
+        }
+
+        .chat-bubble .content li::before {
+            content: '•';
+            position: absolute;
+            left: 0;
+            color: #6b7280;
+        }
+
+        .chat-bubble .source-box {
+            border-top: 1px solid #e5e7eb;
+            margin-top: 8px;
+            padding-top: 8px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-items: center;
+        }
+
+        .chat-bubble .source-label {
+            font-size: 10px;
+            color: #6b7280;
+            font-weight: 500;
+        }
+
+        .chat-bubble .source-tag {
+            display: inline-flex;
+            align-items: center;
+            padding: 3px 8px;
+            font-size: 10px;
+            background: #eff6ff;
+            color: #1d4ed8;
+            border-radius: 4px;
+            text-decoration: none;
+            transition: background 0.2s;
+        }
+
+        .chat-bubble .source-tag:hover {
+            background: #dbeafe;
+        }
+
+        .chat-bubble table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 8px 0;
+            font-size: 13px;
+        }
+
+        .chat-bubble th, .chat-bubble td {
+            border: 1px solid #d1d5db;
+            padding: 8px 12px;
+            text-align: left;
+        }
+
+        .chat-bubble th {
+            background: #f3f4f6;
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .chat-bubble tr:nth-child(even) {
+            background: #f9fafb;
+        }
+
+        /* Raw 출력 스타일 */
+        .raw-output {
+            background: #0f0f23;
+            border-radius: 8px;
+            padding: 16px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 12px;
+            color: #eee;
+            white-space: pre-wrap;
+            word-break: break-all;
+            line-height: 1.5;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        /* 프롬프트 출력 스타일 */
+        .prompt-output {
+            background: #1a1a2e;
+            border-radius: 8px;
+            padding: 16px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 11px;
+            color: #aaa;
+            white-space: pre-wrap;
+            word-break: break-all;
+            line-height: 1.6;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .prompt-output .highlight {
+            background: #2a2a4a;
+            color: #4ecca3;
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+
+        /* 빈 상태 */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 300px;
+            color: #aaa;
+            text-align: center;
+        }
+
+        .empty-state svg {
+            width: 60px;
+            height: 60px;
+            margin-bottom: 16px;
+            opacity: 0.3;
+        }
+
+        /* 모달 */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: #1a1a2e;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 20px;
+            width: 400px;
+            max-width: 90%;
+            color: #eee;
+        }
+
+        .modal h3 {
+            color: #4ecca3;
+            margin-bottom: 16px;
+            font-size: 14px;
+        }
+
+        .modal .form-group {
+            margin-bottom: 12px;
+        }
+
+        .modal .form-group label {
+            display: block;
+            color: #888;
+            font-size: 11px;
+            margin-bottom: 4px;
+        }
+
+        .modal .form-group input,
+        .modal .form-group textarea {
+            width: 100%;
+            background: #0f0f23;
+            border: 1px solid #333;
+            border-radius: 4px;
+            padding: 8px 10px;
+            color: #eee;
+            font-size: 12px;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-top: 16px;
+        }
+
+        /* 저장된 아이템 리스트 */
+        .saved-list {
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #333;
+            border-radius: 4px;
+            margin-top: 8px;
+        }
+
+        .saved-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 10px;
+            border-bottom: 1px solid #333;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .saved-item:last-child {
+            border-bottom: none;
+        }
+
+        .saved-item:hover {
+            background: rgba(78, 204, 163, 0.1);
+        }
+
+        .saved-item .name {
+            font-size: 12px;
+            color: #eee;
+        }
+
+        .saved-item .desc {
+            font-size: 10px;
+            color: #666;
+        }
+
+        .saved-item .delete-btn {
+            color: #e94560;
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 4px;
+            font-size: 14px;
+        }
+
+        .saved-item .delete-btn:hover {
+            color: #ff6b8a;
+        }
+
+        /* 접이식 섹션 */
+        .collapsible-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            padding: 8px 0;
+        }
+
+        .collapsible-header:hover {
+            opacity: 0.8;
+        }
+
+        .collapsible-content {
+            display: none;
+        }
+
+        .collapsible-content.open {
+            display: block;
+        }
+
+        .toggle-icon {
+            color: #888;
+            transition: transform 0.2s;
+        }
+
+        .toggle-icon.open {
+            transform: rotate(180deg);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 왼쪽: 입력 패널 -->
+        <div class="input-panel">
+            <div>
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <h1>Final Agent Test</h1>
+                    <span class="api-status" id="apiStatus">
+                        <span class="dot"></span>
+                        <span id="apiStatusText">확인 중...</span>
+                    </span>
+                </div>
+                <p class="desc">프로덕션과 동일한 프롬프트로 Final Agent만 단독 테스트합니다.</p>
+            </div>
+
+            <!-- 커스텀 프롬프트 섹션 -->
+            <div class="section-card">
+                <div class="collapsible-header" onclick="toggleSection('promptSection')">
+                    <span class="section-title">
+                        커스텀 프롬프트
+                        <span style="font-size:10px; color:#888;">(선택)</span>
+                    </span>
+                    <span class="toggle-icon" id="promptSectionIcon">▼</span>
+                </div>
+                <div class="collapsible-content" id="promptSection">
+                    <div class="section-actions" style="margin-bottom: 8px;">
+                        <button class="btn btn-secondary" onclick="loadDefaultPrompt()">기본 프롬프트</button>
+                        <button class="btn btn-secondary" onclick="openSavePromptModal()">저장</button>
+                        <button class="btn btn-secondary" onclick="openLoadPromptModal()">불러오기</button>
+                    </div>
+                    <div class="input-group">
+                        <label>프롬프트 템플릿 (비워두면 기본 프롬프트 사용)</label>
+                        <textarea id="customPrompt" class="xlarge" placeholder="커스텀 프롬프트를 입력하세요...
+
+플레이스홀더:
+{user_question} - 사용자 질문
+{structure_text} - Answer Structure
+{results_text} - Sub Agent 결과
+{all_citations} - 출처 정보"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 데이터셋 섹션 -->
+            <div class="section-card">
+                <div class="section-header">
+                    <span class="section-title">
+                        테스트 데이터셋
+                        <span class="badge">필수</span>
+                    </span>
+                    <div class="section-actions">
+                        <button class="btn btn-secondary" onclick="loadExample()">예시</button>
+                        <button class="btn btn-secondary" onclick="openSaveDatasetModal()">저장</button>
+                        <button class="btn btn-secondary" onclick="openLoadDatasetModal()">불러오기</button>
+                        <button class="btn btn-danger" onclick="clearAll()" style="padding: 4px 8px;">초기화</button>
+                    </div>
+                </div>
+
+                <div class="input-group">
+                    <label>1. user_question_with_context</label>
+                    <textarea id="userQuestion" placeholder="사용자 질문 + 맥락"></textarea>
+                </div>
+
+                <div class="input-group">
+                    <label>2. structure_text</label>
+                    <textarea id="structureText" class="large" placeholder="Answer Structure"></textarea>
+                </div>
+
+                <div class="input-group">
+                    <label>3. results_text</label>
+                    <textarea id="resultsText" class="xlarge" placeholder="Sub Agent 결과"></textarea>
+                </div>
+
+                <div class="input-group">
+                    <label>4. all_citations (JSON)</label>
+                    <textarea id="allCitations" placeholder='[{"source": "문서명", "url": "..."}]'></textarea>
+                </div>
+            </div>
+
+            <button class="btn-run" id="runBtn" onclick="runFinalAgent()">
+                Final Agent 실행
+            </button>
+        </div>
+
+        <!-- 오른쪽: 출력 패널 -->
+        <div class="output-panel">
+            <div class="output-header">
+                <h2>출력 결과</h2>
+                <div class="stats" id="stats">
+                    실행 전
+                </div>
+            </div>
+
+            <div class="output-tabs">
+                <button class="output-tab active" onclick="showTab('processed')">후처리 결과</button>
+                <button class="output-tab" onclick="showTab('raw')">Raw 출력</button>
+                <button class="output-tab" onclick="showTab('prompt')">사용된 프롬프트</button>
+            </div>
+
+            <div class="output-content">
+                <div class="tab-panel active" id="tab-processed">
+                    <div class="empty-state" id="processedEmpty">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/>
+                        </svg>
+                        <p>왼쪽에서 데이터를 입력하고<br>"Final Agent 실행"을 클릭하세요</p>
+                    </div>
+                    <div id="processedContent" style="display: none;"></div>
+                </div>
+
+                <div class="tab-panel" id="tab-raw">
+                    <div class="empty-state" id="rawEmpty">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/>
+                        </svg>
+                        <p>Gemini가 출력한 원본 텍스트</p>
+                    </div>
+                    <div id="rawContent" style="display: none;"></div>
+                </div>
+
+                <div class="tab-panel" id="tab-prompt">
+                    <div class="empty-state" id="promptEmpty">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>
+                        </svg>
+                        <p>실제로 Gemini에 전달된 프롬프트</p>
+                    </div>
+                    <div id="promptContent" style="display: none;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 프롬프트 저장 모달 -->
+    <div class="modal-overlay" id="savePromptModal">
+        <div class="modal">
+            <h3>프롬프트 저장</h3>
+            <div class="form-group">
+                <label>이름</label>
+                <input type="text" id="promptName" placeholder="예: v2_간결한버전">
+            </div>
+            <div class="form-group">
+                <label>설명 (선택)</label>
+                <input type="text" id="promptDesc" placeholder="간단한 설명">
+            </div>
+            <div class="modal-buttons">
+                <button class="btn btn-secondary" onclick="closeModal('savePromptModal')">취소</button>
+                <button class="btn btn-primary" onclick="savePrompt()">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 프롬프트 불러오기 모달 -->
+    <div class="modal-overlay" id="loadPromptModal">
+        <div class="modal">
+            <h3>저장된 프롬프트</h3>
+            <div class="saved-list" id="promptList">
+                <div style="padding: 20px; text-align: center; color: #666;">로딩 중...</div>
+            </div>
+            <div class="modal-buttons">
+                <button class="btn btn-secondary" onclick="closeModal('loadPromptModal')">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 데이터셋 저장 모달 -->
+    <div class="modal-overlay" id="saveDatasetModal">
+        <div class="modal">
+            <h3>데이터셋 저장</h3>
+            <div class="form-group">
+                <label>이름</label>
+                <input type="text" id="datasetName" placeholder="예: 연세대_산출법_질문">
+            </div>
+            <div class="form-group">
+                <label>설명 (선택)</label>
+                <input type="text" id="datasetDesc" placeholder="간단한 설명">
+            </div>
+            <div class="modal-buttons">
+                <button class="btn btn-secondary" onclick="closeModal('saveDatasetModal')">취소</button>
+                <button class="btn btn-primary" onclick="saveDataset()">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 데이터셋 불러오기 모달 -->
+    <div class="modal-overlay" id="loadDatasetModal">
+        <div class="modal">
+            <h3>저장된 데이터셋</h3>
+            <div class="saved-list" id="datasetList">
+                <div style="padding: 20px; text-align: center; color: #666;">로딩 중...</div>
+            </div>
+            <div class="modal-buttons">
+                <button class="btn btn-secondary" onclick="closeModal('loadDatasetModal')">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8090';
+
+        // 페이지 로드 시
+        document.addEventListener('DOMContentLoaded', () => {
+            checkApiKey();
+        });
+
+        // API 키 상태 확인
+        async function checkApiKey() {
+            try {
+                const res = await fetch(`${API_BASE}/api/check-api-key`);
+                const data = await res.json();
+                const status = document.getElementById('apiStatus');
+                const text = document.getElementById('apiStatusText');
+                
+                if (data.configured) {
+                    status.className = 'api-status ok';
+                    text.textContent = `API 연결됨 (${data.key_preview})`;
+                } else {
+                    status.className = 'api-status error';
+                    text.textContent = 'API 키 없음';
+                }
+            } catch (e) {
+                const status = document.getElementById('apiStatus');
+                const text = document.getElementById('apiStatusText');
+                status.className = 'api-status error';
+                text.textContent = '서버 연결 실패';
+            }
+        }
+
+        // 섹션 토글
+        function toggleSection(sectionId) {
+            const content = document.getElementById(sectionId);
+            const icon = document.getElementById(sectionId + 'Icon');
+            content.classList.toggle('open');
+            icon.classList.toggle('open');
+        }
+
+        // 탭 전환
+        function showTab(tabName) {
+            document.querySelectorAll('.output-tab').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+            document.querySelector(`[onclick="showTab('${tabName}')"]`).classList.add('active');
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+        }
+
+        // Final Agent 실행
+        async function runFinalAgent() {
+            const btn = document.getElementById('runBtn');
+            btn.disabled = true;
+            btn.textContent = '실행 중...';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/final-agent`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        user_question_with_context: document.getElementById('userQuestion').value,
+                        structure_text: document.getElementById('structureText').value,
+                        results_text: document.getElementById('resultsText').value,
+                        all_citations: document.getElementById('allCitations').value || '[]',
+                        custom_prompt: document.getElementById('customPrompt').value || null
+                    })
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    document.getElementById('stats').innerHTML = `
+                        프롬프트: <strong>${data.prompt_length.toLocaleString()}자</strong> |
+                        Raw: <strong>${data.raw_length.toLocaleString()}자</strong> |
+                        후처리: <strong>${data.processed_length.toLocaleString()}자</strong>
+                    `;
+                    renderProcessedAnswer(data.processed_answer);
+                    renderRawAnswer(data.raw_answer);
+                    renderPrompt(data.prompt_used);
+                } else {
+                    alert('오류: ' + (data.detail || '알 수 없는 오류'));
+                }
+            } catch (e) {
+                alert('서버 연결 실패: ' + e.message + '\n\n서버 실행: cd agent-tests/final-agent-test/backend && python main.py');
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Final Agent 실행';
+        }
+
+        // 기본 프롬프트 불러오기
+        async function loadDefaultPrompt() {
+            try {
+                const res = await fetch(`${API_BASE}/api/default-prompt`);
+                const data = await res.json();
+                document.getElementById('customPrompt').value = data.prompt;
+            } catch (e) {
+                alert('기본 프롬프트 불러오기 실패');
+            }
+        }
+
+        // 모달 열기/닫기
+        function openModal(id) {
+            document.getElementById(id).classList.add('active');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+
+        // 프롬프트 저장 모달
+        function openSavePromptModal() {
+            if (!document.getElementById('customPrompt').value.trim()) {
+                alert('저장할 프롬프트가 없습니다.');
+                return;
+            }
+            openModal('savePromptModal');
+        }
+
+        async function savePrompt() {
+            const name = document.getElementById('promptName').value.trim();
+            if (!name) {
+                alert('이름을 입력하세요.');
+                return;
+            }
+
+            try {
+                await fetch(`${API_BASE}/api/prompts`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: name,
+                        prompt: document.getElementById('customPrompt').value,
+                        description: document.getElementById('promptDesc').value
+                    })
+                });
+                alert('저장 완료!');
+                closeModal('savePromptModal');
+                document.getElementById('promptName').value = '';
+                document.getElementById('promptDesc').value = '';
+            } catch (e) {
+                alert('저장 실패: ' + e.message);
+            }
+        }
+
+        // 프롬프트 불러오기 모달
+        async function openLoadPromptModal() {
+            openModal('loadPromptModal');
+            try {
+                const res = await fetch(`${API_BASE}/api/prompts`);
+                const data = await res.json();
+                renderPromptList(data.prompts);
+            } catch (e) {
+                document.getElementById('promptList').innerHTML = '<div style="padding: 20px; text-align: center; color: #e94560;">불러오기 실패</div>';
+            }
+        }
+
+        function renderPromptList(prompts) {
+            const container = document.getElementById('promptList');
+            if (prompts.length === 0) {
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">저장된 프롬프트가 없습니다.</div>';
+                return;
+            }
+
+            container.innerHTML = prompts.map(p => `
+                <div class="saved-item" onclick="loadPrompt('${p.id}')">
+                    <div>
+                        <div class="name">${escapeHtml(p.name)}</div>
+                        <div class="desc">${escapeHtml(p.description || '')}</div>
+                    </div>
+                    <button class="delete-btn" onclick="event.stopPropagation(); deletePrompt('${p.id}')">&times;</button>
+                </div>
+            `).join('');
+        }
+
+        async function loadPrompt(id) {
+            try {
+                const res = await fetch(`${API_BASE}/api/prompts/${id}`);
+                const data = await res.json();
+                document.getElementById('customPrompt').value = data.prompt;
+                closeModal('loadPromptModal');
+                
+                // 프롬프트 섹션 열기
+                const section = document.getElementById('promptSection');
+                const icon = document.getElementById('promptSectionIcon');
+                if (!section.classList.contains('open')) {
+                    section.classList.add('open');
+                    icon.classList.add('open');
+                }
+            } catch (e) {
+                alert('불러오기 실패');
+            }
+        }
+
+        async function deletePrompt(id) {
+            if (!confirm('정말 삭제하시겠습니까?')) return;
+            try {
+                await fetch(`${API_BASE}/api/prompts/${id}`, { method: 'DELETE' });
+                openLoadPromptModal(); // 목록 새로고침
+            } catch (e) {
+                alert('삭제 실패');
+            }
+        }
+
+        // 데이터셋 저장 모달
+        function openSaveDatasetModal() {
+            openModal('saveDatasetModal');
+        }
+
+        async function saveDataset() {
+            const name = document.getElementById('datasetName').value.trim();
+            if (!name) {
+                alert('이름을 입력하세요.');
+                return;
+            }
+
+            try {
+                await fetch(`${API_BASE}/api/datasets`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: name,
+                        user_question_with_context: document.getElementById('userQuestion').value,
+                        structure_text: document.getElementById('structureText').value,
+                        results_text: document.getElementById('resultsText').value,
+                        all_citations: document.getElementById('allCitations').value,
+                        description: document.getElementById('datasetDesc').value
+                    })
+                });
+                alert('저장 완료!');
+                closeModal('saveDatasetModal');
+                document.getElementById('datasetName').value = '';
+                document.getElementById('datasetDesc').value = '';
+            } catch (e) {
+                alert('저장 실패: ' + e.message);
+            }
+        }
+
+        // 데이터셋 불러오기 모달
+        async function openLoadDatasetModal() {
+            openModal('loadDatasetModal');
+            try {
+                const res = await fetch(`${API_BASE}/api/datasets`);
+                const data = await res.json();
+                renderDatasetList(data.datasets);
+            } catch (e) {
+                document.getElementById('datasetList').innerHTML = '<div style="padding: 20px; text-align: center; color: #e94560;">불러오기 실패</div>';
+            }
+        }
+
+        function renderDatasetList(datasets) {
+            const container = document.getElementById('datasetList');
+            if (datasets.length === 0) {
+                container.innerHTML = '<div style="padding: 20px; text-align: center; color: #666;">저장된 데이터셋이 없습니다.</div>';
+                return;
+            }
+
+            container.innerHTML = datasets.map(d => `
+                <div class="saved-item" onclick="loadDataset('${d.id}')">
+                    <div>
+                        <div class="name">${escapeHtml(d.name)}</div>
+                        <div class="desc">${escapeHtml(d.description || '')}</div>
+                    </div>
+                    <button class="delete-btn" onclick="event.stopPropagation(); deleteDataset('${d.id}')">&times;</button>
+                </div>
+            `).join('');
+        }
+
+        async function loadDataset(id) {
+            try {
+                const res = await fetch(`${API_BASE}/api/datasets/${id}`);
+                const data = await res.json();
+                document.getElementById('userQuestion').value = data.user_question_with_context || '';
+                document.getElementById('structureText').value = data.structure_text || '';
+                document.getElementById('resultsText').value = data.results_text || '';
+                document.getElementById('allCitations').value = data.all_citations || '';
+                closeModal('loadDatasetModal');
+            } catch (e) {
+                alert('불러오기 실패');
+            }
+        }
+
+        async function deleteDataset(id) {
+            if (!confirm('정말 삭제하시겠습니까?')) return;
+            try {
+                await fetch(`${API_BASE}/api/datasets/${id}`, { method: 'DELETE' });
+                openLoadDatasetModal(); // 목록 새로고침
+            } catch (e) {
+                alert('삭제 실패');
+            }
+        }
+
+        // 후처리된 답변을 채팅 말풍선으로 렌더링
+        function renderProcessedAnswer(answer) {
+            document.getElementById('processedEmpty').style.display = 'none';
+            const container = document.getElementById('processedContent');
+            container.style.display = 'block';
+
+            const sections = answer.split(/\n\n+/).filter(s => s.trim());
+            let html = '<div class="chat-bubble">';
+            sections.forEach((section, idx) => {
+                html += renderSection(section, idx);
+            });
+            html += '</div>';
+            container.innerHTML = html;
+        }
+
+        function renderSection(section, idx) {
+            let html = `<div class="section">`;
+            
+            const titleMatch = section.match(/【([^】]+)】/);
+            if (titleMatch) {
+                html += `<div class="title">${titleMatch[1]}</div>`;
+                section = section.replace(/【[^】]+】\s*/, '');
+            }
+            
+            const citePattern = /<cite\s+data-source="([^"]*)"\s+data-url="([^"]*)"\s*><\/cite>/g;
+            const sources = [];
+            let match;
+            while ((match = citePattern.exec(section)) !== null) {
+                if (match[1] && !sources.some(s => s.source === match[1])) {
+                    sources.push({ source: match[1], url: match[2] });
+                }
+            }
+            section = section.replace(citePattern, '');
+            
+            const content = section.trim();
+            if (content) {
+                if (content.includes('|') && content.includes('---')) {
+                    html += renderTable(content);
+                } else {
+                    const lines = content.split('\n').filter(l => l.trim());
+                    if (lines.some(l => l.trim().startsWith('•') || l.trim().startsWith('-'))) {
+                        html += '<div class="content"><ul>';
+                        lines.forEach(line => {
+                            const cleanLine = line.replace(/^[•\-]\s*/, '').trim();
+                            if (cleanLine) {
+                                html += `<li>${escapeHtml(cleanLine)}</li>`;
+                            }
+                        });
+                        html += '</ul></div>';
+                    } else {
+                        html += `<div class="content">${escapeHtml(content).replace(/\n/g, '<br>')}</div>`;
+                    }
+                }
+            }
+            
+            if (sources.length > 0) {
+                html += '<div class="source-box">';
+                html += '<span class="source-label">출처:</span>';
+                sources.forEach(s => {
+                    if (s.url) {
+                        html += `<a href="${s.url}" target="_blank" class="source-tag">${escapeHtml(s.source)}</a>`;
+                    } else {
+                        html += `<span class="source-tag">${escapeHtml(s.source)}</span>`;
+                    }
+                });
+                html += '</div>';
+            }
+            
+            html += '</div>';
+            return html;
+        }
+
+        function renderTable(content) {
+            const lines = content.split('\n').filter(l => l.trim());
+            let tableLines = [];
+            let otherContent = [];
+            
+            lines.forEach(line => {
+                if (line.includes('|')) {
+                    tableLines.push(line);
+                } else {
+                    otherContent.push(line);
+                }
+            });
+            
+            if (tableLines.length < 2) {
+                return `<div class="content">${escapeHtml(content).replace(/\n/g, '<br>')}</div>`;
+            }
+            
+            let html = '';
+            
+            if (otherContent.length > 0 && lines.indexOf(otherContent[0]) < lines.indexOf(tableLines[0])) {
+                html += `<div class="content">${escapeHtml(otherContent.shift())}</div>`;
+            }
+            
+            const headerCells = tableLines[0].split('|').filter(c => c.trim()).map(c => c.trim());
+            const dataRows = tableLines.slice(2).map(line => 
+                line.split('|').filter(c => c.trim() !== '' || c.includes(' ')).map(c => c.trim())
+            ).filter(row => row.length > 0);
+            
+            html += '<table><thead><tr>';
+            headerCells.forEach(h => html += `<th>${escapeHtml(h)}</th>`);
+            html += '</tr></thead><tbody>';
+            dataRows.forEach(row => {
+                html += '<tr>';
+                row.forEach(cell => html += `<td>${escapeHtml(cell)}</td>`);
+                html += '</tr>';
+            });
+            html += '</tbody></table>';
+            
+            return html;
+        }
+
+        function renderRawAnswer(answer) {
+            document.getElementById('rawEmpty').style.display = 'none';
+            const container = document.getElementById('rawContent');
+            container.style.display = 'block';
+            container.innerHTML = `<div class="raw-output">${escapeHtml(answer)}</div>`;
+        }
+
+        function renderPrompt(prompt) {
+            document.getElementById('promptEmpty').style.display = 'none';
+            const container = document.getElementById('promptContent');
+            container.style.display = 'block';
+            
+            let highlighted = escapeHtml(prompt);
+            highlighted = highlighted.replace(/\[사용자 질문\]/g, '<span class="highlight">[사용자 질문]</span>');
+            highlighted = highlighted.replace(/\[Answer Structure\]/g, '<span class="highlight">[Answer Structure]</span>');
+            highlighted = highlighted.replace(/\[Sub Agent 결과/g, '<span class="highlight">[Sub Agent 결과</span>');
+            highlighted = highlighted.replace(/\[참고 문헌/g, '<span class="highlight">[참고 문헌</span>');
+            highlighted = highlighted.replace(/===SECTION_START===/g, '<span style="color:#4ecca3;">===SECTION_START===</span>');
+            highlighted = highlighted.replace(/===SECTION_END===/g, '<span style="color:#e94560;">===SECTION_END===</span>');
+            
+            container.innerHTML = `<div class="prompt-output">${highlighted}</div>`;
+        }
+
+        function escapeHtml(text) {
+            if (typeof text !== 'string') text = String(text || '');
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function loadExample() {
+            document.getElementById('userQuestion').value = `## 이전 대화 맥락
+[User] 올해 연세대 가고 싶어
+[Assistant] 연세대학교라는 높은 목표를 향한 수험생의 열정과 도전을 진심으로 응원하며 그 간절함에 깊이 공감함.
+
+## 현재 질문
+산출법이 뭔데?`;
+
+            document.getElementById('structureText').value = `**섹션 1** [empathy]
+- 타이틀: (타이틀 없음)
+- 참조할 데이터: 없음 (직접 작성)
+- 지시사항: 복잡한 대학별 환산 점수 산출 방식 때문에 혼란스러울 학생의 마음을 다독임
+
+**섹션 2** [fact_check]
+- 타이틀: 【연세대 정시 점수 산출】
+- 참조할 데이터: Step1_Result
+- 지시사항: 연세대 2026학년도 정시 수능 성적 산출 방법 핵심 정리
+
+**섹션 3** [next_step]
+- 타이틀: (타이틀 없음)
+- 참조할 데이터: 없음 (직접 작성)
+- 지시사항: 본인 점수 입력 시 구체적인 환산점수 분석 가능함을 안내`;
+
+            document.getElementById('resultsText').value = `### Step1_Result (연세대 agent)
+상태: success
+
+2026학년도 연세대학교 정시 모집 핵심 정보:
+
+**1. 수능 성적 산출 방법**
+- 국어/수학: 표준점수 반영
+- 영어: 등급별 환산점수 (1등급 100점 ~ 9등급 0점)
+- 탐구: 표준점수 반영 (2과목 합산, 상위 1과목 100%, 차상위 80%)
+[출처: 2026 plan]
+
+**2. 학생부 반영 (신설)**
+- 교과 성적 4% + 출결 1% = 총 5%
+- 상위 30단위 석차등급 평균 반영
+[출처: 2026 plan]`;
+
+            document.getElementById('allCitations').value = `[
+  {"source": "2026 plan", "url": "https://example.com/yonsei-2026-plan.pdf"}
+]`;
+        }
+
+        function clearAll() {
+            document.getElementById('userQuestion').value = '';
+            document.getElementById('structureText').value = '';
+            document.getElementById('resultsText').value = '';
+            document.getElementById('allCitations').value = '';
+            
+            document.getElementById('stats').innerHTML = '실행 전';
+            
+            ['processed', 'raw', 'prompt'].forEach(tab => {
+                document.getElementById(`${tab}Empty`).style.display = 'flex';
+                document.getElementById(`${tab}Content`).style.display = 'none';
+                document.getElementById(`${tab}Content`).innerHTML = '';
+            });
+        }
+    </script>
+</body>
+</html>

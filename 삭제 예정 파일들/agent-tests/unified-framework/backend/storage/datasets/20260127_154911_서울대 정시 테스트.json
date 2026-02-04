@@ -1,0 +1,10 @@
+{
+  "name": "서울대 정시 테스트",
+  "agent_type": "orchestration",
+  "description": "서울대 정시 모집요강 질문 테스트용 데이터셋",
+  "data": {
+    "message": "서울대 정시 모집요강 알려줘",
+    "history": []
+  },
+  "created_at": "2026-01-27T15:49:11.387577"
+}
