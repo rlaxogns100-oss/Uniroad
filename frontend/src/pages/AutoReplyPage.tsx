@@ -30,8 +30,9 @@ interface CommentRecord {
   query?: string
   function_result?: string
   status?: 'pending' | 'approved' | 'cancelled' | 'posted' | 'failed'  // 반자동 시스템 상태
-  action_history?: Array<{action: string, timestamp: string, old_comment?: string}>
+  action_history?: Array<{action: string, timestamp: string, old_comment?: string, reason?: string}>
   posted_at?: string | null
+  cancel_reason?: string  // 취소 사유
 }
 
 interface PosterStatus {
@@ -437,37 +438,32 @@ export default function AutoReplyPage() {
       return
     }
     
-    setActionLoading2(prev => new Set(prev).add(cancelingCommentId))
-    try {
-      const res = await fetch(`${API_BASE}/comments/${cancelingCommentId}/cancel`, { 
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: cancelReason })
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || '취소 실패')
-      
-      // 즉시 로컬 상태 업데이트 (Optimistic Update)
-      setComments(prev => prev.map(c => 
-        c.id === cancelingCommentId ? { ...c, status: 'cancelled' as const } : c
-      ))
-      
-      // 모달 닫기
-      setCancelModalOpen(false)
-      setCancelingCommentId(null)
-      setCancelReason('')
-      
-      // 백그라운드에서 전체 새로고침 (await 제거)
+    const commentId = cancelingCommentId
+    const reason = cancelReason
+    
+    // 즉시 로컬 상태 업데이트 (Optimistic Update)
+    setComments(prev => prev.map(c => 
+      c.id === commentId ? { ...c, status: 'cancelled' as const, cancel_reason: reason } : c
+    ))
+    
+    // 모달 즉시 닫기
+    setCancelModalOpen(false)
+    setCancelingCommentId(null)
+    setCancelReason('')
+    
+    // 백그라운드에서 API 호출 (await 없이)
+    fetch(`${API_BASE}/comments/${commentId}/cancel`, { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason })
+    }).then(res => {
+      if (!res.ok) {
+        // 실패 시 상태 되돌리기
+        fetchComments()
+      }
+    }).catch(() => {
       fetchComments()
-    } catch (e: any) {
-      alert(e.message)
-    } finally {
-      setActionLoading2(prev => {
-        const next = new Set(prev)
-        next.delete(cancelingCommentId)
-        return next
-      })
-    }
+    })
   }
 
   const openEditModal = (record: CommentRecord) => {
@@ -1385,7 +1381,14 @@ export default function AutoReplyPage() {
                               )}
                               {(record.status === 'cancelled' || record.status === 'failed') && record.id && (
                                 <div className="flex flex-wrap gap-1 items-center">
-                                  <span className="text-xs text-gray-500">{record.status === 'cancelled' ? '취소됨' : '실패'}</span>
+                                  <span className="text-xs text-gray-500">
+                                    {record.status === 'cancelled' ? '취소됨' : '실패'}
+                                    {record.cancel_reason && (
+                                      <span className="ml-1 px-1.5 py-0.5 bg-gray-200 rounded text-gray-600">
+                                        {record.cancel_reason}
+                                      </span>
+                                    )}
+                                  </span>
                                   <button
                                     onClick={() => handleRevertToPending(record.id!)}
                                     disabled={isLoading}
