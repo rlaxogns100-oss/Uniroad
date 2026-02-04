@@ -19,6 +19,7 @@ interface BotConfig {
 }
 
 interface CommentRecord {
+  id?: string
   timestamp: string
   post_url: string
   post_title: string
@@ -28,6 +29,16 @@ interface CommentRecord {
   post_content?: string
   query?: string
   function_result?: string
+  status?: 'pending' | 'approved' | 'cancelled' | 'posted' | 'failed'  // 반자동 시스템 상태
+  action_history?: Array<{action: string, timestamp: string, old_comment?: string}>
+  posted_at?: string | null
+}
+
+interface PosterStatus {
+  running: boolean
+  pid: number | null
+  approved_count: number
+  timestamp: string
 }
 
 interface CommentsResponse {
@@ -101,7 +112,7 @@ export default function AutoReplyPage() {
   const [keywordsText, setKeywordsText] = useState('')  // 텍스트 입력용
   const [keywordsExpanded, setKeywordsExpanded] = useState(false)
   const [configChanged, setConfigChanged] = useState(false)
-  const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set())
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())  // ID 기반으로 변경
   // 프롬프트 편집 (Query + Answer 2개)
   const [queryPrompt, setQueryPrompt] = useState('')
   const [answerPrompt, setAnswerPrompt] = useState('')
@@ -132,6 +143,23 @@ export default function AutoReplyPage() {
   const [skipLinks, setSkipLinks] = useState<Array<{url: string, article_id: string, added_at: string}>>([])
   const [skipLinkInput, setSkipLinkInput] = useState('')
   const [skipLinkLoading, setSkipLinkLoading] = useState(false)
+
+  // 게시 워커 상태
+  const [posterStatus, setPosterStatus] = useState<PosterStatus | null>(null)
+  const [posterLoading, setPosterLoading] = useState(false)
+  
+  // 게시 로그
+  const [posterLogs, setPosterLogs] = useState<string[]>([])
+  const [posterLogsExpanded, setPosterLogsExpanded] = useState(false)
+  
+  // 댓글 필터 탭
+  const [commentFilter, setCommentFilter] = useState<'all' | 'pending' | 'approved' | 'cancelled' | 'posted'>('all')
+  
+  // 댓글 수정 모달
+  const [editModalOpen, setEditModalOpen] = useState(false)
+  const [editingComment, setEditingComment] = useState<CommentRecord | null>(null)
+  const [editCommentText, setEditCommentText] = useState('')
+  const [actionLoading2, setActionLoading2] = useState<Set<string>>(new Set())  // 여러 개 병렬 처리 가능
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -164,7 +192,7 @@ export default function AutoReplyPage() {
 
   const fetchComments = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/comments?limit=50`)
+      const res = await fetch(`${API_BASE}/comments?limit=500`)
       if (!res.ok) throw new Error('댓글 조회 실패')
       const data: CommentsResponse = await res.json()
       setComments(data.comments)
@@ -187,6 +215,39 @@ export default function AutoReplyPage() {
       setPromptError(e.message ?? '프롬프트를 불러올 수 없습니다.')
     } finally {
       setPromptLoading(false)
+    }
+  }, [])
+
+  const fetchSkipLinks = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/skip-links`)
+      if (!res.ok) throw new Error('스킵 링크 조회 실패')
+      const data = await res.json()
+      setSkipLinks(data.links || [])
+    } catch (e) {
+      console.error('스킵 링크 조회 에러:', e)
+    }
+  }, [])
+
+  const fetchPosterStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/poster/status`)
+      if (!res.ok) throw new Error('게시 워커 상태 조회 실패')
+      const data: PosterStatus = await res.json()
+      setPosterStatus(data)
+    } catch (e) {
+      console.error('게시 워커 상태 조회 에러:', e)
+    }
+  }, [])
+
+  const fetchPosterLogs = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/poster/logs?lines=50`)
+      if (!res.ok) throw new Error('게시 로그 조회 실패')
+      const data = await res.json()
+      setPosterLogs(data.logs || [])
+    } catch (e) {
+      console.error('게시 로그 조회 에러:', e)
     }
   }, [])
 
@@ -215,7 +276,7 @@ export default function AutoReplyPage() {
   useEffect(() => {
     const load = async () => {
       setLoading(true)
-      await Promise.all([fetchStatus(), fetchComments(), fetchPrompts(), fetchSkipLinks()])
+      await Promise.all([fetchStatus(), fetchComments(), fetchPrompts(), fetchSkipLinks(), fetchPosterStatus(), fetchPosterLogs()])
       setLoading(false)
     }
     load()
@@ -224,10 +285,12 @@ export default function AutoReplyPage() {
     const interval = setInterval(() => {
       fetchStatus()
       fetchComments()
+      fetchPosterStatus()
+      fetchPosterLogs()
     }, 10000)
 
     return () => clearInterval(interval)
-  }, [fetchStatus, fetchComments, fetchPrompts, fetchSkipLinks])
+  }, [fetchStatus, fetchComments, fetchPrompts, fetchSkipLinks, fetchPosterStatus, fetchPosterLogs])
 
   // 실시간 로그 스트리밍
   useEffect(() => {
@@ -297,6 +360,161 @@ export default function AutoReplyPage() {
       setError(e.message)
     } finally {
       setActionLoading(false)
+    }
+  }
+
+  // 게시 워커 시작/중지
+  const handleStartPoster = async () => {
+    setPosterLoading(true)
+    setError(null)
+    try {
+      const res = await fetch(`${API_BASE}/poster/start`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '게시 워커 시작 실패')
+      await fetchPosterStatus()
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setPosterLoading(false)
+    }
+  }
+
+  const handleStopPoster = async () => {
+    setPosterLoading(true)
+    setError(null)
+    try {
+      const res = await fetch(`${API_BASE}/poster/stop`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '게시 워커 중지 실패')
+      await fetchPosterStatus()
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setPosterLoading(false)
+    }
+  }
+
+  // 댓글 액션 핸들러들
+  const handleApprove = async (commentId: string) => {
+    setActionLoading2(prev => new Set(prev).add(commentId))
+    try {
+      const res = await fetch(`${API_BASE}/comments/${commentId}/approve`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '승인 실패')
+      await fetchComments()
+      await fetchPosterStatus()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setActionLoading2(prev => {
+        const next = new Set(prev)
+        next.delete(commentId)
+        return next
+      })
+    }
+  }
+
+  const handleCancel = async (commentId: string) => {
+    setActionLoading2(prev => new Set(prev).add(commentId))
+    try {
+      const res = await fetch(`${API_BASE}/comments/${commentId}/cancel`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '취소 실패')
+      await fetchComments()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setActionLoading2(prev => {
+        const next = new Set(prev)
+        next.delete(commentId)
+        return next
+      })
+    }
+  }
+
+  const openEditModal = (record: CommentRecord) => {
+    setEditingComment(record)
+    setEditCommentText(record.comment)
+    setEditModalOpen(true)
+  }
+
+  const handleEditSave = async () => {
+    if (!editingComment?.id) return
+    setActionLoading2(prev => new Set(prev).add(editingComment.id!))
+    try {
+      const res = await fetch(`${API_BASE}/comments/${editingComment.id}/edit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_comment: editCommentText })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '수정 실패')
+      setEditModalOpen(false)
+      setEditingComment(null)
+      await fetchComments()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setActionLoading2(prev => {
+        const next = new Set(prev)
+        next.delete(editingComment.id!)
+        return next
+      })
+    }
+  }
+
+  const handleRegenerate = async (commentId: string) => {
+    setActionLoading2(prev => new Set(prev).add(commentId))
+    try {
+      const res = await fetch(`${API_BASE}/comments/${commentId}/regenerate`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '재생성 실패')
+      await fetchComments()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setActionLoading2(prev => {
+        const next = new Set(prev)
+        next.delete(commentId)
+        return next
+      })
+    }
+  }
+
+  const handleRevertToPending = async (commentId: string) => {
+    setActionLoading2(prev => new Set(prev).add(commentId))
+    try {
+      const res = await fetch(`${API_BASE}/comments/${commentId}/revert`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '되돌리기 실패')
+      await fetchComments()
+      await fetchPosterStatus()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setActionLoading2(prev => {
+        const next = new Set(prev)
+        next.delete(commentId)
+        return next
+      })
+    }
+  }
+
+  // 상태 뱃지 렌더링
+  const renderStatusBadge = (status?: string) => {
+    switch (status) {
+      case 'pending':
+        return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800">대기중</span>
+      case 'approved':
+        return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">승인됨</span>
+      case 'posted':
+        return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">게시완료</span>
+      case 'cancelled':
+        return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800">취소됨</span>
+      case 'failed':
+        return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">실패</span>
+      default:
+        return <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-500">-</span>
     }
   }
 
@@ -378,17 +596,6 @@ export default function AutoReplyPage() {
   }
 
   // 스킵 링크 관련 함수들
-  const fetchSkipLinks = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/skip-links`)
-      if (!res.ok) throw new Error('스킵 링크 조회 실패')
-      const data = await res.json()
-      setSkipLinks(data.links || [])
-    } catch (e) {
-      console.error('스킵 링크 조회 에러:', e)
-    }
-  }, [])
-
   const handleAddSkipLink = async () => {
     if (!skipLinkInput.trim()) {
       alert('URL을 입력해주세요.')
@@ -482,7 +689,7 @@ export default function AutoReplyPage() {
     <div className="min-h-screen bg-gray-50">
       {/* 헤더 */}
       <header className="bg-white shadow-sm">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+        <div className="max-w-[1600px] mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <button
               onClick={() => navigate('/')}
@@ -507,7 +714,7 @@ export default function AutoReplyPage() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-4 py-8">
+      <main className="max-w-[1600px] mx-auto px-4 py-8">
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
             {error}
@@ -883,17 +1090,97 @@ export default function AutoReplyPage() {
           )}
         </div>
 
+        {/* 게시 로그 */}
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div 
+            className="px-6 py-4 border-b border-gray-100 flex items-center justify-between cursor-pointer hover:bg-gray-50"
+            onClick={() => setPosterLogsExpanded(!posterLogsExpanded)}
+          >
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold text-gray-800">게시 로그</h2>
+              {posterStatus?.running && (
+                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse mr-1"></span>
+                  실행중
+                </span>
+              )}
+            </div>
+            <svg 
+              className={`w-5 h-5 text-gray-500 transition-transform ${posterLogsExpanded ? 'rotate-180' : ''}`}
+              fill="none" 
+              stroke="currentColor" 
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </div>
+          {posterLogsExpanded && (
+            <div className="p-4">
+              <div className="bg-gray-900 rounded-lg p-4 h-64 overflow-y-auto font-mono text-xs">
+                {posterLogs.length === 0 ? (
+                  <div className="text-gray-500">게시 로그가 없습니다.</div>
+                ) : (
+                  posterLogs.map((log, idx) => (
+                    <div key={idx} className={`${log.includes('[에러]') || log.includes('Error') ? 'text-red-400' : log.includes('[게시 완료]') ? 'text-green-400' : 'text-gray-300'}`}>
+                      {log}
+                    </div>
+                  ))
+                )}
+              </div>
+              <button
+                onClick={fetchPosterLogs}
+                className="mt-2 px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded"
+              >
+                새로고침
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* 댓글 기록 - 실제 댓글과 가실행 댓글 분리 */}
         
-        {/* 실제 댓글 기록 */}
+        {/* 실제 댓글 기록 (반자동 시스템) */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div 
             className="px-6 py-4 border-b border-gray-100 flex items-center justify-between cursor-pointer hover:bg-gray-50"
             onClick={() => setRealCommentsOpen(!realCommentsOpen)}
           >
-            <h2 className="text-lg font-semibold text-gray-800">
-              실제 댓글 기록 <span className="text-gray-400 font-normal">({comments.filter(c => !c.dry_run).length}개)</span>
-            </h2>
+            <div className="flex items-center gap-4">
+              <h2 className="text-lg font-semibold text-gray-800">
+                실제 댓글 기록 <span className="text-gray-400 font-normal">({comments.filter(c => !c.dry_run).length}개)</span>
+              </h2>
+              {/* 게시 워커 상태 및 컨트롤 */}
+              <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                {posterStatus?.running ? (
+                  <>
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse mr-1.5"></span>
+                      게시 워커 실행중
+                    </span>
+                    <button
+                      onClick={handleStopPoster}
+                      disabled={posterLoading}
+                      className="px-3 py-1 text-xs bg-red-500 hover:bg-red-600 text-white rounded-lg disabled:opacity-50"
+                    >
+                      {posterLoading ? '...' : '게시 중지'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-xs text-gray-500">
+                      승인 대기: {posterStatus?.approved_count || 0}개
+                    </span>
+                    <button
+                      onClick={handleStartPoster}
+                      disabled={posterLoading || (posterStatus?.approved_count || 0) === 0}
+                      className="px-3 py-1 text-xs bg-green-500 hover:bg-green-600 text-white rounded-lg disabled:opacity-50"
+                    >
+                      {posterLoading ? '...' : '게시 시작'}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
             <svg 
               className={`w-5 h-5 text-gray-500 transition-transform ${realCommentsOpen ? 'rotate-180' : ''}`}
               fill="none" 
@@ -906,49 +1193,81 @@ export default function AutoReplyPage() {
           
           {realCommentsOpen && (
             <>
+              {/* 필터 탭 */}
+              <div className="px-4 py-2 border-b border-gray-100 flex gap-2 flex-wrap">
+                {[
+                  { key: 'all', label: '전체', count: comments.filter(c => !c.dry_run).length },
+                  { key: 'pending', label: '대기중', count: comments.filter(c => !c.dry_run && c.status === 'pending').length },
+                  { key: 'approved', label: '승인됨', count: comments.filter(c => !c.dry_run && c.status === 'approved').length },
+                  { key: 'cancelled', label: '취소됨', count: comments.filter(c => !c.dry_run && c.status === 'cancelled').length },
+                  { key: 'posted', label: '게시완료', count: comments.filter(c => !c.dry_run && c.status === 'posted').length },
+                ].map(tab => (
+                  <button
+                    key={tab.key}
+                    onClick={(e) => { e.stopPropagation(); setCommentFilter(tab.key as any); }}
+                    className={`px-3 py-1 text-xs rounded-full transition-colors ${
+                      commentFilter === tab.key 
+                        ? 'bg-blue-500 text-white' 
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    {tab.label} ({tab.count})
+                  </button>
+                ))}
+              </div>
               {comments.filter(c => !c.dry_run).length === 0 ? (
                 <div className="p-8 text-center text-gray-500">
                   아직 실제 댓글 기록이 없습니다.
                 </div>
               ) : (
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
                   <table className="w-full bg-white border border-gray-200 table-fixed">
-                    <thead>
+                    <thead className="sticky top-0 bg-gray-50 z-10">
                       <tr className="bg-gray-50 border-b border-gray-200">
-                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '18%' }}>원글</th>
-                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '18%' }}>쿼리</th>
-                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '22%' }}>함수결과</th>
-                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '22%' }}>최종답변</th>
-                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '20%' }}>링크</th>
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '5%' }}>상태</th>
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '15%' }}>원글</th>
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '15%' }}>쿼리</th>
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '18%' }}>함수결과</th>
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '18%' }}>최종답변</th>
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '12%' }}>링크</th>
+                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '17%' }}>액션</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {comments.filter(c => !c.dry_run).map((record, idx) => {
-                        const isExpanded = expandedRows.has(idx)
+                      {comments
+                        .filter(c => !c.dry_run)
+                        .filter(c => commentFilter === 'all' || c.status === commentFilter)
+                        .map((record, idx) => {
+                        const rowId = record.id || `idx-${idx}`
+                        const isExpanded = expandedRows.has(rowId)
+                        const isLoading = record.id ? actionLoading2.has(record.id) : false
                         return (
                           <tr
-                            key={idx}
+                            key={rowId}
                             onClick={() => {
                               setExpandedRows(prev => {
                                 const next = new Set(prev)
-                                if (next.has(idx)) next.delete(idx)
-                                else next.add(idx)
+                                if (next.has(rowId)) next.delete(rowId)
+                                else next.add(rowId)
                                 return next
                               })
                             }}
                             className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
                           >
                             <td className="px-2 py-1.5 align-top">
-                              <ExpandableCell content={record.post_content || '-'} maxLength={35} isExpanded={isExpanded} />
+                              {renderStatusBadge(record.status)}
                             </td>
                             <td className="px-2 py-1.5 align-top">
-                              <ExpandableCell content={record.query || '-'} maxLength={40} isExpanded={isExpanded} />
+                              <ExpandableCell content={record.post_content || '-'} maxLength={30} isExpanded={isExpanded} />
                             </td>
                             <td className="px-2 py-1.5 align-top">
-                              <ExpandableCell content={record.function_result || '-'} maxLength={50} isExpanded={isExpanded} />
+                              <ExpandableCell content={record.query || '-'} maxLength={30} isExpanded={isExpanded} />
                             </td>
                             <td className="px-2 py-1.5 align-top">
-                              <ExpandableCell content={record.comment} maxLength={40} isExpanded={isExpanded} />
+                              <ExpandableCell content={record.function_result || '-'} maxLength={40} isExpanded={isExpanded} />
+                            </td>
+                            <td className="px-2 py-1.5 align-top">
+                              <ExpandableCell content={record.comment} maxLength={35} isExpanded={isExpanded} />
                             </td>
                             <td className="px-2 py-1.5 align-top">
                               <a
@@ -959,8 +1278,68 @@ export default function AutoReplyPage() {
                                 className="text-xs text-blue-600 hover:underline block truncate"
                                 title={record.post_title || record.post_url}
                               >
-                                {record.post_title || '링크'}
+                                {record.post_title?.substring(0, 15) || '링크'}
                               </a>
+                            </td>
+                            <td className="px-2 py-1.5 align-top" onClick={e => e.stopPropagation()}>
+                              {(record.status === 'pending' || record.status === 'approved') && record.id && (
+                                <div className="flex flex-wrap gap-1">
+                                  {record.status === 'pending' && (
+                                    <button
+                                      onClick={() => handleApprove(record.id!)}
+                                      disabled={isLoading}
+                                      className="px-2 py-0.5 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded disabled:opacity-50"
+                                    >
+                                      {isLoading ? '...' : '확인'}
+                                    </button>
+                                  )}
+                                  {record.status === 'approved' && (
+                                    <button
+                                      onClick={() => handleRevertToPending(record.id!)}
+                                      disabled={isLoading}
+                                      className="px-2 py-0.5 text-xs bg-orange-500 hover:bg-orange-600 text-white rounded disabled:opacity-50"
+                                    >
+                                      {isLoading ? '...' : '승인취소'}
+                                    </button>
+                                  )}
+                                  <button
+                                    onClick={() => handleCancel(record.id!)}
+                                    disabled={isLoading}
+                                    className="px-2 py-0.5 text-xs bg-gray-400 hover:bg-gray-500 text-white rounded disabled:opacity-50"
+                                  >
+                                    {isLoading ? '...' : '취소'}
+                                  </button>
+                                  <button
+                                    onClick={() => openEditModal(record)}
+                                    disabled={isLoading}
+                                    className="px-2 py-0.5 text-xs bg-yellow-500 hover:bg-yellow-600 text-white rounded disabled:opacity-50"
+                                  >
+                                    수정
+                                  </button>
+                                  <button
+                                    onClick={() => handleRegenerate(record.id!)}
+                                    disabled={isLoading}
+                                    className="px-2 py-0.5 text-xs bg-purple-500 hover:bg-purple-600 text-white rounded disabled:opacity-50"
+                                  >
+                                    {isLoading ? '...' : '재생성'}
+                                  </button>
+                                </div>
+                              )}
+                              {record.status === 'posted' && (
+                                <span className="text-xs text-green-600">게시완료</span>
+                              )}
+                              {(record.status === 'cancelled' || record.status === 'failed') && record.id && (
+                                <div className="flex flex-wrap gap-1 items-center">
+                                  <span className="text-xs text-gray-500">{record.status === 'cancelled' ? '취소됨' : '실패'}</span>
+                                  <button
+                                    onClick={() => handleRevertToPending(record.id!)}
+                                    disabled={isLoading}
+                                    className="px-2 py-0.5 text-xs bg-blue-500 hover:bg-blue-600 text-white rounded disabled:opacity-50"
+                                  >
+                                    {isLoading ? '...' : '되돌리기'}
+                                  </button>
+                                </div>
+                              )}
                             </td>
                           </tr>
                         )
@@ -1012,14 +1391,14 @@ export default function AutoReplyPage() {
                     </thead>
                     <tbody>
                       {comments.filter(c => c.dry_run).map((record, idx) => {
-                        const isExpanded = expandedRows.has(idx + 10000) // 다른 인덱스 사용
+                        const rowId = record.id || `dry-${idx}`
+                        const isExpanded = expandedRows.has(rowId)
                         return (
                           <tr
-                            key={idx}
+                            key={rowId}
                             onClick={() => {
                               setExpandedRows(prev => {
                                 const next = new Set(prev)
-                                const rowId = idx + 10000
                                 if (next.has(rowId)) next.delete(rowId)
                                 else next.add(rowId)
                                 return next
@@ -1258,11 +1637,58 @@ export default function AutoReplyPage() {
           <ul className="text-sm text-blue-700 space-y-1">
             <li>1. 로컬 PC에서 get_cookies.py 실행하여 네이버 로그인 쿠키 생성</li>
             <li>2. 생성된 naver_cookies.pkl 파일을 서버로 업로드</li>
-            <li>3. 이 페이지에서 '봇 시작' 버튼 클릭</li>
-            <li>4. 설정은 봇 실행 중에도 변경 가능 (다음 사이클에 적용)</li>
+            <li>3. 이 페이지에서 '봇 시작' 버튼 클릭 → 댓글이 자동 생성되어 대기열에 추가됨</li>
+            <li>4. 생성된 댓글을 검토하고 '확인' 버튼으로 승인</li>
+            <li>5. '게시 시작' 버튼 클릭 → 승인된 댓글이 딜레이를 적용하여 자동 게시됨</li>
           </ul>
         </div>
       </main>
+
+      {/* 댓글 수정 모달 */}
+      {editModalOpen && editingComment && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-800">댓글 수정</h3>
+            </div>
+            <div className="p-6">
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">원글</label>
+                <div className="p-3 bg-gray-50 rounded-lg text-sm text-gray-600 max-h-32 overflow-y-auto">
+                  {editingComment.post_content || editingComment.post_title || '-'}
+                </div>
+              </div>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-2">댓글 내용</label>
+                <textarea
+                  value={editCommentText}
+                  onChange={(e) => setEditCommentText(e.target.value)}
+                  rows={6}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                />
+              </div>
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => {
+                    setEditModalOpen(false)
+                    setEditingComment(null)
+                  }}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleEditSave}
+                  disabled={editingComment?.id ? actionLoading2.has(editingComment.id) : false}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {editingComment?.id && actionLoading2.has(editingComment.id) ? '저장 중...' : '저장'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

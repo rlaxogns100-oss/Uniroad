@@ -188,7 +188,7 @@ async def test_generate_reply(body: TestRequest):
         raise HTTPException(status_code=400, detail="게시글 내용을 입력해주세요.")
     
     manager = get_bot_manager()
-    result = manager.test_generate_reply(body.post_content)
+    result = await manager.test_generate_reply(body.post_content)
     
     if not result.get("success"):
         raise HTTPException(status_code=500, detail=result.get("message", "테스트 실행 실패"))
@@ -303,3 +303,158 @@ async def stream_logs():
             "X-Accel-Buffering": "no"  # nginx buffering 비활성화
         }
     )
+
+
+# ==========================================
+# 반자동 시스템 API 엔드포인트
+# ==========================================
+
+class CommentEditRequest(BaseModel):
+    """댓글 수정 요청"""
+    new_comment: str
+
+
+@router.post("/comments/{comment_id}/approve")
+async def approve_comment(comment_id: str):
+    """
+    댓글 승인 - 게시 대기열에 추가
+    
+    승인된 댓글은 게시 워커가 실행 중일 때 딜레이를 적용하여 자동으로 게시됩니다.
+    """
+    manager = get_bot_manager()
+    result = manager.approve_comment(comment_id)
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "승인 실패"))
+    
+    return result
+
+
+@router.post("/comments/{comment_id}/cancel")
+async def cancel_comment(comment_id: str):
+    """
+    댓글 취소 - 게시하지 않음
+    
+    취소된 댓글은 기록에 남지만 게시되지 않습니다.
+    """
+    manager = get_bot_manager()
+    result = manager.cancel_comment(comment_id)
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "취소 실패"))
+    
+    return result
+
+
+@router.post("/comments/{comment_id}/edit")
+async def edit_comment(comment_id: str, body: CommentEditRequest):
+    """
+    댓글 수정
+    
+    댓글 내용을 수정합니다. 수정 이력이 기록됩니다.
+    """
+    if not body.new_comment or not body.new_comment.strip():
+        raise HTTPException(status_code=400, detail="수정할 댓글 내용을 입력해주세요.")
+    
+    manager = get_bot_manager()
+    result = manager.edit_comment(comment_id, body.new_comment.strip())
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "수정 실패"))
+    
+    return result
+
+
+@router.post("/comments/{comment_id}/regenerate")
+async def regenerate_comment(comment_id: str):
+    """
+    댓글 재생성 - AI 에이전트를 다시 실행
+    
+    원본 게시글 내용을 기반으로 새로운 댓글을 생성합니다.
+    """
+    manager = get_bot_manager()
+    result = await manager.regenerate_comment(comment_id)
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "재생성 실패"))
+    
+    return result
+
+
+@router.post("/comments/{comment_id}/revert")
+async def revert_comment(comment_id: str):
+    """
+    댓글을 pending 상태로 되돌리기
+    
+    취소됨, 실패, 승인됨 상태의 댓글을 다시 대기 상태로 되돌립니다.
+    """
+    manager = get_bot_manager()
+    result = manager.revert_to_pending(comment_id)
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "되돌리기 실패"))
+    
+    return result
+
+
+# ==========================================
+# 게시 워커 API 엔드포인트
+# ==========================================
+
+@router.post("/poster/start")
+async def start_poster():
+    """
+    게시 워커 시작
+    
+    승인된 댓글을 설정된 딜레이에 따라 자동으로 게시합니다.
+    """
+    manager = get_bot_manager()
+    result = manager.start_poster()
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "시작 실패"))
+    
+    return result
+
+
+@router.post("/poster/stop")
+async def stop_poster():
+    """
+    게시 워커 중지
+    """
+    manager = get_bot_manager()
+    result = manager.stop_poster()
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "중지 실패"))
+    
+    return result
+
+
+@router.get("/poster/status")
+async def get_poster_status():
+    """
+    게시 워커 상태 조회
+    
+    Returns:
+        running: 실행 중 여부
+        pid: 프로세스 ID
+        approved_count: 승인 대기 중인 댓글 수
+    """
+    manager = get_bot_manager()
+    return manager.get_poster_status()
+
+
+@router.get("/poster/logs")
+async def get_poster_logs(lines: int = 50):
+    """
+    게시 워커 로그 조회
+    
+    Args:
+        lines: 가져올 로그 줄 수 (기본 50)
+    
+    Returns:
+        logs: 로그 줄 배열
+    """
+    manager = get_bot_manager()
+    return manager.get_poster_logs(lines)
