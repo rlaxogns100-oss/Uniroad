@@ -638,8 +638,16 @@ export default function ChatPage() {
                 {announcements.length === 0 ? (
                   <p className="text-xs text-gray-500 py-2">등록된 공지사항이 없습니다.</p>
                 ) : (
-                  announcements.map((announcement) => (
-                    <div key={announcement.id} className="group">
+                  announcements.map((announcement) => {
+                    // 5일 이내인지 확인
+                    const createdDate = new Date(announcement.created_at)
+                    const now = new Date()
+                    const diffTime = now.getTime() - createdDate.getTime()
+                    const diffDays = diffTime / (1000 * 60 * 60 * 24)
+                    const isNew = diffDays <= 5
+
+                    return (
+                    <div key={announcement.id} className={`group ${isNew ? 'animate-shake-new' : ''}`}>
                       <button 
                         onClick={() => {
                           setSelectedAnnouncement(announcement)
@@ -658,7 +666,12 @@ export default function ChatPage() {
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-xs font-medium text-gray-900 truncate">{announcement.title}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="text-xs font-medium text-gray-900 truncate">{announcement.title}</p>
+                            {isNew && (
+                              <span className="new-badge flex-shrink-0">NEW</span>
+                            )}
+                          </div>
                           <p className="text-[10px] text-gray-500">
                             {new Date(announcement.created_at).toLocaleDateString('ko-KR')}
                           </p>
@@ -693,7 +706,8 @@ export default function ChatPage() {
                         )}
                       </button>
                     </div>
-                  ))
+                    )
+                  })
                 )}
                 
                 {/* 관리자 추가 버튼 */}
