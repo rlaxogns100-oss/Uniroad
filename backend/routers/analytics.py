@@ -6,7 +6,7 @@ Analytics Router
 
 from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from services.supabase_client import supabase_service
 from utils.admin_filter import is_admin_account
 
@@ -120,14 +120,107 @@ async def get_user_summary() -> Dict[str, Any]:
                     if not is_admin_account(email=user.email):
                         today_logins += 1
         
+@router.get("/api/analytics/utm-questions")
+async def get_utm_questions(
+    utm_source: Optional[str] = None,
+    utm_medium: Optional[str] = None,
+    days: int = 30
+) -> Dict[str, Any]:
+    """
+    UTM별 인기 질문 분석
+    - 어떤 매체에서 온 사용자가 어떤 질문을 많이 하는지
+    """
+    try:
+        client = supabase_service.get_client()
+        
+        # 기본 쿼리
+        query = client.table("chat_sessions")\
+            .select("utm_source, utm_medium, utm_campaign, chat_messages(content, created_at)")\
+            .gte("created_at", (datetime.now() - timedelta(days=days)).isoformat())
+        
+        # UTM 필터 적용
+        if utm_source:
+            query = query.eq("utm_source", utm_source)
+        if utm_medium:
+            query = query.eq("utm_medium", utm_medium)
+        
+        response = query.execute()
+        
+        # 질문 패턴 분석
+        question_patterns = {
+            "합격 가능성": ["합격", "가능", "확률", "가능성"],
+            "점수/성적": ["점수", "성적", "등급", "백분위", "표준점수"],
+            "전형 관련": ["전형", "수시", "정시", "학종", "교과"],
+            "학과/전공": ["학과", "전공", "학부", "계열"],
+            "대학 정보": ["대학", "학교", "캠퍼스"],
+            "경쟁률": ["경쟁률", "지원", "인원"],
+        }
+        
+        # UTM별 질문 분석
+        utm_analysis = {}
+        
+        for session in response.data:
+            utm_key = f"{session.get('utm_source', 'direct')}_{session.get('utm_medium', 'none')}"
+            
+            if utm_key not in utm_analysis:
+                utm_analysis[utm_key] = {
+                    "utm_source": session.get('utm_source', 'direct'),
+                    "utm_medium": session.get('utm_medium', 'none'),
+                    "utm_campaign": session.get('utm_campaign'),
+                    "total_questions": 0,
+                    "patterns": {pattern: 0 for pattern in question_patterns},
+                    "sample_questions": []
+                }
+            
+            # 사용자 메시지만 분석
+            for msg in session.get('chat_messages', []):
+                if msg.get('content'):
+                    content = msg['content'].lower()
+                    utm_analysis[utm_key]["total_questions"] += 1
+                    
+                    # 샘플 질문 저장 (최대 5개)
+                    if len(utm_analysis[utm_key]["sample_questions"]) < 5:
+                        utm_analysis[utm_key]["sample_questions"].append(msg['content'][:100])
+                    
+                    # 패턴 매칭
+                    for pattern, keywords in question_patterns.items():
+                        if any(keyword in content for keyword in keywords):
+                            utm_analysis[utm_key]["patterns"][pattern] += 1
+        
+        # 결과 정리
+        results = []
+        for utm_key, data in utm_analysis.items():
+            if data["total_questions"] > 0:
+                # 패턴별 비율 계산
+                pattern_percentages = {
+                    pattern: round(100 * count / data["total_questions"], 1)
+                    for pattern, count in data["patterns"].items()
+                }
+                
+                results.append({
+                    "utm_source": data["utm_source"],
+                    "utm_medium": data["utm_medium"],
+                    "utm_campaign": data["utm_campaign"],
+                    "total_questions": data["total_questions"],
+                    "pattern_percentages": pattern_percentages,
+                    "top_patterns": sorted(
+                        pattern_percentages.items(), 
+                        key=lambda x: x[1], 
+                        reverse=True
+                    )[:3],
+                    "sample_questions": data["sample_questions"]
+                })
+        
+        # 총 질문 수로 정렬
+        results.sort(key=lambda x: x["total_questions"], reverse=True)
+        
         return {
             "success": True,
-            "total_users": total_users,
-            "today_new_users": today_new_users,
-            "today_logins": today_logins,
+            "period_days": days,
+            "utm_analysis": results,
             "timestamp": datetime.now().isoformat()
         }
         
     except Exception as e:
-        print(f"❌ 사용자 요약 조회 오류: {e}")
+        print(f"❌ UTM 질문 분석 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))

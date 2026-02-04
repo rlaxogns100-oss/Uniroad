@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
+import { getSessionId, getUTMParams } from '../utils/tracking'
 
 export interface ChatSession {
   id: string
@@ -85,8 +86,21 @@ export function useChat() {
       const token = localStorage.getItem('access_token')
       if (!token) return null
 
+      // UTM 정보와 브라우저 세션 ID 가져오기
+      const browserSessionId = getSessionId()
+      const utm = getUTMParams()
+
       const response = await axios.post('/api/sessions/', 
-        { title: title.substring(0, 100) },
+        { 
+          title: title.substring(0, 100),
+          browser_session_id: browserSessionId,
+          utm_source: utm.utm_source,
+          utm_medium: utm.utm_medium,
+          utm_campaign: utm.utm_campaign,
+          utm_content: utm.utm_content,
+          utm_term: utm.utm_term,
+          referrer: document.referrer
+        },
         { headers: { Authorization: `Bearer ${token}` } }
       )
 

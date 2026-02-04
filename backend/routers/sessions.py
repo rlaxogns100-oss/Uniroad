@@ -13,6 +13,13 @@ router = APIRouter()
 
 class CreateSessionRequest(BaseModel):
     title: Optional[str] = "새 대화"
+    browser_session_id: Optional[str] = None
+    utm_source: Optional[str] = None
+    utm_medium: Optional[str] = None
+    utm_campaign: Optional[str] = None
+    utm_content: Optional[str] = None
+    utm_term: Optional[str] = None
+    referrer: Optional[str] = None
 
 
 class UpdateSessionRequest(BaseModel):
@@ -84,6 +91,13 @@ async def create_session(
             .insert({
                 "user_id": user["user_id"],
                 "title": request.title,
+                "browser_session_id": request.browser_session_id,
+                "utm_source": request.utm_source,
+                "utm_medium": request.utm_medium,
+                "utm_campaign": request.utm_campaign,
+                "utm_content": request.utm_content,
+                "utm_term": request.utm_term,
+                "referrer": request.referrer,
             })\
             .execute()
         

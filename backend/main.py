@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from config import settings
-from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs, profile, functions, auto_reply, analytics
+from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs, profile, functions, auto_reply, analytics, tracking
 from routes import calculator
 import os
 # agent_admin은 router_agent 테스트 중 비활성화
@@ -51,6 +51,7 @@ app.include_router(calculator.calculator_bp, prefix="/api/calculator", tags=["�
 app.include_router(functions.router, prefix="/api/functions", tags=["Functions"])
 app.include_router(auto_reply.router, prefix="/api/auto-reply", tags=["자동댓글봇"])
 app.include_router(analytics.router, tags=["분석"])
+app.include_router(tracking.router, tags=["추적"])
 
 # 정적 파일 경로 설정
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

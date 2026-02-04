@@ -11,6 +11,7 @@ import TimingDashboard from './pages/TimingDashboard'
 import AutoReplyPage from './pages/AutoReplyPage'
 import AnalyticsDashboard from './pages/AnalyticsDashboard'
 import { useEffect } from 'react'
+import { initializeTracking, trackPageView } from './utils/tracking'
 
 // 보호된 라우트 (로그인 필요)
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -66,10 +67,27 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+// 페이지 추적 컴포넌트
+function PageTracker() {
+  const location = useLocation()
+  
+  useEffect(() => {
+    trackPageView(location.pathname)
+  }, [location])
+  
+  return null
+}
+
 function App() {
+  useEffect(() => {
+    // 추적 초기화
+    initializeTracking()
+  }, [])
+  
   return (
     <BrowserRouter>
       <AuthProvider>
+        <PageTracker />
         <Routes>
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/" element={<LandingPage />} />
