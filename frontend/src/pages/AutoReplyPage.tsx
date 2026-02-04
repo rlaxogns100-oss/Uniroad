@@ -420,7 +420,14 @@ export default function AutoReplyPage() {
       const res = await fetch(`${API_BASE}/comments/${commentId}/cancel`, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || '취소 실패')
-      await fetchComments()
+      
+      // 즉시 로컬 상태 업데이트 (Optimistic Update)
+      setComments(prev => prev.map(c => 
+        c.id === commentId ? { ...c, status: 'cancelled' as const } : c
+      ))
+      
+      // 백그라운드에서 전체 새로고침 (await 제거)
+      fetchComments()
     } catch (e: any) {
       alert(e.message)
     } finally {
