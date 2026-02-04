@@ -10,6 +10,7 @@ import AuthPage from './pages/AuthPage'
 import TimingDashboard from './pages/TimingDashboard'
 import AutoReplyPage from './pages/AutoReplyPage'
 import AnalyticsDashboard from './pages/AnalyticsDashboard'
+import AdminAnalytics from './pages/AdminAnalytics'
 import { useEffect } from 'react'
 import { initializeTracking, trackPageView } from './utils/tracking'
 
@@ -152,6 +153,14 @@ function App() {
             element={
               <AdminRoute>
                 <AnalyticsDashboard />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/admin-analytics"
+            element={
+              <AdminRoute>
+                <AdminAnalytics />
               </AdminRoute>
             }
           />

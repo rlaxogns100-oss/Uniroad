@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     # Supabase
     SUPABASE_URL: str
     SUPABASE_KEY: str
+    SUPABASE_SERVICE_ROLE_KEY: str = ""  # 관리자 작업용 (선택사항)
     SUPABASE_JWT_SECRET: str = "your-jwt-secret"  # JWT 토큰 검증용
     
     # Gemini (채팅/분류/임베딩용)

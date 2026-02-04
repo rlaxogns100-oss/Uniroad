@@ -73,7 +73,12 @@ BEGIN
         qa.utm_medium,
         qa.question_pattern,
         COUNT(*) as question_count,
-        ARRAY_AGG(DISTINCT qa.question ORDER BY qa.question LIMIT 5) as sample_questions
+        ARRAY(SELECT DISTINCT question FROM question_analysis qa2 
+              WHERE qa2.utm_source = qa.utm_source 
+              AND qa2.utm_medium = qa.utm_medium 
+              AND qa2.question_pattern = qa.question_pattern 
+              ORDER BY question 
+              LIMIT 5) as sample_questions
     FROM question_analysis qa
     GROUP BY qa.utm_source, qa.utm_medium, qa.question_pattern
     ORDER BY question_count DESC;

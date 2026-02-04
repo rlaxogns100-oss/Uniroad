@@ -330,6 +330,13 @@ export default function AdminPage() {
               <span className="text-2xl">📊</span>
               <span className="text-sm text-center">실시간 분석</span>
             </button>
+            <button
+              onClick={() => navigate('/admin-analytics')}
+              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-purple-100 text-purple-800 hover:bg-purple-200 transition-colors font-medium border border-purple-200"
+            >
+              <span className="text-2xl">📉</span>
+              <span className="text-sm text-center">관리자 분석</span>
+            </button>
             <a
               href="https://analytics.google.com/analytics/web/#/analysis/a382271955p521910579/edit/iAeobtq1RAOuwPn3j53_fA"
               target="_blank"

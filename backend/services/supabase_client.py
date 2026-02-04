@@ -14,16 +14,29 @@ class SupabaseService:
     """Supabase 클라이언트 관리"""
     
     _instance: Optional[Client] = None
+    _admin_instance: Optional[Client] = None
     
     @classmethod
     def get_client(cls) -> Client:
-        """싱글톤 패턴으로 Supabase 클라이언트 반환"""
+        """싱글톤 패턴으로 Supabase 클라이언트 반환 (일반 사용자)"""
         if cls._instance is None:
             cls._instance = create_client(
                 settings.SUPABASE_URL,
                 settings.SUPABASE_KEY
             )
         return cls._instance
+    
+    @classmethod
+    def get_admin_client(cls) -> Client:
+        """관리자 권한 Supabase 클라이언트 반환 (서비스 역할 키)"""
+        if cls._admin_instance is None:
+            # 서비스 역할 키가 있으면 사용, 없으면 일반 키 사용
+            service_key = settings.SUPABASE_SERVICE_ROLE_KEY or settings.SUPABASE_KEY
+            cls._admin_instance = create_client(
+                settings.SUPABASE_URL,
+                service_key
+            )
+        return cls._admin_instance
     
     @property
     def client(self) -> Client:
