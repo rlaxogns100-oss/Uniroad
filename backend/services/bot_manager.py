@@ -553,13 +553,15 @@ class BotManager:
         except Exception as e:
             return {"success": False, "message": str(e)}
 
-    async def test_generate_reply(self, post_content: str) -> Dict[str, Any]:
+    async def test_generate_reply(self, post_content: str, title: str = None, content: str = None) -> Dict[str, Any]:
         """
         테스트용 댓글 생성 (Query Agent -> RAG -> Answer Agent 파이프라인)
         main.py의 analyze_and_generate_reply와 동일하게 동작하되, Answer Agent는 gemini-3-flash-preview 사용
         
         Args:
-            post_content: 테스트할 게시글 내용 (제목 + 본문)
+            post_content: 테스트할 게시글 내용 (제목 + 본문) - title/content가 없을 때 사용
+            title: 게시글 제목 (선택, 직접 전달 시 사용)
+            content: 게시글 본문 (선택, 직접 전달 시 사용)
             
         Returns:
             dict: query, function_result, answer 포함
@@ -614,10 +616,14 @@ class BotManager:
                 answer_agent = genai.GenerativeModel('gemini-2.5-flash')
                 print("  -> [재생성] Answer Agent: gemini-2.5-flash (fallback)")
             
-            # 제목과 본문 분리 (첫 줄을 제목으로)
-            lines = post_content.strip().split('\n', 1)
-            title = lines[0] if lines else ""
-            content = lines[1] if len(lines) > 1 else ""
+            # 제목과 본문 분리
+            # title/content가 직접 전달되면 사용, 아니면 post_content에서 파싱
+            if title is None or content is None:
+                lines = post_content.strip().split('\n', 1)
+                if title is None:
+                    title = lines[0] if lines else ""
+                if content is None:
+                    content = lines[1].strip() if len(lines) > 1 else ""
             
             # ==========================================
             # 학습 데이터 로드 (comment_history.json에서)
@@ -1286,12 +1292,29 @@ target_range 옵션 (새로운 판정 기준):
         post_content = target_comment.get("post_content", "")
         post_title = target_comment.get("post_title", "")
         
-        if not post_content:
+        if not post_content and not post_title:
             return {"success": False, "message": "원본 게시글 내용이 없어 재생성할 수 없습니다."}
         
-        # test_generate_reply 호출하여 새 댓글 생성
+        # post_content에서 제목과 본문 분리 (저장 형식: "제목\n\n본문")
+        # post_title이 있으면 그것을 사용, 없으면 post_content 첫 줄 사용
+        if post_title:
+            title = post_title
+            # post_content가 "제목\n\n본문" 형식이면 본문만 추출
+            if post_content.startswith(post_title):
+                content = post_content[len(post_title):].strip()
+                if content.startswith('\n'):
+                    content = content.lstrip('\n')
+            else:
+                content = post_content
+        else:
+            # post_title이 없으면 post_content에서 파싱
+            lines = post_content.strip().split('\n', 1)
+            title = lines[0] if lines else ""
+            content = lines[1].strip() if len(lines) > 1 else ""
+        
+        # test_generate_reply 호출하여 새 댓글 생성 (title, content 분리 전달)
         try:
-            result = await self.test_generate_reply(f"제목: {post_title}\n\n{post_content}")
+            result = await self.test_generate_reply(post_content, title=title, content=content)
             
             if result.get("success") and result.get("answer"):
                 old_comment = target_comment.get("comment", "")
