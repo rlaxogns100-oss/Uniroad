@@ -24,6 +24,8 @@ export default function AdminPage() {
   const [newHashtag, setNewHashtag] = useState('')
   const [selectedHashtags, setSelectedHashtags] = useState<string[]>([])
   const [showLogs, setShowLogs] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   
   // 모든 문서에서 고유 해시태그 추출
   const allHashtags = Array.from(
@@ -43,10 +45,18 @@ export default function AdminPage() {
 
   const loadDocuments = async () => {
     try {
+      setIsLoading(true)
+      setLoadError(null)
+      console.log('📥 문서 목록 로드 시작...')
       const docs = await getDocuments()
+      console.log('✅ 문서 목록 로드 완료:', docs.length, '개')
       setDocuments(docs)
-    } catch (error) {
-      console.error('문서 목록 로드 오류:', error)
+    } catch (error: any) {
+      console.error('❌ 문서 목록 로드 오류:', error)
+      const errorMessage = error?.message || '문서 목록을 불러올 수 없습니다.'
+      setLoadError(errorMessage)
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -229,6 +239,38 @@ export default function AdminPage() {
     }
   }
 
+  // 로딩 중 표시
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4"></div>
+          <p className="text-gray-600 text-lg font-medium">문서 목록을 불러오는 중...</p>
+          <p className="text-gray-500 text-sm mt-2">잠시만 기다려주세요</p>
+        </div>
+      </div>
+    )
+  }
+
+  // 에러 표시
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex items-center justify-center">
+        <div className="text-center bg-white rounded-2xl shadow-xl p-8 max-w-md">
+          <div className="text-5xl mb-4">⚠️</div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">문서 목록 로드 실패</h2>
+          <p className="text-gray-600 mb-6">{loadError}</p>
+          <button
+            onClick={loadDocuments}
+            className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+          >
+            다시 시도
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
       {/* 헤더 */}
@@ -244,6 +286,12 @@ export default function AdminPage() {
               className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
             >
               📤 업로드 페이지
+            </button>
+            <button
+              onClick={() => navigate('/analytics')}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+            >
+              📊 분석 대시보드
             </button>
             <button
               onClick={() => navigate('/chat')}
@@ -280,6 +328,13 @@ export default function AdminPage() {
             >
               <span className="text-2xl">💬</span>
               <span className="text-sm text-center">댓글 봇</span>
+            </button>
+            <button
+              onClick={() => navigate('/analytics')}
+              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors font-medium border border-blue-200"
+            >
+              <span className="text-2xl">📊</span>
+              <span className="text-sm text-center">분석 대시보드</span>
             </button>
           </div>
         </div>

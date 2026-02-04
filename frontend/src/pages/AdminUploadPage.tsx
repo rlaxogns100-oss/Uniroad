@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { uploadDocument, getDocuments, deleteDocument, Document } from '../api/client'
+import { trackFileUpload, trackEvent, GA4Events } from '../utils/ga4'
 
 /** API 오류에서 사용자에게 보여줄 메시지 추출 (FastAPI detail, 배열/문자열/plain text 모두 처리) */
 function getUploadErrorMessage(error: any): string {

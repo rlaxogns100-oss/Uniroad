@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     # Gemini (채팅/분류/임베딩용)
     GEMINI_API_KEY: str
     
+    # Google Analytics 4
+    GA4_PROPERTY_ID: str = "521910579"
+    GOOGLE_APPLICATION_CREDENTIALS: str = ""  # Google 서비스 계정 JSON 파일 경로 (선택사항)
+    
     # Server
     BACKEND_PORT: int = 8000
     FRONTEND_URL: str = "http://localhost:5173"

@@ -190,6 +190,17 @@ export default function AutoReplyPage() {
     }
   }, [])
 
+  const fetchSkipLinks = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/skip-links`)
+      if (!res.ok) throw new Error('스킵 링크 조회 실패')
+      const data = await res.json()
+      setSkipLinks(data.links || [])
+    } catch (e) {
+      console.error('스킵 링크 조회 에러:', e)
+    }
+  }, [])
+
   const handleSavePrompts = async () => {
     setPromptSaving(true)
     setPromptError(null)
@@ -376,18 +387,6 @@ export default function AutoReplyPage() {
       setTestLoading(false)
     }
   }
-
-  // 스킵 링크 관련 함수들
-  const fetchSkipLinks = useCallback(async () => {
-    try {
-      const res = await fetch(`${API_BASE}/skip-links`)
-      if (!res.ok) throw new Error('스킵 링크 조회 실패')
-      const data = await res.json()
-      setSkipLinks(data.links || [])
-    } catch (e) {
-      console.error('스킵 링크 조회 에러:', e)
-    }
-  }, [])
 
   const handleAddSkipLink = async () => {
     if (!skipLinkInput.trim()) {

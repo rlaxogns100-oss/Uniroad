@@ -440,8 +440,36 @@ export const updateDocument = async (
 
 // 문서 목록 API
 export const getDocuments = async (): Promise<Document[]> => {
-  const response = await api.get<{ documents: Document[] }>('/documents')
-  return response.data.documents
+  try {
+    console.log('📡 API 요청: GET /documents')
+    const response = await api.get<{ documents: Document[] }>('/documents', {
+      timeout: 10000 // 10초 타임아웃
+    })
+    console.log('✅ API 응답 성공:', response.data.documents.length, '개 문서')
+    return response.data.documents
+  } catch (error: any) {
+    console.error('❌ API 요청 실패:', {
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      message: error.message,
+      data: error.response?.data
+    })
+    
+    if (error.code === 'ECONNABORTED') {
+      throw new Error('요청 시간 초과 (10초). 서버가 응답하지 않습니다.')
+    }
+    if (error.response?.status === 404) {
+      throw new Error('API 엔드포인트를 찾을 수 없습니다. (/api/documents)')
+    }
+    if (error.response?.status === 500) {
+      throw new Error('서버 오류가 발생했습니다. 관리자에게 문의하세요.')
+    }
+    if (!error.response) {
+      throw new Error('서버에 연결할 수 없습니다. 네트워크를 확인하세요.')
+    }
+    
+    throw error
+  }
 }
 
 // 문서 삭제 API

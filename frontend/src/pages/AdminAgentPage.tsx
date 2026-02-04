@@ -9,6 +9,7 @@ import {
   hasLocalStorageLogs,
   ExecutionLog 
 } from '../utils/adminLogger'
+import { trackEvaluationToggle, trackEvaluationSkip, trackEvent, GA4Events } from '../utils/ga4'
 
 // Admin Agent 평가 함수 (백그라운드에서 비동기 실행, 백엔드 API 호출)
 async function evaluateLog(log: ExecutionLog): Promise<void> {
@@ -287,6 +288,8 @@ function ExpandableCell({ content, maxLength = 30, cleanRouter = false, isExpand
   )
 }
 
+const EVALUATION_PAUSED_KEY = 'admin-agent-evaluation-paused'
+
 export default function AdminAgentPage() {
   const navigate = useNavigate()
   const [logs, setLogs] = useState<ExecutionLog[]>([])
@@ -295,6 +298,14 @@ export default function AdminAgentPage() {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [showMigrateBanner, setShowMigrateBanner] = useState(false)
   const [migrating, setMigrating] = useState(false)
+  // 평가 전체 중단 (true = 평가 안 함, false = 평가 함)
+  const [evaluationPaused, setEvaluationPaused] = useState(() => {
+    try {
+      return localStorage.getItem(EVALUATION_PAUSED_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
 
   // 로그 로드 (Supabase에서)
   const loadLogs = useCallback(async () => {
@@ -309,12 +320,12 @@ export default function AdminAgentPage() {
     }
   }, [])
 
-  // pending 로그 자동 평가
+  // pending 로그 자동 평가 (evaluationPaused면 실행 안 함)
   const evaluatePendingLogs = useCallback(async (logsToCheck: ExecutionLog[]) => {
+    if (evaluationPaused) return
     const pendingLogs = logsToCheck.filter(
-      log => log.evaluation?.routerStatus === 'pending' && !evaluatingIds.has(log.id)
+      log => log.evaluation?.routerStatus === 'pending' && !log.evaluation?.skipped && !evaluatingIds.has(log.id)
     )
-    
     for (const log of pendingLogs) {
       setEvaluatingIds(prev => new Set([...prev, log.id]))
       evaluateLog(log).finally(() => {
@@ -323,11 +334,10 @@ export default function AdminAgentPage() {
           next.delete(log.id)
           return next
         })
-        // 캐시 업데이트 후 상태 반영
         setLogs(getLogs())
       })
     }
-  }, [evaluatingIds])
+  }, [evaluatingIds, evaluationPaused])
 
   // 마이그레이션 처리
   const handleMigrate = async () => {
@@ -359,12 +369,11 @@ export default function AdminAgentPage() {
       evaluatePendingLogs(cached)
     })
     
-    // 실시간 업데이트 리스너
+    // 실시간 업데이트 리스너 (평가 중단이면 평가 안 함, 로그만 반영)
     const handleLogUpdated = async (e: CustomEvent) => {
-      // 새 로그 자동 평가
       const newLog = e.detail as ExecutionLog
       setLogs(getLogs())
-      
+      if (evaluationPaused) return
       if (!evaluatingIds.has(newLog.id)) {
         setEvaluatingIds(prev => new Set([...prev, newLog.id]))
         evaluateLog(newLog).finally(() => {
@@ -390,12 +399,11 @@ export default function AdminAgentPage() {
       window.removeEventListener('admin-log-evaluated', handleLogEvaluated)
       window.removeEventListener('admin-log-cleared', handleLogCleared)
     }
-  }, [loadLogs, evaluatingIds, evaluatePendingLogs])
+  }, [loadLogs, evaluatingIds, evaluatePendingLogs, evaluationPaused])
 
-  // 수동 평가 재실행
+  // 수동 평가 재실행 (평가 중단이면 실행 안 함)
   const handleReEvaluate = async (log: ExecutionLog) => {
-    if (evaluatingIds.has(log.id)) return
-    
+    if (evaluationPaused || evaluatingIds.has(log.id)) return
     setEvaluatingIds(prev => new Set([...prev, log.id]))
     await evaluateLog(log)
     setEvaluatingIds(prev => {
@@ -419,6 +427,8 @@ export default function AdminAgentPage() {
     
     await updateLogEvaluation(log.id, skippedEvaluation)
     setLogs(getLogs())
+    // GA4 이벤트 추적
+    trackEvaluationSkip(log.id)
   }
 
   // 전체 삭제 핸들러
@@ -427,6 +437,19 @@ export default function AdminAgentPage() {
       await clearLogs()
       setLogs([])
     }
+  }
+
+  // 평가 중단/시작 토글 (localStorage에 저장)
+  const toggleEvaluationPaused = () => {
+    setEvaluationPaused(prev => {
+      const next = !prev
+      try {
+        localStorage.setItem(EVALUATION_PAUSED_KEY, String(next))
+      } catch {}
+      // GA4 이벤트 추적
+      trackEvaluationToggle(next)
+      return next
+    })
   }
 
   return (
@@ -479,6 +502,17 @@ export default function AdminAgentPage() {
           </div>
           
           <div className="flex items-center gap-3">
+            <button
+              onClick={toggleEvaluationPaused}
+              className={`px-3 py-2 rounded-lg transition-colors text-sm font-medium ${
+                evaluationPaused
+                  ? 'bg-green-100 hover:bg-green-200 text-green-800'
+                  : 'bg-amber-100 hover:bg-amber-200 text-amber-800'
+              }`}
+              title={evaluationPaused ? '클릭하면 평가를 다시 시작합니다' : '클릭하면 새 로그에 대한 품질 평가를 중단합니다'}
+            >
+              {evaluationPaused ? '평가 시작' : '평가 중단'}
+            </button>
             <button
               onClick={loadLogs}
               disabled={loading}
@@ -640,12 +674,13 @@ export default function AdminAgentPage() {
                             e.stopPropagation()
                             handleReEvaluate(log)
                           }}
-                          disabled={isEvaluating}
+                          disabled={isEvaluating || evaluationPaused}
                           className={`text-[10px] px-1.5 py-0.5 rounded transition-colors ${
-                            isEvaluating 
+                            isEvaluating || evaluationPaused
                               ? 'bg-gray-100 text-gray-400 cursor-not-allowed' 
                               : 'bg-blue-100 text-blue-700 hover:bg-blue-200'
                           }`}
+                          title={evaluationPaused ? '평가 중단 중에는 재평가할 수 없습니다' : '재평가'}
                         >
                           {isEvaluating ? '...' : '재평가'}
                         </button>
