@@ -12,6 +12,7 @@ import string
 from datetime import datetime
 
 from services.supabase_client import supabase_service
+from utils.admin_filter import should_skip_logging
 
 router = APIRouter()
 
@@ -125,6 +126,14 @@ async def get_logs(limit: int = 500, offset: int = 0):
 async def create_log(request: CreateLogRequest):
     """새 로그 생성"""
     try:
+        # 관리자 계정 확인 (로깅 제외)
+        if should_skip_logging(user_id=request.userId):
+            print(f"⏭️ 관리자 계정 - 로그 저장 건너뜀 (user_id: {request.userId})")
+            return {
+                'id': 'ADMIN_SKIPPED',
+                'message': '관리자 계정은 로깅되지 않습니다.'
+            }
+        
         # 6자리 고유 ID 생성 (중복 체크)
         max_attempts = 10
         log_id = None

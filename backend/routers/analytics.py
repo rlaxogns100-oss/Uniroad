@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from datetime import datetime, timedelta
 from typing import Dict, Any, List
 from services.supabase_client import supabase_service
+from utils.admin_filter import is_admin_account
 
 router = APIRouter()
 
@@ -42,6 +43,11 @@ async def get_login_stats() -> Dict[str, Any]:
                 last_signin_local = last_signin.astimezone().replace(tzinfo=None)
                 
                 if last_signin_local.date() == today:
+                    # 관리자 계정 제외
+                    if is_admin_account(email=user.email):
+                        print(f"⏭️ 관리자 계정 제외: {user.email}")
+                        continue
+                    
                     hour = last_signin_local.hour
                     hourly_stats[f"{hour:02d}:00"] += 1
                     
@@ -101,14 +107,18 @@ async def get_user_summary() -> Dict[str, Any]:
             if user.created_at:
                 created = user.created_at.astimezone().replace(tzinfo=None)
                 if created.date() == today:
-                    today_new_users += 1
+                    # 관리자 계정 제외
+                    if not is_admin_account(email=user.email):
+                        today_new_users += 1
             
             # 오늘 로그인한 사용자
             if user.last_sign_in_at:
                 last_signin = datetime.fromisoformat(user.last_sign_in_at.replace('Z', '+00:00'))
                 last_signin_local = last_signin.astimezone().replace(tzinfo=None)
                 if last_signin_local.date() == today:
-                    today_logins += 1
+                    # 관리자 계정 제외
+                    if not is_admin_account(email=user.email):
+                        today_logins += 1
         
         return {
             "success": True,

@@ -20,6 +20,7 @@ from services.multi_agent import (
     AVAILABLE_AGENTS
 )
 from utils.timing_logger import TimingLogger
+from utils.admin_filter import should_skip_logging
 from middleware.auth import optional_auth
 from middleware.rate_limit import check_and_increment_usage, get_client_ip
 
@@ -286,23 +287,31 @@ async def chat(
                 
                 if session_check.data:
                     print(f"✅ 세션 존재 확인, 메시지 저장 중...")
-                    # 사용자 메시지 저장
-                    user_msg = supabase_service.client.table("chat_messages").insert({
-                        "session_id": session_id,
-                        "role": "user",
-                        "content": message
-                    }).execute()
-                    print(f"   ✓ 사용자 메시지 저장: {user_msg.data}")
                     
-                    # AI 응답 메시지 저장
-                    ai_msg = supabase_service.client.table("chat_messages").insert({
-                        "session_id": session_id,
-                        "role": "assistant",
-                        "content": direct_response
-                    }).execute()
-                    print(f"   ✓ AI 응답 메시지 저장: {ai_msg.data}")
+                    # 관리자 계정 확인 (로깅 제외)
+                    user_id = session_check.data[0].get("user_id") if session_check.data else None
+                    is_admin = should_skip_logging(user_id=user_id)
                     
-                    # 세션 updated_at 갱신
+                    if is_admin:
+                        print(f"⏭️ 관리자 계정 - 메시지 저장 건너뜀")
+                    else:
+                        # 사용자 메시지 저장
+                        user_msg = supabase_service.client.table("chat_messages").insert({
+                            "session_id": session_id,
+                            "role": "user",
+                            "content": message
+                        }).execute()
+                        print(f"   ✓ 사용자 메시지 저장: {user_msg.data}")
+                        
+                        # AI 응답 메시지 저장
+                        ai_msg = supabase_service.client.table("chat_messages").insert({
+                            "session_id": session_id,
+                            "role": "assistant",
+                            "content": direct_response
+                        }).execute()
+                        print(f"   ✓ AI 응답 메시지 저장: {ai_msg.data}")
+                    
+                    # 세션 updated_at 갱신 (관리자도 갱신)
                     supabase_service.client.table("chat_sessions")\
                         .update({"updated_at": "now()"})\
                         .eq("id", session_id)\
