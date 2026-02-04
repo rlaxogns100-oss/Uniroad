@@ -50,13 +50,19 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   }
   
   if (!isAuthenticated) {
+    console.warn('❌ 인증되지 않음, /auth로 리다이렉트')
     return <Navigate to="/auth" replace />
   }
   
-  if (user?.name !== '김도균') {
+  // 관리자 확인 (이름 또는 이메일로 확인)
+  const isAdmin = user?.name === '김도균' || user?.email === 'herry0515@naver.com'
+  
+  if (!isAdmin) {
+    console.warn(`❌ 관리자 아님 (name: ${user?.name}, email: ${user?.email}), /chat/login으로 리다이렉트`)
     return <Navigate to="/chat/login" replace />
   }
   
+  console.log('✅ 관리자 접근 허용:', user?.name)
   return <>{children}</>
 }
 

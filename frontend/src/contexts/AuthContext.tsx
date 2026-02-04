@@ -52,7 +52,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setLoading(false)
 
           // OAuth 로그인 성공 시: 관리자(김도균)는 /chat/login/admin, 그 외는 /chat/login
-          const isAdmin = userData?.name === '김도균'
+          const isAdmin = userData?.name === '김도균' || userData?.email === 'herry0515@naver.com'
+          console.log('✅ OAuth 로그인 성공:', userData, '관리자:', isAdmin)
           window.location.href = isAdmin ? '/chat/login/admin' : '/chat/login'
           return
         } catch (error) {
@@ -97,13 +98,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const response = await axios.post('/api/auth/signin', { email, password })
       const { access_token, user: userData } = response.data
       
+      console.log('✅ 로그인 성공:', userData)
+      
       setAccessToken(access_token)
       setUser(userData)
       
       localStorage.setItem('access_token', access_token)
       localStorage.setItem('user', JSON.stringify(userData))
+      
+      // 로그인 성공 후 리다이렉트
+      const isAdmin = userData?.name === '김도균' || userData?.email === 'herry0515@naver.com'
+      window.location.href = isAdmin ? '/chat/login/admin' : '/chat/login'
+      
       return userData
     } catch (error: any) {
+      console.error('❌ 로그인 실패:', error)
       throw new Error(error.response?.data?.detail || '로그인 실패')
     }
   }
@@ -155,10 +164,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email: `${name}@test.com`,
       name: name,
     }
+    console.log('✅ 빠른 로그인:', userData)
     setUser(userData)
     setAccessToken('quick-access-token')
     localStorage.setItem('access_token', 'quick-access-token')
     localStorage.setItem('user', JSON.stringify(userData))
+    
+    // 빠른 로그인 후 리다이렉트
+    const isAdmin = name === '김도균'
+    window.location.href = isAdmin ? '/chat/login/admin' : '/chat/login'
   }
 
   const signOut = async () => {
