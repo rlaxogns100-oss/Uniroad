@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 
+// 지원하는 카페 목록
+const CAFES = [
+  { id: 'suhui', name: '수만휘' },
+  { id: 'pnmath', name: '수험생카페' },
+  { id: 'gangmok', name: '맘카페' },
+]
+
 interface BotStatus {
   running: boolean
   pid: number | null
@@ -8,6 +15,15 @@ interface BotStatus {
   config: BotConfig
   bot_dir: string
   timestamp: string
+  current_account: string | null
+  accounts: Account[]
+}
+
+interface Account {
+  id: string
+  name: string
+  naver_id: string
+  cookie_exists: boolean
 }
 
 interface BotConfig {
@@ -25,7 +41,6 @@ interface CommentRecord {
   post_title: string
   comment: string
   success: boolean
-  dry_run?: boolean  // 가실행 여부
   post_content?: string
   query?: string
   function_result?: string
@@ -49,8 +64,6 @@ interface CommentsResponse {
   limit: number
   offset: number
 }
-
-const API_BASE = '/api/auto-reply'
 
 // ExpandableCell 컴포넌트 (AdminAgentPage와 동일)
 function ExpandableCell({ content, maxLength = 30, isExpanded = false }: { content: any, maxLength?: number, isExpanded?: boolean }) {
@@ -90,6 +103,13 @@ function ExpandableCell({ content, maxLength = 30, isExpanded = false }: { conte
 
 export default function AutoReplyPage() {
   const navigate = useNavigate()
+  
+  // 활성 카페 탭
+  const [activeCafe, setActiveCafe] = useState('suhui')
+  
+  // API 베이스 URL (카페별로 동적 변경)
+  const API_BASE = `/api/auto-reply/${activeCafe}`
+  
   const [authenticated, setAuthenticated] = useState(false)
   const [password, setPassword] = useState('')
   const [authError, setAuthError] = useState('')
@@ -102,7 +122,6 @@ export default function AutoReplyPage() {
   
   // 드롭다운 상태
   const [realCommentsOpen, setRealCommentsOpen] = useState(true)
-  const [dryRunCommentsOpen, setDryRunCommentsOpen] = useState(true)
   
   // 설정 상태
   const [minDelay, setMinDelay] = useState(50)
@@ -166,6 +185,9 @@ export default function AutoReplyPage() {
   const [cancelModalOpen, setCancelModalOpen] = useState(false)
   const [cancelingCommentId, setCancelingCommentId] = useState<string | null>(null)
   const [cancelReason, setCancelReason] = useState('')
+  
+  // 계정 선택
+  const [selectedAccount, setSelectedAccount] = useState<string>('')
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -191,10 +213,17 @@ export default function AutoReplyPage() {
       setKeywords(loadedKeywords)
       setKeywordsText(loadedKeywords.join(', '))
       setConfigChanged(false)
+      // 계정 정보 설정
+      if (data.current_account && !selectedAccount) {
+        setSelectedAccount(data.current_account)
+      } else if (!selectedAccount && data.accounts?.length > 0) {
+        // 현재 선택된 계정이 없으면 첫 번째 계정 선택
+        setSelectedAccount(data.accounts[0].id)
+      }
     } catch (e) {
       setError('봇 상태를 불러올 수 없습니다.')
     }
-  }, [])
+  }, [API_BASE, selectedAccount])
 
   const fetchComments = useCallback(async () => {
     try {
@@ -206,7 +235,7 @@ export default function AutoReplyPage() {
     } catch (e) {
       console.error('댓글 조회 에러:', e)
     }
-  }, [])
+  }, [API_BASE])
 
   const fetchPrompts = useCallback(async () => {
     setPromptLoading(true)
@@ -222,7 +251,7 @@ export default function AutoReplyPage() {
     } finally {
       setPromptLoading(false)
     }
-  }, [])
+  }, [API_BASE])
 
   const fetchSkipLinks = useCallback(async () => {
     try {
@@ -233,7 +262,7 @@ export default function AutoReplyPage() {
     } catch (e) {
       console.error('스킵 링크 조회 에러:', e)
     }
-  }, [])
+  }, [API_BASE])
 
   const fetchPosterStatus = useCallback(async () => {
     try {
@@ -244,7 +273,7 @@ export default function AutoReplyPage() {
     } catch (e) {
       console.error('게시 워커 상태 조회 에러:', e)
     }
-  }, [])
+  }, [API_BASE])
 
   const fetchPosterLogs = useCallback(async () => {
     try {
@@ -255,7 +284,30 @@ export default function AutoReplyPage() {
     } catch (e) {
       console.error('게시 로그 조회 에러:', e)
     }
-  }, [])
+  }, [API_BASE])
+
+  // 탭 전환 시 상태 초기화 및 데이터 다시 로드
+  const handleCafeChange = useCallback((cafeId: string) => {
+    if (cafeId === activeCafe) return
+    
+    // 즉시 카페 변경 (UI 반응성 우선)
+    setActiveCafe(cafeId)
+    
+    // 상태 초기화 (로딩 표시 없이)
+    setStatus(null)
+    setComments([])
+    setTotalComments(0)
+    setLogs([])
+    setPosterLogs([])
+    setPosterStatus(null)
+    setTestResults([])
+    setSkipLinks([])
+    setError(null)
+    setExpandedRows(new Set())
+    setTestExpandedRows(new Set())
+    setSelectedAccount('')  // 계정 선택 초기화
+  }, [activeCafe])
+
   const handleSavePrompts = async () => {
     setPromptSaving(true)
     setPromptError(null)
@@ -279,6 +331,8 @@ export default function AutoReplyPage() {
   }
 
   useEffect(() => {
+    if (!authenticated) return
+    
     const load = async () => {
       setLoading(true)
       await Promise.all([fetchStatus(), fetchComments(), fetchPrompts(), fetchSkipLinks(), fetchPosterStatus(), fetchPosterLogs()])
@@ -295,7 +349,7 @@ export default function AutoReplyPage() {
     }, 10000)
 
     return () => clearInterval(interval)
-  }, [fetchStatus, fetchComments, fetchPrompts, fetchSkipLinks, fetchPosterStatus, fetchPosterLogs])
+  }, [authenticated, activeCafe, fetchStatus, fetchComments, fetchPrompts, fetchSkipLinks, fetchPosterStatus, fetchPosterLogs])
 
   // 실시간 로그 스트리밍
   useEffect(() => {
@@ -334,18 +388,23 @@ export default function AutoReplyPage() {
     }
   }, [logs, autoScroll, logsExpanded])
 
-  const handleStart = async (dryRun: boolean = false) => {
+  const handleStart = async () => {
+    if (!selectedAccount) {
+      setError('계정을 선택해주세요.')
+      return
+    }
     setActionLoading(true)
     setError(null)
     try {
-      const url = `${API_BASE}/start${dryRun ? '?dry_run=true' : ''}`
-      const res = await fetch(url, { method: 'POST' })
+      const url = `${API_BASE}/start`
+      const res = await fetch(url, { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: selectedAccount, dry_run: false })
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || '시작 실패')
       await fetchStatus()
-      if (dryRun) {
-        alert('가실행 모드로 봇이 시작되었습니다. (댓글을 실제로 달지 않습니다)')
-      }
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -370,10 +429,18 @@ export default function AutoReplyPage() {
 
   // 게시 워커 시작/중지
   const handleStartPoster = async () => {
+    if (!selectedAccount) {
+      setError('계정을 선택해주세요.')
+      return
+    }
     setPosterLoading(true)
     setError(null)
     try {
-      const res = await fetch(`${API_BASE}/poster/start`, { method: 'POST' })
+      const res = await fetch(`${API_BASE}/poster/start`, { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ account_id: selectedAccount })
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || '게시 워커 시작 실패')
       await fetchPosterStatus()
@@ -763,6 +830,25 @@ export default function AutoReplyPage() {
             </span>
           </div>
         </div>
+        
+        {/* 카페 탭 네비게이션 */}
+        <div className="max-w-[1600px] mx-auto px-4 border-t border-gray-100">
+          <nav className="flex gap-1">
+            {CAFES.map(cafe => (
+              <button
+                key={cafe.id}
+                onClick={() => handleCafeChange(cafe.id)}
+                className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
+                  activeCafe === cafe.id
+                    ? 'border-blue-500 text-blue-600 bg-blue-50'
+                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                }`}
+              >
+                {cafe.name}
+              </button>
+            ))}
+          </nav>
+        </div>
       </header>
 
       <main className="max-w-[1600px] mx-auto px-4 py-8">
@@ -791,12 +877,35 @@ export default function AutoReplyPage() {
                   <span className="font-mono text-gray-800">{status.pid}</span>
                 </div>
               )}
-              <div className="flex justify-between">
-                <span className="text-gray-600">쿠키 파일</span>
-                <span className={status?.cookie_exists ? 'text-green-600' : 'text-red-600'}>
-                  {status?.cookie_exists ? '있음' : '없음'}
-                </span>
+              
+              {/* 계정 선택 */}
+              <div className="flex justify-between items-center">
+                <span className="text-gray-600">계정</span>
+                <select
+                  value={selectedAccount}
+                  onChange={(e) => setSelectedAccount(e.target.value)}
+                  disabled={status?.running}
+                  className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                >
+                  <option value="">계정 선택</option>
+                  {status?.accounts?.map((account) => (
+                    <option key={account.id} value={account.id}>
+                      {account.name} {account.cookie_exists ? '✓' : '(쿠키 없음)'}
+                    </option>
+                  ))}
+                </select>
               </div>
+              
+              {/* 선택된 계정의 쿠키 상태 */}
+              {selectedAccount && (
+                <div className="flex justify-between">
+                  <span className="text-gray-600">쿠키 파일</span>
+                  <span className={status?.accounts?.find(a => a.id === selectedAccount)?.cookie_exists ? 'text-green-600' : 'text-red-600'}>
+                    {status?.accounts?.find(a => a.id === selectedAccount)?.cookie_exists ? '있음' : '없음'}
+                  </span>
+                </div>
+              )}
+              
               <div className="flex justify-between">
                 <span className="text-gray-600">총 댓글 수</span>
                 <span className="font-medium text-gray-800">{totalComments}개</span>
@@ -808,34 +917,29 @@ export default function AutoReplyPage() {
                 <button
                   onClick={handleStop}
                   disabled={actionLoading}
-                  className="flex-1 py-2.5 px-4 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors"
+                  className="w-full py-2.5 px-4 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors"
                 >
                   {actionLoading ? '처리 중...' : '봇 중지'}
                 </button>
               ) : (
-                <>
-                  <button
-                    onClick={() => handleStart(false)}
-                    disabled={actionLoading || !status?.cookie_exists}
-                    className="flex-1 py-2.5 px-4 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors"
-                  >
-                    {actionLoading ? '처리 중...' : '봇 시작'}
-                  </button>
-                  <button
-                    onClick={() => handleStart(true)}
-                    disabled={actionLoading || !status?.cookie_exists}
-                    className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors"
-                    title="댓글을 실제로 달지 않고 생성만 테스트합니다"
-                  >
-                    {actionLoading ? '처리 중...' : '가실행'}
-                  </button>
-                </>
+                <button
+                  onClick={() => handleStart()}
+                  disabled={actionLoading || !selectedAccount || !status?.accounts?.find(a => a.id === selectedAccount)?.cookie_exists}
+                  className="w-full py-2.5 px-4 bg-green-600 hover:bg-green-700 disabled:bg-gray-400 text-white font-medium rounded-lg transition-colors"
+                >
+                  {actionLoading ? '처리 중...' : '봇 시작'}
+                </button>
               )}
             </div>
 
-            {!status?.cookie_exists && (
+            {selectedAccount && !status?.accounts?.find(a => a.id === selectedAccount)?.cookie_exists && (
               <p className="mt-3 text-sm text-amber-600">
-                쿠키 파일이 없습니다. 로컬에서 get_cookies.py를 실행하세요.
+                선택한 계정의 쿠키 파일이 없습니다. 로컬에서 get_cookies.py를 실행하세요.
+              </p>
+            )}
+            {!selectedAccount && (
+              <p className="mt-3 text-sm text-amber-600">
+                봇을 시작하려면 계정을 선택하세요.
               </p>
             )}
           </div>
@@ -1188,9 +1292,9 @@ export default function AutoReplyPage() {
           )}
         </div>
 
-        {/* 댓글 기록 - 실제 댓글과 가실행 댓글 분리 */}
+        {/* 댓글 기록 */}
         
-        {/* 실제 댓글 기록 (반자동 시스템) */}
+        {/* 댓글 기록 (반자동 시스템) */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
           <div 
             className="px-6 py-4 border-b border-gray-100 flex items-center justify-between cursor-pointer hover:bg-gray-50"
@@ -1198,7 +1302,7 @@ export default function AutoReplyPage() {
           >
             <div className="flex items-center gap-4">
               <h2 className="text-lg font-semibold text-gray-800">
-                실제 댓글 기록 <span className="text-gray-400 font-normal">({comments.filter(c => !c.dry_run).length}개)</span>
+                댓글 기록 <span className="text-gray-400 font-normal">({comments.length}개)</span>
               </h2>
               {/* 게시 워커 상태 및 컨트롤 */}
               <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
@@ -1223,8 +1327,9 @@ export default function AutoReplyPage() {
                     </span>
                     <button
                       onClick={handleStartPoster}
-                      disabled={posterLoading || (posterStatus?.approved_count || 0) === 0}
+                      disabled={posterLoading || (posterStatus?.approved_count || 0) === 0 || !selectedAccount || !status?.accounts?.find(a => a.id === selectedAccount)?.cookie_exists}
                       className="px-3 py-1 text-xs bg-green-500 hover:bg-green-600 text-white rounded-lg disabled:opacity-50"
+                      title={!selectedAccount ? '계정을 선택하세요' : ''}
                     >
                       {posterLoading ? '...' : '게시 시작'}
                     </button>
@@ -1247,11 +1352,11 @@ export default function AutoReplyPage() {
               {/* 필터 탭 */}
               <div className="px-4 py-2 border-b border-gray-100 flex gap-2 flex-wrap">
                 {[
-                  { key: 'all', label: '전체', count: comments.filter(c => !c.dry_run).length },
-                  { key: 'pending', label: '대기중', count: comments.filter(c => !c.dry_run && c.status === 'pending').length },
-                  { key: 'approved', label: '승인됨', count: comments.filter(c => !c.dry_run && c.status === 'approved').length },
-                  { key: 'cancelled', label: '취소됨', count: comments.filter(c => !c.dry_run && c.status === 'cancelled').length },
-                  { key: 'posted', label: '게시완료', count: comments.filter(c => !c.dry_run && c.status === 'posted').length },
+                  { key: 'all', label: '전체', count: comments.length },
+                  { key: 'pending', label: '대기중', count: comments.filter(c => c.status === 'pending').length },
+                  { key: 'approved', label: '승인됨', count: comments.filter(c => c.status === 'approved').length },
+                  { key: 'cancelled', label: '취소됨', count: comments.filter(c => c.status === 'cancelled').length },
+                  { key: 'posted', label: '게시완료', count: comments.filter(c => c.status === 'posted').length },
                 ].map(tab => (
                   <button
                     key={tab.key}
@@ -1266,9 +1371,9 @@ export default function AutoReplyPage() {
                   </button>
                 ))}
               </div>
-              {comments.filter(c => !c.dry_run).length === 0 ? (
+              {comments.length === 0 ? (
                 <div className="p-8 text-center text-gray-500">
-                  아직 실제 댓글 기록이 없습니다.
+                  아직 댓글 기록이 없습니다.
                 </div>
               ) : (
                 <div className="overflow-x-auto max-h-[600px] overflow-y-auto">
@@ -1286,7 +1391,6 @@ export default function AutoReplyPage() {
                     </thead>
                     <tbody>
                       {comments
-                        .filter(c => !c.dry_run)
                         .filter(c => commentFilter === 'all' || c.status === commentFilter)
                         .map((record, idx) => {
                         const rowId = record.id || `idx-${idx}`
@@ -1398,95 +1502,6 @@ export default function AutoReplyPage() {
                                   </button>
                                 </div>
                               )}
-                            </td>
-                          </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* 가실행 댓글 기록 */}
-        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-          <div 
-            className="px-6 py-4 border-b border-gray-100 flex items-center justify-between cursor-pointer hover:bg-gray-50"
-            onClick={() => setDryRunCommentsOpen(!dryRunCommentsOpen)}
-          >
-            <h2 className="text-lg font-semibold text-gray-800">
-              가실행 댓글 기록 <span className="text-gray-400 font-normal">({comments.filter(c => c.dry_run).length}개)</span>
-            </h2>
-            <svg 
-              className={`w-5 h-5 text-gray-500 transition-transform ${dryRunCommentsOpen ? 'rotate-180' : ''}`}
-              fill="none" 
-              stroke="currentColor" 
-              viewBox="0 0 24 24"
-            >
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-            </svg>
-          </div>
-          
-          {dryRunCommentsOpen && (
-            <>
-              {comments.filter(c => c.dry_run).length === 0 ? (
-                <div className="p-8 text-center text-gray-500">
-                  아직 가실행 댓글 기록이 없습니다.
-                </div>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full bg-white border border-gray-200 table-fixed">
-                    <thead>
-                      <tr className="bg-gray-50 border-b border-gray-200">
-                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '18%' }}>원글</th>
-                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '18%' }}>쿼리</th>
-                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '22%' }}>함수결과</th>
-                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '22%' }}>최종답변</th>
-                        <th className="px-2 py-2 text-left text-xs font-semibold text-gray-600" style={{ width: '20%' }}>링크</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {comments.filter(c => c.dry_run).map((record, idx) => {
-                        const rowId = record.id || `dry-${idx}`
-                        const isExpanded = expandedRows.has(rowId)
-                        return (
-                          <tr
-                            key={rowId}
-                            onClick={() => {
-                              setExpandedRows(prev => {
-                                const next = new Set(prev)
-                                if (next.has(rowId)) next.delete(rowId)
-                                else next.add(rowId)
-                                return next
-                              })
-                            }}
-                            className="border-b border-gray-100 hover:bg-gray-50 cursor-pointer"
-                          >
-                            <td className="px-2 py-1.5 align-top">
-                              <ExpandableCell content={record.post_content || '-'} maxLength={35} isExpanded={isExpanded} />
-                            </td>
-                            <td className="px-2 py-1.5 align-top">
-                              <ExpandableCell content={record.query || '-'} maxLength={40} isExpanded={isExpanded} />
-                            </td>
-                            <td className="px-2 py-1.5 align-top">
-                              <ExpandableCell content={record.function_result || '-'} maxLength={50} isExpanded={isExpanded} />
-                            </td>
-                            <td className="px-2 py-1.5 align-top">
-                              <ExpandableCell content={record.comment} maxLength={40} isExpanded={isExpanded} />
-                            </td>
-                            <td className="px-2 py-1.5 align-top">
-                              <a
-                                href={record.post_url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                onClick={e => e.stopPropagation()}
-                                className="text-xs text-blue-600 hover:underline block truncate"
-                                title={record.post_title || record.post_url}
-                              >
-                                {record.post_title || '링크'}
-                              </a>
                             </td>
                           </tr>
                         )

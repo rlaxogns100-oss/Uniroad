@@ -9,7 +9,12 @@ from io import BytesIO
 from typing import Optional
 
 from fastapi import APIRouter, File, UploadFile, Form, HTTPException
-from PyPDF2 import PdfReader
+
+try:
+    from PyPDF2 import PdfReader
+    HAS_PYPDF2 = True
+except ImportError:
+    HAS_PYPDF2 = False
 
 from services.pdf_processor import process_pdf, upload_to_supabase_with_file
 
@@ -94,7 +99,10 @@ async def upload_document(
             except Exception:
                 pass
 
-        total_pages = len(PdfReader(BytesIO(file_bytes)).pages)
+        if HAS_PYPDF2:
+            total_pages = len(PdfReader(BytesIO(file_bytes)).pages)
+        else:
+            total_pages = 0  # PyPDF2 없으면 페이지 수 미확인
         chunks_total = len(processed_data.get("chunks", []))
         total_time = time.time() - start_time
 

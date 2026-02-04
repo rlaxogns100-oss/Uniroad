@@ -2,6 +2,8 @@
 자동 댓글 봇 관리 서비스
 
 봇 프로세스의 시작/중지, 상태 확인, 설정 관리, 댓글 기록 조회를 담당합니다.
+멀티 카페 지원: 각 카페별로 독립된 BotManager 인스턴스를 관리합니다.
+계정 분리: 탭(카페)과 계정을 분리하여 각 탭에서 계정을 선택할 수 있습니다.
 """
 import os
 import json
@@ -15,27 +17,68 @@ from pathlib import Path
 import google.generativeai as genai
 
 
+# 지원하는 카페 목록 (탭 이름, 카페 ID, 디렉토리명)
+SUPPORTED_CAFES = {
+    "suhui": {"name": "수만휘", "dir": "suhui"},
+    "pnmath": {"name": "수험생카페", "dir": "pnmath"},
+    "gangmok": {"name": "맘카페", "dir": "gangmok"},
+}
+
+# 사용 가능한 계정 목록
+ACCOUNTS = {
+    "horse324": {
+        "name": "수만휘 계정 (horse324)",
+        "naver_id": "horse324",
+        "nicknames": ["하늘담아", "도군"]
+    },
+    "hao_yj": {
+        "name": "수험생카페 계정 (hao_yj)",
+        "naver_id": "hao_yj",
+        "nicknames": ["포만한"]
+    },
+    "herry0515": {
+        "name": "맘카페 계정 (herry0515)",
+        "naver_id": "herry0515",
+        "nicknames": []
+    },
+}
+
+
 class BotManager:
-    """자동 댓글 봇 관리 클래스"""
+    """자동 댓글 봇 관리 클래스 - 카페별 독립 인스턴스"""
     
-    _instance = None
+    # 카페 ID별 인스턴스 저장
+    _instances: Dict[str, "BotManager"] = {}
     
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._initialized = False
-        return cls._instance
+    def __new__(cls, cafe_id: str = "suhui"):
+        if cafe_id not in cls._instances:
+            instance = super().__new__(cls)
+            instance._initialized = False
+            cls._instances[cafe_id] = instance
+        return cls._instances[cafe_id]
     
-    def __init__(self):
+    def __init__(self, cafe_id: str = "suhui"):
         if self._initialized:
             return
         
-        # auto_reply 디렉토리 경로 설정
-        # 서버에서의 경로를 환경변수로 설정 가능
-        self.bot_dir = os.environ.get(
+        self.cafe_id = cafe_id
+        self.current_account_id: Optional[str] = None  # 현재 선택된 계정
+        
+        # auto_reply 베이스 디렉토리
+        base_dir = os.environ.get(
             "AUTO_REPLY_DIR",
             os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))), "auto_reply")
         )
+        
+        # 카페별 디렉토리 설정
+        # cafes/{cafe_id}/ 구조 사용
+        self.bot_dir = os.path.join(base_dir, "cafes", cafe_id)
+        self.base_dir = base_dir  # main.py 등 공통 파일 위치
+        self.accounts_dir = os.path.join(base_dir, "accounts")  # 계정별 쿠키 저장 디렉토리
+        
+        # 디렉토리가 없으면 생성
+        os.makedirs(self.bot_dir, exist_ok=True)
+        os.makedirs(self.accounts_dir, exist_ok=True)
         
         self.config_file = os.path.join(self.bot_dir, "bot_config.json")
         self.history_file = os.path.join(self.bot_dir, "comment_history.json")
@@ -44,16 +87,59 @@ class BotManager:
         self.skip_links_file = os.path.join(self.bot_dir, "skip_links.json")
         self.stop_flag_file = os.path.join(self.bot_dir, ".stop_bot")
         self.pid_file = os.path.join(self.bot_dir, ".bot_pid")
+        self.account_file = os.path.join(self.bot_dir, ".current_account")  # 현재 사용 중인 계정 저장
         
         self._process: Optional[subprocess.Popen] = None
         self._initialized = True
         
-        print(f"[BotManager] 봇 디렉토리: {self.bot_dir}")
+        # 저장된 계정 정보 로드
+        self._load_current_account()
+        
+        print(f"[BotManager:{cafe_id}] 봇 디렉토리: {self.bot_dir}")
+    
+    def _load_current_account(self):
+        """저장된 현재 계정 정보 로드"""
+        if os.path.exists(self.account_file):
+            try:
+                with open(self.account_file, "r") as f:
+                    self.current_account_id = f.read().strip()
+                    if self.current_account_id not in ACCOUNTS:
+                        self.current_account_id = None
+            except:
+                self.current_account_id = None
+    
+    def _save_current_account(self, account_id: str):
+        """현재 계정 정보 저장"""
+        with open(self.account_file, "w") as f:
+            f.write(account_id)
+        self.current_account_id = account_id
+    
+    def get_account_cookie_path(self, account_id: str) -> str:
+        """계정별 쿠키 파일 경로 반환"""
+        return os.path.join(self.accounts_dir, f"{account_id}_cookies.pkl")
+    
+    def get_available_accounts(self) -> List[Dict[str, Any]]:
+        """사용 가능한 계정 목록 반환 (쿠키 존재 여부 포함)"""
+        accounts = []
+        for account_id, info in ACCOUNTS.items():
+            cookie_path = self.get_account_cookie_path(account_id)
+            accounts.append({
+                "id": account_id,
+                "name": info["name"],
+                "naver_id": info["naver_id"],
+                "cookie_exists": os.path.exists(cookie_path)
+            })
+        return accounts
     
     @classmethod
-    def get_instance(cls) -> "BotManager":
-        """싱글톤 인스턴스 반환"""
-        return cls()
+    def get_instance(cls, cafe_id: str = "suhui") -> "BotManager":
+        """카페별 인스턴스 반환"""
+        return cls(cafe_id)
+    
+    @classmethod
+    def get_supported_cafes(cls) -> Dict[str, Dict]:
+        """지원하는 카페 목록 반환"""
+        return SUPPORTED_CAFES
     
     def _read_pid_file(self) -> Optional[int]:
         """PID 파일에서 프로세스 ID 읽기"""
@@ -98,9 +184,25 @@ class BotManager:
             is_running = True
             pid = self._process.pid
         
-        # 쿠키 파일 존재 확인
-        cookie_file = os.path.join(self.bot_dir, "naver_cookies.pkl")
-        cookie_exists = os.path.exists(cookie_file)
+        # 현재 선택된 계정의 쿠키 파일 존재 확인
+        cookie_exists = False
+        if self.current_account_id:
+            cookie_path = self.get_account_cookie_path(self.current_account_id)
+            cookie_exists = os.path.exists(cookie_path)
+        
+        # 설정 로드
+        config = self.get_config()
+        
+        return {
+            "running": is_running,
+            "pid": pid if is_running else None,
+            "cookie_exists": cookie_exists,
+            "config": config,
+            "bot_dir": self.bot_dir,
+            "current_account": self.current_account_id,
+            "accounts": self.get_available_accounts(),
+            "timestamp": datetime.now().isoformat()
+        }
         
         # 설정 로드
         config = self.get_config()
@@ -162,12 +264,35 @@ class BotManager:
         except Exception as e:
             print(f"[BotManager] Chrome 프로세스 정리 중 오류: {e}")
     
-    def start(self, dry_run: bool = False) -> Dict[str, Any]:
+    def start(self, dry_run: bool = False, account_id: Optional[str] = None) -> Dict[str, Any]:
         """봇 시작
         
         Args:
             dry_run: True면 댓글을 실제로 달지 않고 생성만 함 (가실행 모드)
+            account_id: 사용할 계정 ID (없으면 현재 선택된 계정 사용)
         """
+        # 계정 ID 결정
+        target_account = account_id or self.current_account_id
+        if not target_account:
+            return {
+                "success": False,
+                "message": "계정을 선택해주세요."
+            }
+        
+        if target_account not in ACCOUNTS:
+            return {
+                "success": False,
+                "message": f"알 수 없는 계정입니다: {target_account}"
+            }
+        
+        # 계정 쿠키 파일 확인
+        cookie_path = self.get_account_cookie_path(target_account)
+        if not os.path.exists(cookie_path):
+            return {
+                "success": False,
+                "message": f"계정 '{target_account}'의 쿠키 파일이 없습니다. 로컬에서 get_cookies.py를 실행하세요."
+            }
+        
         status = self.get_status()
         
         if status["running"]:
@@ -177,11 +302,8 @@ class BotManager:
                 "pid": status["pid"]
             }
         
-        if not status["cookie_exists"]:
-            return {
-                "success": False,
-                "message": "쿠키 파일이 없습니다. 로컬에서 get_cookies.py를 실행하세요."
-            }
+        # 현재 계정 저장
+        self._save_current_account(target_account)
         
         # Chrome 프로세스 정리 (crash 방지)
         self._cleanup_chrome_processes()
@@ -191,8 +313,8 @@ class BotManager:
             os.remove(self.stop_flag_file)
         
         try:
-            # 봇 프로세스 시작
-            main_py = os.path.join(self.bot_dir, "main.py")
+            # 봇 프로세스 시작 - main.py는 base_dir에 있음
+            main_py = os.path.join(self.base_dir, "main.py")
             
             if not os.path.exists(main_py):
                 return {
@@ -204,6 +326,10 @@ class BotManager:
             env = os.environ.copy()
             env["HEADLESS"] = "true"
             env["PYTHONUNBUFFERED"] = "1"  # 로그 실시간 출력 (버퍼링 해제)
+            env["CAFE_ID"] = self.cafe_id  # 카페 ID 전달
+            env["CAFE_DIR"] = self.bot_dir  # 카페별 디렉토리 전달
+            env["ACCOUNT_ID"] = target_account  # 계정 ID 전달
+            env["COOKIE_FILE"] = cookie_path  # 쿠키 파일 경로 전달
             if dry_run:
                 env["DRY_RUN"] = "true"
             
@@ -222,7 +348,7 @@ class BotManager:
             python_cmd = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else "python3"
             bot_log = os.path.join(self.bot_dir, "bot.log")
             logf = open(bot_log, "a", encoding="utf-8")
-            logf.write(f"\n===== 봇 시작 {datetime.now().isoformat()} =====\n")
+            logf.write(f"\n===== 봇 시작 [{self.cafe_id}] 계정: {target_account} {datetime.now().isoformat()} =====\n")
             logf.flush()
             
             # DRY_RUN 모드 설정
@@ -231,7 +357,7 @@ class BotManager:
             
             self._process = subprocess.Popen(
                 [python_cmd, main_py],
-                cwd=self.bot_dir,
+                cwd=self.base_dir,  # main.py가 있는 base_dir에서 실행
                 env=env,
                 stdout=logf,
                 stderr=subprocess.STDOUT,
@@ -429,6 +555,7 @@ class BotManager:
     async def test_generate_reply(self, post_content: str) -> Dict[str, Any]:
         """
         테스트용 댓글 생성 (Query Agent -> RAG -> Answer Agent 파이프라인)
+        main.py의 analyze_and_generate_reply와 동일하게 동작하되, Answer Agent는 gemini-3-flash-preview 사용
         
         Args:
             post_content: 테스트할 게시글 내용 (제목 + 본문)
@@ -437,6 +564,9 @@ class BotManager:
             dict: query, function_result, answer 포함
         """
         try:
+            import random
+            import copy
+            
             # config.py에서 API 키 로드
             config_py = os.path.join(self.bot_dir, "config.py")
             if not os.path.exists(config_py):
@@ -475,23 +605,152 @@ class BotManager:
                     system_instruction=query_prompt
                 )
             
-            # Answer Agent 모델 초기화
+            # Answer Agent 모델 초기화 (재생성은 gemini-3-flash-preview 사용)
             try:
                 answer_agent = genai.GenerativeModel('gemini-3-flash-preview')
+                print("  -> [재생성] Answer Agent: gemini-3-flash-preview")
             except:
                 answer_agent = genai.GenerativeModel('gemini-2.5-flash')
+                print("  -> [재생성] Answer Agent: gemini-2.5-flash (fallback)")
             
             # 제목과 본문 분리 (첫 줄을 제목으로)
             lines = post_content.strip().split('\n', 1)
             title = lines[0] if lines else ""
             content = lines[1] if len(lines) > 1 else ""
             
-            # 1. Query Agent 실행
+            # ==========================================
+            # 학습 데이터 로드 (comment_history.json에서)
+            # ==========================================
+            def load_comment_history_for_training():
+                comment_history_file = os.path.join(self.bot_dir, "comment_history.json")
+                if not os.path.exists(comment_history_file):
+                    return []
+                try:
+                    with open(comment_history_file, "r", encoding="utf-8") as f:
+                        history = json.load(f)
+                    return copy.deepcopy(history)
+                except:
+                    return []
+            
+            def get_answer_agent_examples(max_good=10, max_bad=10):
+                history = load_comment_history_for_training()
+                good_examples = []
+                bad_examples = []
+                
+                def strip_intro_outro(comment):
+                    """댓글에서 intro(첫 줄)와 outro(마지막 줄)를 제거하고 본문만 반환"""
+                    if not comment:
+                        return comment
+                    
+                    # 빈 줄 기준으로 분리
+                    paragraphs = comment.strip().split('\n\n')
+                    
+                    # 3개 이상의 단락이 있으면 첫 번째와 마지막 제거
+                    if len(paragraphs) >= 3:
+                        # 중간 단락들만 반환
+                        return '\n\n'.join(paragraphs[1:-1])
+                    elif len(paragraphs) == 2:
+                        # 2개면 첫 번째만 제거 (마지막은 본문일 수 있음)
+                        return paragraphs[1]
+                    else:
+                        # 1개면 그대로 반환
+                        return comment
+                
+                for item in history:
+                    status = item.get("status", "")
+                    cancel_reason = item.get("cancel_reason", "")
+                    pc = item.get("post_content", "") or item.get("post_title", "")
+                    cm = item.get("comment", "")
+                    
+                    if not pc or not cm:
+                        continue
+                    
+                    # intro/outro 제거한 본문만 사용
+                    cm_body = strip_intro_outro(cm)
+                    
+                    example = {
+                        "post_content": pc[:500],
+                        "comment": cm_body
+                    }
+                    
+                    if status in ["posted", "approved"]:
+                        good_examples.append(example)
+                    elif status == "cancelled" and cancel_reason == "최종답변부실":
+                        bad_examples.append(example)
+                
+                selected_good = random.sample(good_examples, min(max_good, len(good_examples))) if good_examples else []
+                selected_bad = random.sample(bad_examples, min(max_bad, len(bad_examples))) if bad_examples else []
+                
+                return selected_good, selected_bad
+            
+            def get_query_agent_examples(max_examples=20):
+                history = load_comment_history_for_training()
+                inappropriate_posts = []
+                
+                for item in history:
+                    status = item.get("status", "")
+                    cancel_reason = item.get("cancel_reason", "")
+                    pc = item.get("post_content", "") or item.get("post_title", "")
+                    
+                    if status == "cancelled" and cancel_reason == "부적절한 글" and pc:
+                        inappropriate_posts.append({"post_content": pc[:500]})
+                
+                selected = random.sample(inappropriate_posts, min(max_examples, len(inappropriate_posts))) if inappropriate_posts else []
+                return selected
+            
+            def format_answer_agent_examples(good_examples, bad_examples):
+                parts = []
+                
+                if good_examples:
+                    parts.append("=" * 50)
+                    parts.append("[✅ 따라해야 할 좋은 답변 예시]")
+                    parts.append("아래는 승인되어 실제로 게시된 답변입니다.")
+                    parts.append("특징: 3~4문장, 구체적인 숫자(입결, 모집인원 등) 인용, ~해요체")
+                    parts.append("=" * 50)
+                    for i, ex in enumerate(good_examples, 1):
+                        parts.append(f"\n[좋은 예시 {i}]")
+                        parts.append(f"원글: {ex['post_content']}")
+                        parts.append(f"답변: {ex['comment']}")
+                
+                if bad_examples:
+                    parts.append("\n" + "=" * 50)
+                    parts.append("[❌ 따라하면 안 되는 나쁜 답변 예시]")
+                    parts.append("아래는 취소된 답변입니다. 이런 식으로 작성하지 마세요.")
+                    parts.append("문제점: 너무 김, 마크다운 사용, 번호 목록 사용, RAG 데이터 없이 일반적 조언")
+                    parts.append("=" * 50)
+                    for i, ex in enumerate(bad_examples, 1):
+                        parts.append(f"\n[나쁜 예시 {i}]")
+                        parts.append(f"원글: {ex['post_content']}")
+                        parts.append(f"답변: {ex['comment']}")
+                
+                return "\n".join(parts)
+            
+            def format_query_agent_examples(inappropriate_posts):
+                if not inappropriate_posts:
+                    return ""
+                
+                parts = []
+                parts.append("\n" + "=" * 50)
+                parts.append("[❌ 답변하면 안 되는 부적절한 글 예시]")
+                parts.append("아래와 같은 글에는 PASS 처리하세요. (빈 배열 반환)")
+                parts.append("=" * 50)
+                
+                for i, ex in enumerate(inappropriate_posts, 1):
+                    parts.append(f"\n[부적절한 글 {i}]")
+                    parts.append(f"원글: {ex['post_content']}")
+                
+                return "\n".join(parts)
+            
+            # 1. Query Agent 실행 (부적절한 글 예시 포함)
+            inappropriate_posts = get_query_agent_examples(max_examples=20)
+            inappropriate_section = format_query_agent_examples(inappropriate_posts)
+            
             query_message = f"""[게시글]
 제목: {title}
 본문: {content[:1000]}
 
 위 게시글을 분석하여 function_calls를 JSON 형식으로 생성하세요.
+{inappropriate_section}
 """
             
             generation_config = {
@@ -540,38 +799,65 @@ class BotManager:
                 traceback.print_exc()
                 rag_context = f"[RAG 오류: {str(e)}]"
             
-            # 3. Answer Agent 실행
+            # 3. Answer Agent 실행 (학습 데이터 포함)
+            good_examples, bad_examples = get_answer_agent_examples(max_good=10, max_bad=10)
+            examples_section = format_answer_agent_examples(good_examples, bad_examples)
+            
             rag_section = ""
             if rag_context:
-                rag_section = f"""
-[📚 관련 입시 정보 (RAG)]
+                rag_section = f"""[📚 관련 입시 정보 (RAG)]
 아래는 게시글과 관련된 공식 입시 정보입니다. 답변 시 참고하세요.
 {rag_context}
 """
             
-            answer_full_prompt = f"""
-당신은 수만휘 입시 커뮤니티의 입시 멘토입니다.
+            answer_full_prompt = f"""당신은 수만휘 입시 커뮤니티의 입시 멘토입니다.
 게시글을 읽고 도움이 되는 댓글을 작성하세요.
 
-[게시글 정보]
+{examples_section}
+
+[📋 게시글 정보]
 제목: {title}
 본문: {content[:1000]}
+
 {rag_section}
+[✍️ 작성 지침]
 {answer_prompt}
 """
             
-            answer_response = answer_agent.generate_content(answer_full_prompt)
+            print(f"  -> [재생성] 학습 데이터 로드 (좋은 예시 {len(good_examples)}개, 나쁜 예시 {len(bad_examples)}개)")
+            
+            generation_config = {
+                "temperature": 0.3,
+                "max_output_tokens": 2048
+            }
+            
+            answer_response = answer_agent.generate_content(answer_full_prompt, generation_config=generation_config)
             answer_text = (answer_response.text or "").strip()
             answer_text = answer_text.replace('"', '').replace("'", "").strip()
             
             if not answer_text or len(answer_text) <= 20:
                 final_answer = "[PASS] 할 말이 없거나 너무 짧습니다."
             else:
-                final_answer = f"""수험생 전문 ai에 물어보니까 이러네요
+                # 랜덤 오프닝/클로징 (main.py와 동일)
+                OPENINGS = [
+                    "수험생 전문 ai에 물어보니까 이러네요",
+                    "입시 전용 ai 돌려보니까 이렇게 나와요",
+                    "데이터 학습된 ai한테 물어본 결과입니다"
+                ]
+                CLOSINGS = [
+                    "구글에 uni2road 검색해서 써 보세요",
+                    "구글 검색창에 uni2road 치면 나옵니다",
+                    "구글에서 uni2road 검색해서 돌려보세요"
+                ]
+                
+                opening = random.choice(OPENINGS)
+                closing = random.choice(CLOSINGS)
+                
+                final_answer = f"""{opening}
 
 {answer_text}
 
-구글에 uni2road 검색해서 써 보세요"""
+{closing}"""
             
             return {
                 "success": True,
@@ -581,6 +867,8 @@ class BotManager:
             }
             
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return {
                 "success": False,
                 "message": f"테스트 실행 실패: {str(e)}",
@@ -592,13 +880,18 @@ class BotManager:
     def _format_rag_context(self, rag_results: Dict) -> str:
         """RAG 결과를 문자열로 포맷팅"""
         if not rag_results:
-            return ""
+            return "[검색 결과 없음]"
         
         context_parts = []
+        total_chunks = 0
         
         for key, result in rag_results.items():
             chunks = result.get("chunks", [])
+            total_chunks += len(chunks)
+            
             if not chunks:
+                # 검색했지만 결과가 없는 경우도 표시
+                context_parts.append(f"\n=== {result.get('university', '전체')} ===\n[검색 결과 없음]")
                 continue
             
             context_parts.append(f"\n=== 관련 입시 정보 ({result.get('university', '전체')}) ===")
@@ -607,7 +900,10 @@ class BotManager:
                 content = chunk.get("content", "")
                 context_parts.append(f"[{i}] {content}")
         
-        return "\n".join(context_parts) if context_parts else ""
+        if not context_parts:
+            return "[검색 결과 없음]"
+        
+        return "\n".join(context_parts)
     
     def _get_default_query_prompt(self) -> str:
         """기본 Query Agent 프롬프트 반환"""
@@ -1037,9 +1333,35 @@ target_range 옵션 (새로운 판정 기준):
         if not hasattr(self, 'poster_pid_file'):
             self.poster_pid_file = os.path.join(self.bot_dir, ".poster_pid")
     
-    def start_poster(self) -> Dict[str, Any]:
-        """게시 워커 시작 - 승인된 댓글을 딜레이 적용하여 게시"""
+    def start_poster(self, account_id: Optional[str] = None) -> Dict[str, Any]:
+        """게시 워커 시작 - 승인된 댓글을 딜레이 적용하여 게시
+        
+        Args:
+            account_id: 사용할 계정 ID (없으면 현재 선택된 계정 사용)
+        """
         self.__init_poster_attrs()
+        
+        # 계정 ID 결정
+        target_account = account_id or self.current_account_id
+        if not target_account:
+            return {
+                "success": False,
+                "message": "계정을 선택해주세요."
+            }
+        
+        if target_account not in ACCOUNTS:
+            return {
+                "success": False,
+                "message": f"알 수 없는 계정입니다: {target_account}"
+            }
+        
+        # 계정 쿠키 파일 확인
+        cookie_path = self.get_account_cookie_path(target_account)
+        if not os.path.exists(cookie_path):
+            return {
+                "success": False,
+                "message": f"계정 '{target_account}'의 쿠키 파일이 없습니다."
+            }
         
         # 이미 실행 중인지 확인
         poster_status = self.get_poster_status()
@@ -1050,26 +1372,25 @@ target_range 옵션 (새로운 판정 기준):
                 "pid": poster_status.get("pid")
             }
         
-        # 쿠키 파일 확인
-        cookie_file = os.path.join(self.bot_dir, "naver_cookies.pkl")
-        if not os.path.exists(cookie_file):
-            return {
-                "success": False,
-                "message": "쿠키 파일이 없습니다."
-            }
+        # 현재 계정 저장
+        self._save_current_account(target_account)
         
         # 정지 플래그 제거
         if os.path.exists(self.poster_stop_flag_file):
             os.remove(self.poster_stop_flag_file)
         
         try:
-            # 게시 워커용 스크립트 실행
-            main_py = os.path.join(self.bot_dir, "main.py")
+            # 게시 워커용 스크립트 실행 - main.py는 base_dir에 있음
+            main_py = os.path.join(self.base_dir, "main.py")
             
             env = os.environ.copy()
             env["HEADLESS"] = "true"
             env["PYTHONUNBUFFERED"] = "1"
             env["RUN_POSTER"] = "true"  # 게시 워커 모드
+            env["CAFE_ID"] = self.cafe_id  # 카페 ID 전달
+            env["CAFE_DIR"] = self.bot_dir  # 카페별 디렉토리 전달
+            env["ACCOUNT_ID"] = target_account  # 계정 ID 전달
+            env["COOKIE_FILE"] = cookie_path  # 쿠키 파일 경로 전달
             
             system_paths = "/usr/local/bin:/usr/bin:/bin"
             env["PATH"] = f"{system_paths}:{env.get('PATH', '')}"
@@ -1078,13 +1399,13 @@ target_range 옵션 (새로운 판정 기준):
             python_cmd = "/usr/bin/python3" if os.path.exists("/usr/bin/python3") else "python3"
             poster_log = os.path.join(self.bot_dir, "poster.log")
             logf = open(poster_log, "a", encoding="utf-8")
-            logf.write(f"\n===== 게시 워커 시작 {datetime.now().isoformat()} =====\n")
+            logf.write(f"\n===== 게시 워커 시작 [{self.cafe_id}] 계정: {target_account} {datetime.now().isoformat()} =====\n")
             logf.flush()
             
             # poster 모드로 실행하는 래퍼 명령
             self._poster_process = subprocess.Popen(
-                [python_cmd, "-c", f"import sys; sys.path.insert(0, '{self.bot_dir}'); from main import run_poster_bot; run_poster_bot()"],
-                cwd=self.bot_dir,
+                [python_cmd, "-c", f"import sys; sys.path.insert(0, '{self.base_dir}'); from main import run_poster_bot; run_poster_bot()"],
+                cwd=self.base_dir,
                 env=env,
                 stdout=logf,
                 stderr=subprocess.STDOUT,
@@ -1098,7 +1419,7 @@ target_range 옵션 (새로운 판정 기준):
             
             return {
                 "success": True,
-                "message": "게시 워커가 시작되었습니다.",
+                "message": f"게시 워커가 시작되었습니다. (계정: {target_account})",
                 "pid": self._poster_process.pid
             }
             
@@ -1212,6 +1533,13 @@ target_range 옵션 (새로운 판정 기준):
 
 
 # 모듈 로드 시 인스턴스 생성하지 않음 (경로 문제 방지)
-def get_bot_manager() -> BotManager:
-    """BotManager 인스턴스 반환"""
-    return BotManager.get_instance()
+def get_bot_manager(cafe_id: str = "suhui") -> BotManager:
+    """카페별 BotManager 인스턴스 반환"""
+    if cafe_id not in SUPPORTED_CAFES:
+        raise ValueError(f"지원하지 않는 카페 ID: {cafe_id}. 지원 카페: {list(SUPPORTED_CAFES.keys())}")
+    return BotManager.get_instance(cafe_id)
+
+
+def get_supported_cafes() -> Dict[str, Dict]:
+    """지원하는 카페 목록 반환"""
+    return SUPPORTED_CAFES

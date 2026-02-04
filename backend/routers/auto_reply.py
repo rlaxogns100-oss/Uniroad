@@ -1,5 +1,7 @@
 """
 자동 댓글 봇 관리 API 라우터
+멀티 카페 지원: 각 카페별로 독립된 봇 관리
+계정 분리: 탭(카페)과 계정을 분리하여 각 탭에서 계정을 선택 가능
 """
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
@@ -7,7 +9,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 import asyncio
 import os
-from services.bot_manager import get_bot_manager
+from services.bot_manager import get_bot_manager, get_supported_cafes, SUPPORTED_CAFES, ACCOUNTS
 
 router = APIRouter()
 
@@ -21,6 +23,12 @@ class BotConfigUpdate(BaseModel):
     keywords: Optional[List[str]] = None
 
 
+class BotStartRequest(BaseModel):
+    """봇 시작 요청"""
+    dry_run: bool = False
+    account_id: Optional[str] = None
+
+
 class BotActionResponse(BaseModel):
     """봇 액션 응답"""
     success: bool
@@ -28,8 +36,40 @@ class BotActionResponse(BaseModel):
     pid: Optional[int] = None
 
 
-@router.get("/status")
-async def get_bot_status():
+# ==========================================
+# 카페 목록 API
+# ==========================================
+
+@router.get("/cafes")
+async def list_cafes():
+    """
+    지원하는 카페 목록 조회
+    
+    Returns:
+        cafes: 카페 ID와 이름 목록
+    """
+    return {"cafes": SUPPORTED_CAFES}
+
+
+@router.get("/accounts")
+async def list_accounts():
+    """
+    사용 가능한 계정 목록 조회
+    
+    Returns:
+        accounts: 계정 ID와 이름 목록
+    """
+    # 아무 카페나 선택해서 계정 목록 가져오기 (계정은 공통)
+    manager = get_bot_manager("suhui")
+    return {"accounts": manager.get_available_accounts()}
+
+
+# ==========================================
+# 카페별 봇 관리 API
+# ==========================================
+
+@router.get("/{cafe_id}/status")
+async def get_bot_status(cafe_id: str):
     """
     봇 상태 조회
     
@@ -39,22 +79,23 @@ async def get_bot_status():
         cookie_exists: 쿠키 파일 존재 여부
         config: 현재 설정
     """
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     return manager.get_status()
 
 
-@router.post("/start", response_model=BotActionResponse)
-async def start_bot(dry_run: bool = False):
+@router.post("/{cafe_id}/start", response_model=BotActionResponse)
+async def start_bot(cafe_id: str, request: BotStartRequest = BotStartRequest()):
     """
     봇 시작
     
     Args:
-        dry_run: True면 가실행 모드 (댓글 생성만 하고 실제로 달지 않음)
+        request.dry_run: True면 가실행 모드 (댓글 생성만 하고 실제로 달지 않음)
+        request.account_id: 사용할 계정 ID (없으면 현재 선택된 계정 사용)
     
     쿠키 파일이 존재해야 시작 가능합니다.
     """
-    manager = get_bot_manager()
-    result = manager.start(dry_run=dry_run)
+    manager = get_bot_manager(cafe_id)
+    result = manager.start(dry_run=request.dry_run, account_id=request.account_id)
     
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result["message"])
@@ -62,14 +103,14 @@ async def start_bot(dry_run: bool = False):
     return result
 
 
-@router.post("/stop", response_model=BotActionResponse)
-async def stop_bot():
+@router.post("/{cafe_id}/stop", response_model=BotActionResponse)
+async def stop_bot(cafe_id: str):
     """
     봇 중지
     
     Graceful shutdown을 시도합니다.
     """
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     result = manager.stop()
     
     if not result["success"]:
@@ -78,23 +119,23 @@ async def stop_bot():
     return result
 
 
-@router.get("/config")
-async def get_bot_config():
+@router.get("/{cafe_id}/config")
+async def get_bot_config(cafe_id: str):
     """
     봇 설정 조회
     """
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     return manager.get_config()
 
 
-@router.post("/config")
-async def update_bot_config(config: BotConfigUpdate):
+@router.post("/{cafe_id}/config")
+async def update_bot_config(cafe_id: str, config: BotConfigUpdate):
     """
     봇 설정 업데이트
     
     실행 중인 봇에도 다음 사이클에 적용됩니다.
     """
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     
     # None이 아닌 값만 업데이트
     update_data = {k: v for k, v in config.model_dump().items() if v is not None}
@@ -110,8 +151,8 @@ async def update_bot_config(config: BotConfigUpdate):
     return result
 
 
-@router.get("/comments")
-async def get_comments(limit: int = 100, offset: int = 0):
+@router.get("/{cafe_id}/comments")
+async def get_comments(cafe_id: str, limit: int = 100, offset: int = 0):
     """
     댓글 기록 조회
     
@@ -130,7 +171,7 @@ async def get_comments(limit: int = 100, offset: int = 0):
     if offset < 0:
         offset = 0
     
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     return manager.get_comments(limit=limit, offset=offset)
 
 
@@ -145,31 +186,31 @@ class TestRequest(BaseModel):
     post_content: str
 
 
-@router.get("/prompts")
-async def get_prompts():
+@router.get("/{cafe_id}/prompts")
+async def get_prompts(cafe_id: str):
     """
     봇 Query/Answer Agent 프롬프트 조회.
     bot_prompts.json에 저장된 값 반환. 없으면 빈 문자열.
     """
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     return manager.get_prompts()
 
 
-@router.post("/prompts")
-async def update_prompts(body: PromptsUpdate):
+@router.post("/{cafe_id}/prompts")
+async def update_prompts(cafe_id: str, body: PromptsUpdate):
     """
     봇 Query/Answer Agent 프롬프트 저장.
     다음 사이클부터 봇이 이 프롬프트를 사용합니다.
     """
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     result = manager.update_prompts(body.model_dump(exclude_none=True))
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", "저장 실패"))
     return result
 
 
-@router.post("/test")
-async def test_generate_reply(body: TestRequest):
+@router.post("/{cafe_id}/test")
+async def test_generate_reply(cafe_id: str, body: TestRequest):
     """
     테스트용 댓글 생성 (Query Agent -> RAG -> Answer Agent 파이프라인)
     
@@ -187,7 +228,7 @@ async def test_generate_reply(body: TestRequest):
     if not body.post_content or not body.post_content.strip():
         raise HTTPException(status_code=400, detail="게시글 내용을 입력해주세요.")
     
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     result = await manager.test_generate_reply(body.post_content)
     
     if not result.get("success"):
@@ -201,17 +242,17 @@ class SkipLinkRequest(BaseModel):
     url: str
 
 
-@router.get("/skip-links")
-async def get_skip_links():
+@router.get("/{cafe_id}/skip-links")
+async def get_skip_links(cafe_id: str):
     """
     수동 스킵 링크 목록 조회
     """
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     return manager.get_skip_links()
 
 
-@router.post("/skip-links")
-async def add_skip_link(body: SkipLinkRequest):
+@router.post("/{cafe_id}/skip-links")
+async def add_skip_link(cafe_id: str, body: SkipLinkRequest):
     """
     수동 스킵 링크 추가 (중복 댓글 방지용)
     
@@ -222,7 +263,7 @@ async def add_skip_link(body: SkipLinkRequest):
     if not body.url or not body.url.strip():
         raise HTTPException(status_code=400, detail="URL을 입력해주세요.")
     
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     result = manager.add_skip_link(body.url.strip())
     
     if not result.get("success"):
@@ -231,15 +272,15 @@ async def add_skip_link(body: SkipLinkRequest):
     return result
 
 
-@router.delete("/skip-links")
-async def remove_skip_link(body: SkipLinkRequest):
+@router.delete("/{cafe_id}/skip-links")
+async def remove_skip_link(cafe_id: str, body: SkipLinkRequest):
     """
     수동 스킵 링크 삭제
     """
     if not body.url or not body.url.strip():
         raise HTTPException(status_code=400, detail="URL을 입력해주세요.")
     
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     result = manager.remove_skip_link(body.url.strip())
     
     if not result.get("success"):
@@ -248,8 +289,8 @@ async def remove_skip_link(body: SkipLinkRequest):
     return result
 
 
-@router.get("/logs/stream")
-async def stream_logs():
+@router.get("/{cafe_id}/logs/stream")
+async def stream_logs(cafe_id: str):
     """
     실시간 로그 스트리밍 (Server-Sent Events)
     
@@ -259,7 +300,7 @@ async def stream_logs():
         StreamingResponse: text/event-stream 형식의 실시간 로그
     """
     async def log_generator():
-        manager = get_bot_manager()
+        manager = get_bot_manager(cafe_id)
         bot_log_file = os.path.join(manager.bot_dir, "bot.log")
         last_position = 0
         
@@ -318,14 +359,14 @@ class CommentCancelRequest(BaseModel):
     reason: str
 
 
-@router.post("/comments/{comment_id}/approve")
-async def approve_comment(comment_id: str):
+@router.post("/{cafe_id}/comments/{comment_id}/approve")
+async def approve_comment(cafe_id: str, comment_id: str):
     """
     댓글 승인 - 게시 대기열에 추가
     
     승인된 댓글은 게시 워커가 실행 중일 때 딜레이를 적용하여 자동으로 게시됩니다.
     """
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     result = manager.approve_comment(comment_id)
     
     if not result.get("success"):
@@ -334,14 +375,14 @@ async def approve_comment(comment_id: str):
     return result
 
 
-@router.post("/comments/{comment_id}/cancel")
-async def cancel_comment(comment_id: str, body: CommentCancelRequest):
+@router.post("/{cafe_id}/comments/{comment_id}/cancel")
+async def cancel_comment(cafe_id: str, comment_id: str, body: CommentCancelRequest):
     """
     댓글 취소 - 게시하지 않음
     
     취소된 댓글은 기록에 남지만 게시되지 않습니다.
     """
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     result = manager.cancel_comment(comment_id, reason=body.reason)
     
     if not result.get("success"):
@@ -350,8 +391,8 @@ async def cancel_comment(comment_id: str, body: CommentCancelRequest):
     return result
 
 
-@router.post("/comments/{comment_id}/edit")
-async def edit_comment(comment_id: str, body: CommentEditRequest):
+@router.post("/{cafe_id}/comments/{comment_id}/edit")
+async def edit_comment(cafe_id: str, comment_id: str, body: CommentEditRequest):
     """
     댓글 수정
     
@@ -360,7 +401,7 @@ async def edit_comment(comment_id: str, body: CommentEditRequest):
     if not body.new_comment or not body.new_comment.strip():
         raise HTTPException(status_code=400, detail="수정할 댓글 내용을 입력해주세요.")
     
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     result = manager.edit_comment(comment_id, body.new_comment.strip())
     
     if not result.get("success"):
@@ -369,14 +410,14 @@ async def edit_comment(comment_id: str, body: CommentEditRequest):
     return result
 
 
-@router.post("/comments/{comment_id}/regenerate")
-async def regenerate_comment(comment_id: str):
+@router.post("/{cafe_id}/comments/{comment_id}/regenerate")
+async def regenerate_comment(cafe_id: str, comment_id: str):
     """
     댓글 재생성 - AI 에이전트를 다시 실행
     
     원본 게시글 내용을 기반으로 새로운 댓글을 생성합니다.
     """
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     result = await manager.regenerate_comment(comment_id)
     
     if not result.get("success"):
@@ -385,14 +426,14 @@ async def regenerate_comment(comment_id: str):
     return result
 
 
-@router.post("/comments/{comment_id}/revert")
-async def revert_comment(comment_id: str):
+@router.post("/{cafe_id}/comments/{comment_id}/revert")
+async def revert_comment(cafe_id: str, comment_id: str):
     """
     댓글을 pending 상태로 되돌리기
     
     취소됨, 실패, 승인됨 상태의 댓글을 다시 대기 상태로 되돌립니다.
     """
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     result = manager.revert_to_pending(comment_id)
     
     if not result.get("success"):
@@ -405,15 +446,20 @@ async def revert_comment(comment_id: str):
 # 게시 워커 API 엔드포인트
 # ==========================================
 
-@router.post("/poster/start")
-async def start_poster():
+class PosterStartRequest(BaseModel):
+    """게시 워커 시작 요청"""
+    account_id: Optional[str] = None
+
+
+@router.post("/{cafe_id}/poster/start")
+async def start_poster(cafe_id: str, request: PosterStartRequest = PosterStartRequest()):
     """
     게시 워커 시작
     
     승인된 댓글을 설정된 딜레이에 따라 자동으로 게시합니다.
     """
-    manager = get_bot_manager()
-    result = manager.start_poster()
+    manager = get_bot_manager(cafe_id)
+    result = manager.start_poster(account_id=request.account_id)
     
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", "시작 실패"))
@@ -421,12 +467,12 @@ async def start_poster():
     return result
 
 
-@router.post("/poster/stop")
-async def stop_poster():
+@router.post("/{cafe_id}/poster/stop")
+async def stop_poster(cafe_id: str):
     """
     게시 워커 중지
     """
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     result = manager.stop_poster()
     
     if not result.get("success"):
@@ -435,8 +481,8 @@ async def stop_poster():
     return result
 
 
-@router.get("/poster/status")
-async def get_poster_status():
+@router.get("/{cafe_id}/poster/status")
+async def get_poster_status(cafe_id: str):
     """
     게시 워커 상태 조회
     
@@ -445,12 +491,12 @@ async def get_poster_status():
         pid: 프로세스 ID
         approved_count: 승인 대기 중인 댓글 수
     """
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     return manager.get_poster_status()
 
 
-@router.get("/poster/logs")
-async def get_poster_logs(lines: int = 50):
+@router.get("/{cafe_id}/poster/logs")
+async def get_poster_logs(cafe_id: str, lines: int = 50):
     """
     게시 워커 로그 조회
     
@@ -460,5 +506,5 @@ async def get_poster_logs(lines: int = 50):
     Returns:
         logs: 로그 줄 배열
     """
-    manager = get_bot_manager()
+    manager = get_bot_manager(cafe_id)
     return manager.get_poster_logs(lines)
