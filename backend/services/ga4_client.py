@@ -276,69 +276,92 @@ class GA4Client:
         end_date = datetime.now().date()
         start_date = end_date - timedelta(days=days)
         
-        # 단계별 조회 설정
-        stages_config = [
-            {
-                "name": "랜딩페이지_방문",
-                "dimensions": ["pagePath"],
-                "metrics": ["screenPageViews"],
-                "filter_path": "/"  # 홈페이지
-            },
-            {
-                "name": "챗봇_페이지_방문",
-                "dimensions": ["pagePath"],
-                "metrics": ["screenPageViews"],
-                "filter_path": "/chat"  # 챗봇 페이지
-            },
-            {
-                "name": "실제_질문_전송",
-                "dimensions": ["eventName"],
-                "metrics": ["eventCount"],
-                "filter_event": "질문_전송_태그"  # 질문 전송 이벤트
-            }
-        ]
+        print(f"\n🔗 깔때기 분석 시작 ({start_date} ~ {end_date})")
         
+        # 1단계: 랜딩페이지 방문 (모든 페이지 방문)
+        print("  [1/3] 랜딩페이지 방문 조회 중...")
+        landing_response = self.run_report(
+            dimensions=["pagePath"],
+            metrics=["screenPageViews"],
+            date_ranges=[{
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat()
+            }]
+        )
+        
+        landing_count = 0
+        if landing_response:
+            for row in landing_response.rows:
+                landing_count += int(row.metric_values[0].value)
+        
+        print(f"  ✅ 랜딩페이지 방문: {landing_count}")
+        
+        # 2단계: 챗봇 페이지 방문
+        print("  [2/3] 챗봇 페이지 방문 조회 중...")
+        chat_response = self.run_report(
+            dimensions=["pagePath"],
+            metrics=["screenPageViews"],
+            date_ranges=[{
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat()
+            }]
+        )
+        
+        chat_count = 0
+        if chat_response:
+            for row in chat_response.rows:
+                page_path = row.dimension_values[0].value
+                if "/chat" in page_path:
+                    chat_count += int(row.metric_values[0].value)
+        
+        print(f"  ✅ 챗봇 페이지 방문: {chat_count}")
+        
+        # 3단계: 실제 질문 전송 (질문_전송_태그 이벤트)
+        print("  [3/3] 질문 전송 이벤트 조회 중...")
+        event_response = self.run_report(
+            dimensions=["eventName"],
+            metrics=["eventCount"],
+            date_ranges=[{
+                "start": start_date.isoformat(),
+                "end": end_date.isoformat()
+            }]
+        )
+        
+        message_count = 0
+        if event_response:
+            for row in event_response.rows:
+                event_name = row.dimension_values[0].value
+                # "질문_전송_태그" 이벤트 찾기
+                if "질문_전송" in event_name or event_name == "send_message":
+                    message_count = int(row.metric_values[0].value)
+                    print(f"     찾은 이벤트: {event_name} = {message_count}")
+                    break
+        
+        print(f"  ✅ 질문 전송: {message_count}")
+        
+        # 단계 데이터 구성
         stage_data = []
         
-        for i, stage_config in enumerate(stages_config):
-            try:
-                response = self.run_report(
-                    dimensions=stage_config["dimensions"],
-                    metrics=stage_config["metrics"],
-                    date_ranges=[{
-                        "start": start_date.isoformat(),
-                        "end": end_date.isoformat()
-                    }]
-                )
-                
-                if response and len(response.rows) > 0:
-                    total_count = 0
-                    
-                    if "filter_path" in stage_config:
-                        # 페이지 경로 필터링
-                        for row in response.rows:
-                            page_path = row.dimension_values[0].value
-                            if stage_config["filter_path"] in page_path:
-                                total_count += int(row.metric_values[0].value)
-                    elif "filter_event" in stage_config:
-                        # 이벤트 필터링
-                        for row in response.rows:
-                            event_name = row.dimension_values[0].value
-                            if stage_config["filter_event"] in event_name:
-                                total_count += int(row.metric_values[0].value)
-                    
-                    if total_count > 0:
-                        stage_data.append({
-                            "stage": stage_config["name"],
-                            "count": total_count,
-                            "order": i
-                        })
-            except Exception as e:
-                print(f"⚠️ 단계 '{stage_config['name']}' 조회 오류: {e}")
-                continue
+        if landing_count > 0:
+            stage_data.append({
+                "stage": "랜딩페이지_방문",
+                "count": landing_count,
+                "order": 0
+            })
         
-        # 정렬
-        stage_data.sort(key=lambda x: x["order"])
+        if chat_count > 0:
+            stage_data.append({
+                "stage": "챗봇_페이지_방문",
+                "count": chat_count,
+                "order": 1
+            })
+        
+        if message_count > 0:
+            stage_data.append({
+                "stage": "실제_질문_전송",
+                "count": message_count,
+                "order": 2
+            })
         
         # 전환율 계산
         if stage_data:
@@ -351,12 +374,19 @@ class GA4Client:
                 else:
                     stage["step_conversion"] = 100
         
-        return {
+        result = {
             "stages": stage_data,
             "total_users": stage_data[0]["count"] if stage_data else 0,
             "final_conversions": stage_data[-1]["count"] if stage_data else 0,
             "overall_conversion": round((stage_data[-1]["count"] / stage_data[0]["count"]) * 100, 1) if stage_data and stage_data[0]["count"] > 0 else 0
         }
+        
+        print(f"\n✅ 깔때기 분석 완료:")
+        print(f"   총 진입: {result['total_users']}")
+        print(f"   최종 전환: {result['final_conversions']}")
+        print(f"   전체 전환율: {result['overall_conversion']}%\n")
+        
+        return result
     
     def get_summary(self, days: int = 7):
         """전체 요약 데이터 조회"""
