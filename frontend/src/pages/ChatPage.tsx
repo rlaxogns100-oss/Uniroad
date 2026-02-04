@@ -993,6 +993,16 @@ export default function ChatPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
               </svg>
               <span className="text-sm font-medium flex-1 text-left">공지사항</span>
+              {/* 5일 이내 공지사항이 있으면 NEW 배지 표시 */}
+              {announcements.some(announcement => {
+                const createdDate = new Date(announcement.created_at)
+                const now = new Date()
+                const diffTime = now.getTime() - createdDate.getTime()
+                const diffDays = diffTime / (1000 * 60 * 60 * 24)
+                return diffDays <= 5
+              }) && (
+                <span className="new-badge animate-shake-new flex-shrink-0">NEW</span>
+              )}
               <svg 
                 className={`w-5 h-5 text-gray-500 flex-shrink-0 transition-transform ${isAnnouncementDropdownOpen ? 'rotate-180' : ''}`}
                 fill="none" 
