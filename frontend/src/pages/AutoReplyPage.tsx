@@ -405,8 +405,15 @@ export default function AutoReplyPage() {
       const res = await fetch(`${API_BASE}/comments/${commentId}/approve`, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || '승인 실패')
-      await fetchComments()
-      await fetchPosterStatus()
+      
+      // 즉시 로컬 상태 업데이트 (Optimistic Update)
+      setComments(prev => prev.map(c => 
+        c.id === commentId ? { ...c, status: 'approved' as const } : c
+      ))
+      
+      // 백그라운드에서 새로고침 (await 제거)
+      fetchComments()
+      fetchPosterStatus()
     } catch (e: any) {
       alert(e.message)
     } finally {
@@ -480,9 +487,17 @@ export default function AutoReplyPage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || '수정 실패')
+      
+      // 즉시 로컬 상태 업데이트 (Optimistic Update)
+      setComments(prev => prev.map(c => 
+        c.id === editingComment.id ? { ...c, comment: editCommentText } : c
+      ))
+      
       setEditModalOpen(false)
       setEditingComment(null)
-      await fetchComments()
+      
+      // 백그라운드에서 새로고침 (await 제거)
+      fetchComments()
     } catch (e: any) {
       alert(e.message)
     } finally {
@@ -500,7 +515,9 @@ export default function AutoReplyPage() {
       const res = await fetch(`${API_BASE}/comments/${commentId}/regenerate`, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || '재생성 실패')
-      await fetchComments()
+      
+      // 백그라운드에서 새로고침 (await 제거)
+      fetchComments()
     } catch (e: any) {
       alert(e.message)
     } finally {
@@ -518,8 +535,15 @@ export default function AutoReplyPage() {
       const res = await fetch(`${API_BASE}/comments/${commentId}/revert`, { method: 'POST' })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || '되돌리기 실패')
-      await fetchComments()
-      await fetchPosterStatus()
+      
+      // 즉시 로컬 상태 업데이트 (Optimistic Update)
+      setComments(prev => prev.map(c => 
+        c.id === commentId ? { ...c, status: 'pending' as const } : c
+      ))
+      
+      // 백그라운드에서 새로고침 (await 제거)
+      fetchComments()
+      fetchPosterStatus()
     } catch (e: any) {
       alert(e.message)
     } finally {
