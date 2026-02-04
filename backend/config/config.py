@@ -9,10 +9,15 @@ class Settings(BaseSettings):
     # Supabase
     SUPABASE_URL: str
     SUPABASE_KEY: str
+    SUPABASE_SERVICE_ROLE_KEY: str = ""  # 관리자 작업용 (선택사항)
     SUPABASE_JWT_SECRET: str = "your-jwt-secret"  # JWT 토큰 검증용
     
     # Gemini (채팅/분류/임베딩용)
     GEMINI_API_KEY: str
+    
+    # Google Analytics 4
+    GA4_PROPERTY_ID: str = "521910579"
+    GOOGLE_APPLICATION_CREDENTIALS: str = ""  # Google 서비스 계정 JSON 파일 경로 (선택사항)
     
     # Server
     BACKEND_PORT: int = 8000

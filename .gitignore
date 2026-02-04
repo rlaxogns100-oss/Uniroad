@@ -7,6 +7,14 @@
 backend/.env
 
 # ============================================
+# Google OAuth & Credentials
+# ============================================
+backend/credentials/token.json
+backend/credentials/*.json
+backend/client_secrets.json/
+!backend/credentials/.gitkeep
+
+# ============================================
 # Python (Backend)
 # ============================================
 backend/venv/
@@ -16,6 +24,7 @@ backend/**/*.pyc
 backend/**/*.pyo
 backend/**/*.pyd
 backend/logs/
+logs/
 *.log
 
 # Token usage tracking

@@ -5,14 +5,18 @@ interface User {
   id: string
   email: string
   name?: string
+  avatar_url?: string
 }
 
 interface AuthContextType {
   user: User | null
   accessToken: string | null
   loading: boolean
-  signIn: (email: string, password: string) => Promise<void>
-  signUp: (email: string, password: string, name?: string) => Promise<void>
+  signIn: (email: string, password: string) => Promise<User | null>
+  signUp: (email: string, password: string, name?: string) => Promise<User | null>
+  signInWithGoogle: () => Promise<void>
+  signInWithKakao: () => Promise<void>
+  quickSignIn: (name: string) => void  // 비밀번호 없이 빠른 로그인
   signOut: () => void
   isAuthenticated: boolean
 }
@@ -24,20 +28,54 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // 로컬스토리지에서 토큰 복원
+  // 로컬스토리지에서 토큰 복원 + OAuth 콜백 처리
   useEffect(() => {
-    const storedToken = localStorage.getItem('access_token')
-    const storedUser = localStorage.getItem('user')
-    
-    if (storedToken && storedUser) {
-      setAccessToken(storedToken)
-      setUser(JSON.parse(storedUser))
-      
-      // 토큰 유효성 검증
-      verifyToken(storedToken)
-    } else {
-      setLoading(false)
+    const handleOAuthCallback = async () => {
+      // OAuth 콜백 처리 (URL query에서 code 추출)
+      const urlParams = new URLSearchParams(window.location.search)
+      const code = urlParams.get('code')
+
+      if (code) {
+        console.log('OAuth code found, exchanging for token...')
+        try {
+          const response = await axios.post('/api/auth/oauth/callback', { code })
+          const { access_token, refresh_token, user: userData } = response.data
+
+          localStorage.setItem('access_token', access_token)
+          if (refresh_token) {
+            localStorage.setItem('refresh_token', refresh_token)
+          }
+          localStorage.setItem('user', JSON.stringify(userData))
+
+          setAccessToken(access_token)
+          setUser(userData)
+          setLoading(false)
+
+          // OAuth 로그인 성공 시: 관리자(김도균)는 /chat/login/admin, 그 외는 /chat/login
+          const isAdmin = userData?.name === '김도균' || userData?.email === 'herry0515@naver.com'
+          console.log('✅ OAuth 로그인 성공:', userData, '관리자:', isAdmin)
+          window.location.href = isAdmin ? '/chat/login/admin' : '/chat/login'
+          return
+        } catch (error) {
+          console.error('OAuth 콜백 처리 실패:', error)
+          window.history.replaceState(null, '', window.location.pathname)
+        }
+      }
+
+      // 로컬스토리지에서 토큰 복원
+      const storedToken = localStorage.getItem('access_token')
+      const storedUser = localStorage.getItem('user')
+
+      if (storedToken && storedUser) {
+        setAccessToken(storedToken)
+        setUser(JSON.parse(storedUser))
+        verifyToken(storedToken)
+      } else {
+        setLoading(false)
+      }
     }
+
+    handleOAuthCallback()
   }, [])
 
   const verifyToken = async (token: string) => {
@@ -55,22 +93,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (email: string, password: string): Promise<User | null> => {
     try {
       const response = await axios.post('/api/auth/signin', { email, password })
       const { access_token, user: userData } = response.data
+      
+      console.log('✅ 로그인 성공:', userData)
       
       setAccessToken(access_token)
       setUser(userData)
       
       localStorage.setItem('access_token', access_token)
       localStorage.setItem('user', JSON.stringify(userData))
+      
+      // 로그인 성공 후 리다이렉트
+      const isAdmin = userData?.name === '김도균' || userData?.email === 'herry0515@naver.com'
+      window.location.href = isAdmin ? '/chat/login/admin' : '/chat/login'
+      
+      return userData
     } catch (error: any) {
+      console.error('❌ 로그인 실패:', error)
       throw new Error(error.response?.data?.detail || '로그인 실패')
     }
   }
 
-  const signUp = async (email: string, password: string, name?: string) => {
+  const signUp = async (email: string, password: string, name?: string): Promise<User | null> => {
     try {
       const response = await axios.post('/api/auth/signup', { email, password, name })
       const { access_token, user: userData } = response.data
@@ -80,12 +127,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       localStorage.setItem('access_token', access_token)
       localStorage.setItem('user', JSON.stringify(userData))
+      return userData
     } catch (error: any) {
       throw new Error(error.response?.data?.detail || '회원가입 실패')
     }
   }
 
-  const signOut = () => {
+  const signInWithGoogle = async () => {
+    try {
+      const response = await axios.post('/api/auth/oauth/url', {
+        provider: 'google',
+        redirect_to: window.location.origin
+      })
+      window.location.href = response.data.url
+    } catch (error: any) {
+      throw new Error(error.response?.data?.detail || 'Google 로그인 실패')
+    }
+  }
+
+  const signInWithKakao = async () => {
+    try {
+      const response = await axios.post('/api/auth/oauth/url', {
+        provider: 'kakao',
+        redirect_to: window.location.origin
+      })
+      window.location.href = response.data.url
+    } catch (error: any) {
+      throw new Error(error.response?.data?.detail || '카카오 로그인 실패')
+    }
+  }
+
+  // 비밀번호 없이 빠른 로그인 (테스트용)
+  const quickSignIn = (name: string) => {
+    const userData: User = {
+      id: `quick-${Date.now()}`,
+      email: `${name}@test.com`,
+      name: name,
+    }
+    console.log('✅ 빠른 로그인:', userData)
+    setUser(userData)
+    setAccessToken('quick-access-token')
+    localStorage.setItem('access_token', 'quick-access-token')
+    localStorage.setItem('user', JSON.stringify(userData))
+    
+    // 빠른 로그인 후 리다이렉트
+    const isAdmin = name === '김도균'
+    window.location.href = isAdmin ? '/chat/login/admin' : '/chat/login'
+  }
+
+  const signOut = async () => {
+    try {
+      await axios.post('/api/auth/signout')
+    } catch (e) {
+      console.error('로그아웃 오류:', e)
+    }
     setUser(null)
     setAccessToken(null)
     localStorage.removeItem('access_token')
@@ -101,6 +196,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         loading,
         signIn,
         signUp,
+        signInWithGoogle,
+        signInWithKakao,
+        quickSignIn,
         signOut,
         isAuthenticated: !!user,
       }}

@@ -13,7 +13,7 @@ class EmbeddingService:
     
     def __init__(self):
         genai.configure(api_key=settings.GEMINI_API_KEY)
-        self.embedding_model = "text-embedding-004"
+        self.embedding_model = "embedding-001"  # 768차원
         self.embedding_dimension = 768  # Gemini 임베딩 차원
     
     def chunk_text(

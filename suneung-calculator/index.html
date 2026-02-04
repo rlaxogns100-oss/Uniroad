@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>2026학년도 수능 환산점수 배치표</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: #f5f5f5;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: linear-gradient(135deg, #1a237e 0%, #3949ab 100%);
+            color: white;
+            padding: 30px 20px;
+            text-align: center;
+            margin-bottom: 20px;
+            border-radius: 10px;
+        }
+
+        header h1 {
+            font-size: 1.8rem;
+            margin-bottom: 5px;
+        }
+
+        header p {
+            opacity: 0.9;
+            font-size: 0.9rem;
+        }
+
+        .input-section {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .input-section h2 {
+            font-size: 1.2rem;
+            margin-bottom: 20px;
+            color: #1a237e;
+            border-bottom: 2px solid #e8eaf6;
+            padding-bottom: 10px;
+        }
+
+        .score-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .score-input {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .score-input label {
+            font-size: 0.85rem;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .score-input input, .score-input select {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 1rem;
+            transition: border-color 0.3s;
+        }
+
+        .score-input input:focus, .score-input select:focus {
+            outline: none;
+            border-color: #3949ab;
+        }
+
+        .score-input input[type="number"] {
+            background: #fffde7;
+        }
+
+        .filter-section {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            align-items: center;
+            margin-top: 20px;
+            padding-top: 20px;
+            border-top: 1px solid #eee;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .filter-group label {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .filter-group input[type="text"] {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            width: 150px;
+        }
+
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #3949ab;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #1a237e;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 12px 25px;
+            background: white;
+            border: none;
+            border-radius: 5px 5px 0 0;
+            cursor: pointer;
+            font-size: 1rem;
+            color: #666;
+            transition: all 0.3s;
+        }
+
+        .tab.active {
+            background: #3949ab;
+            color: white;
+        }
+
+        .tab:hover:not(.active) {
+            background: #e8eaf6;
+        }
+
+        .tab .count {
+            font-size: 0.8rem;
+            margin-left: 5px;
+            opacity: 0.8;
+        }
+
+        .results-section {
+            background: white;
+            border-radius: 0 10px 10px 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .results-count {
+            font-size: 0.9rem;
+            color: #666;
+        }
+
+        .sort-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .sort-group select {
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+
+        .results-table th {
+            background: #f5f5f5;
+            padding: 12px 8px;
+            text-align: left;
+            font-weight: 600;
+            color: #333;
+            border-bottom: 2px solid #ddd;
+            position: sticky;
+            top: 0;
+            cursor: pointer;
+        }
+
+        .results-table th:hover {
+            background: #e8eaf6;
+        }
+
+        .results-table td {
+            padding: 10px 8px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .results-table tr:hover {
+            background: #f8f9fa;
+        }
+
+        .results-table tr.highlight {
+            background: #e3f2fd;
+        }
+
+        .status-safe {
+            background: #c8e6c9;
+            color: #2e7d32;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: inline-block;
+        }
+
+        .status-appropriate {
+            background: #bbdefb;
+            color: #1565c0;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: inline-block;
+        }
+
+        .status-expected {
+            background: #ffe0b2;
+            color: #ef6c00;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: inline-block;
+        }
+
+        .status-challenge {
+            background: #ffcdd2;
+            color: #c62828;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            display: inline-block;
+        }
+
+        .status-difficult {
+            background: #f5f5f5;
+            color: #757575;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            display: inline-block;
+        }
+
+        .track-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .track-natural {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+
+        .track-humanities {
+            background: #fff3e0;
+            color: #ef6c00;
+        }
+
+        .track-combined {
+            background: #e3f2fd;
+            color: #1565c0;
+        }
+
+        .my-score {
+            font-weight: 700;
+            color: #1a237e;
+            font-size: 1rem;
+        }
+
+        .score-cell {
+            font-family: 'Monaco', 'Consolas', monospace;
+        }
+
+        .score-diff {
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+
+        .score-diff.positive {
+            color: #2e7d32;
+        }
+
+        .score-diff.negative {
+            color: #c62828;
+        }
+
+        .table-container {
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 50px;
+            color: #999;
+        }
+
+        .legend {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+            font-size: 0.85rem;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .notice {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 0 5px 5px 0;
+            font-size: 0.9rem;
+        }
+
+        .notice strong {
+            color: #e65100;
+        }
+
+        .score-summary {
+            background: #e3f2fd;
+            padding: 15px 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .score-summary-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .score-summary-item .label {
+            font-size: 0.8rem;
+            color: #666;
+        }
+
+        .score-summary-item .value {
+            font-size: 1.2rem;
+            font-weight: 700;
+            color: #1a237e;
+        }
+
+        footer {
+            text-align: center;
+            padding: 20px;
+            color: #999;
+            font-size: 0.85rem;
+        }
+
+        @media (max-width: 768px) {
+            .score-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .filter-section {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .results-table {
+                font-size: 0.8rem;
+            }
+
+            .results-table th, .results-table td {
+                padding: 8px 4px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>2026학년도 수능 환산점수 배치표</h1>
+            <p>2026 수능 실채점 기준 | 원본: 베텔기우스(Betelgeuse058.tistory.com)</p>
+        </header>
+
+        <div class="notice">
+            <strong>안내:</strong> 이 배치표는 각 대학의 2025학년도 입시결과(70%컷)를 2026학년도 수능 기준으로 역환산한 자료입니다.
+            실제 지원 시에는 각 대학의 모집요강을 반드시 확인하세요.
+        </div>
+
+        <div class="input-section">
+            <h2>내 점수 입력</h2>
+            <p style="font-size: 0.9rem; color: #666; margin-bottom: 15px;">💡 대학에 따라 표점수 또는 백분위를 입력받습니다. 가능하면 모두 입력해주세요.</p>
+
+            <div class="score-grid">
+                <div class="score-input">
+                    <label>국어 표점수</label>
+                    <input type="number" id="korean" placeholder="131" min="0" max="200">
+                </div>
+                <div class="score-input">
+                    <label>국어 백분위</label>
+                    <input type="number" id="koreanPct" placeholder="85" min="0" max="100">
+                </div>
+                <div class="score-input">
+                    <label>수학 표점수</label>
+                    <input type="number" id="math" placeholder="140" min="0" max="200">
+                </div>
+                <div class="score-input">
+                    <label>수학 백분위</label>
+                    <input type="number" id="mathPct" placeholder="92" min="0" max="100">
+                </div>
+                <div class="score-input">
+                    <label>탐구1 표점수</label>
+                    <input type="number" id="tamgu1" placeholder="68" min="0" max="100">
+                </div>
+                <div class="score-input">
+                    <label>탐구1 백분위</label>
+                    <input type="number" id="tamgu1Pct" placeholder="96" min="0" max="100">
+                </div>
+                <div class="score-input">
+                    <label>탐구2 표점수</label>
+                    <input type="number" id="tamgu2" placeholder="65" min="0" max="100">
+                </div>
+                <div class="score-input">
+                    <label>탐구2 백분위</label>
+                    <input type="number" id="tamgu2Pct" placeholder="92" min="0" max="100">
+                </div>
+                <div class="score-input">
+                    <label>영어 등급</label>
+                    <select id="english">
+                        <option value="1">1등급</option>
+                        <option value="2">2등급</option>
+                        <option value="3">3등급</option>
+                        <option value="4">4등급</option>
+                        <option value="5">5등급</option>
+                    </select>
+                </div>
+                <div class="score-input">
+                    <label>한국사 등급</label>
+                    <select id="history">
+                        <option value="1">1등급</option>
+                        <option value="2">2등급</option>
+                        <option value="3">3등급</option>
+                        <option value="4">4등급</option>
+                        <option value="5">5등급</option>
+                    </select>
+                </div>
+                <div class="score-input">
+                    <label>탐구 계열</label>
+                    <select id="tamguType">
+                        <option value="science">과학탐구</option>
+                        <option value="social">사회탐구</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="filter-section">
+                <div class="filter-group">
+                    <label>계열:</label>
+                    <select id="trackFilter">
+                        <option value="all">전체</option>
+                        <option value="자연">자연</option>
+                        <option value="인문">인문</option>
+                        <option value="통합">통합</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>합격가능성:</label>
+                    <select id="probabilityFilter">
+                        <option value="all">전체</option>
+                        <option value="safe">안정 이상</option>
+                        <option value="appropriate">적정 이상</option>
+                        <option value="expected">소신 이상</option>
+                        <option value="challenge">도전 이상</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label>대학:</label>
+                    <input type="text" id="universitySearch" placeholder="대학명">
+                </div>
+                <div class="filter-group">
+                    <label>학과:</label>
+                    <input type="text" id="departmentSearch" placeholder="학과명">
+                </div>
+                <button class="btn btn-primary" onclick="calculateScores()">분석하기</button>
+            </div>
+        </div>
+
+        <div id="scoreSummary" class="score-summary" style="display: none;">
+            <div class="score-summary-item">
+                <span class="label">표준점수 합계</span>
+                <span class="value" id="totalScore">-</span>
+            </div>
+            <div class="score-summary-item">
+                <span class="label">국수탐 평균</span>
+                <span class="value" id="avgScore">-</span>
+            </div>
+            <div class="score-summary-item">
+                <span class="label">지원 가능 학과</span>
+                <span class="value" id="possibleCount">-</span>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" data-gun="가" onclick="switchTab('가')">가군 <span class="count" id="countGa">0</span></button>
+            <button class="tab" data-gun="나" onclick="switchTab('나')">나군 <span class="count" id="countNa">0</span></button>
+            <button class="tab" data-gun="다" onclick="switchTab('다')">다군 <span class="count" id="countDa">0</span></button>
+        </div>
+
+        <div class="results-section">
+            <div class="results-header">
+                <h3 id="resultsTitle">가군 배치표</h3>
+                <div class="sort-group">
+                    <label>정렬:</label>
+                    <select id="sortBy" onchange="renderResults()">
+                        <option value="probability">합격가능성순</option>
+                        <option value="score">환산점수순</option>
+                        <option value="university">대학명순</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="table-container">
+                <table class="results-table">
+                    <thead>
+                        <tr>
+                            <th>대학</th>
+                            <th>학과</th>
+                            <th>계열</th>
+                            <th>내 환산점수</th>
+                            <th>안정</th>
+                            <th>적정</th>
+                            <th>예상컷</th>
+                            <th>도전</th>
+                            <th>합격 가능성</th>
+                            <th>반영비율</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsBody">
+                        <tr>
+                            <td colspan="10" class="no-results">점수를 입력하고 [분석하기] 버튼을 클릭하세요.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="legend">
+                <div class="legend-item"><span class="status-safe">안정</span> 합격 확률 90% 이상</div>
+                <div class="legend-item"><span class="status-appropriate">적정</span> 합격 확률 70% 이상</div>
+                <div class="legend-item"><span class="status-expected">소신</span> 합격 확률 40% 이상</div>
+                <div class="legend-item"><span class="status-challenge">도전</span> 합격 확률 10% 이상</div>
+                <div class="legend-item"><span class="status-difficult">어려움</span> 합격 확률 10% 미만</div>
+            </div>
+        </div>
+
+        <footer>
+            <p>본 자료는 베텔기우스님의 환산점수 엑셀배치표를 기반으로 제작되었습니다.</p>
+            <p>참고용이며, 실제 입시 결과와 다를 수 있습니다.</p>
+        </footer>
+    </div>
+
+    <script>
+        let universities = [];
+        let formulas = {};
+        let conversion = {};
+        let deductions = {};
+        let currentGun = '가';
+        let calculatedResults = [];
+
+        // 데이터 로드
+        async function loadData() {
+            try {
+                const timestamp = new Date().getTime();
+                const [univRes, formulaRes, convRes, deductRes] = await Promise.all([
+                    fetch(`universities.json?v=${timestamp}`),
+                    fetch(`formulas_extracted.json?v=${timestamp}`),
+                    fetch(`conversion.json?v=${timestamp}`),
+                    fetch(`deduction_tables.json?v=${timestamp}`)
+                ]);
+
+                universities = await univRes.json();
+                formulas = await formulaRes.json();
+                conversion = await convRes.json();
+                deductions = await deductRes.json();
+
+                console.log(`데이터 로드 완료: ${universities.length}개 학과`);
+                console.log(`공식 로드 완료: ${Object.keys(formulas).length}개 공식`);
+                console.log(`감점 테이블 로드 완료: ${Object.keys(deductions).length}개`);
+
+                // 초기 개수 표시
+                document.getElementById('countGa').textContent = universities.filter(u => u.gun === '가').length;
+                document.getElementById('countNa').textContent = universities.filter(u => u.gun === '나').length;
+                document.getElementById('countDa').textContent = universities.filter(u => u.gun === '다').length;
+            } catch (error) {
+                console.error('데이터 로드 실패:', error);
+                document.getElementById('resultsBody').innerHTML =
+                    '<tr><td colspan="10" class="no-results">데이터 로드 실패. 로컬 서버에서 실행해주세요.<br><code>python3 -m http.server 8080</code></td></tr>';
+            }
+        }
+
+        // 변환표준점수 가져오기
+        function getConvertedScore(percentile, university, tamguType) {
+            if (!conversion[percentile]) return null;
+
+            const univMappings = {
+                '연세대': '연세대',
+                '고려대': '고려대',
+                '서강대': '서강 자연',
+                '성균관대': '성균관대',
+                '한양대': '한양대',
+                '중앙대': '중앙대',
+                '경희대': '경희대',
+                '이화여대': '이화여대',
+                '서울시립대': '서울시립대',
+                '건국대': '건국대',
+                '동국대': '동국대',
+                '숙명여대': '숙명여대',
+                '한국외대': '한국외대',
+                '아주대': '아주대',
+                '인하대': '인하 자연'
+            };
+
+            let convUniv = univMappings[university] || '연세대';
+            if (!conversion[percentile][convUniv]) {
+                convUniv = '연세대';
+            }
+
+            const scores = conversion[percentile][convUniv];
+            if (!scores) return null;
+
+            return tamguType === 'science' ? scores.science : scores.social;
+        }
+
+        // 환산점수 계산 (엑셀 수식 완전 재현)
+        function calculateScore(univ, korean, koreanPct, math, mathPct, tamgu1, tamgu2, tamgu1Pct, tamgu2Pct, tamguType, english, history) {
+            const formula = formulas[univ.formulaId];
+            if (!formula) {
+                // 기본 계산
+                return korean * 0.25 + math * 0.35 + (tamgu1 + tamgu2) * 0.2;
+            }
+
+            // scoreMethod에 따라 점수 결정
+            let k = korean, m = math;
+            
+            if (univ.scoreMethod === '백분위') {
+                // 백분위만 받는 대학
+                k = koreanPct || korean;
+                m = mathPct || math;
+            } else if (univ.scoreMethod === '표점/만점') {
+                // 표점 또는 백분위 - 백분위 우선
+                k = koreanPct || korean;
+                m = mathPct || math;
+            } else {
+                // 표점 받는 대학 (기본)
+                k = korean;
+                m = math;
+            }
+
+            let t1 = tamgu1, t2 = tamgu2;
+
+            // 변환표준점수 적용
+            if (univ.tamguMethod === '변표') {
+                const conv1 = getConvertedScore(tamgu1Pct, univ.university, tamguType);
+                const conv2 = getConvertedScore(tamgu2Pct, univ.university, tamguType);
+                if (conv1) t1 = conv1;
+                if (conv2) t2 = conv2;
+            }
+
+            // 🔥 엑셀 수식 완전 재현
+            // 국어 = 국어입력값 × 국어계수
+            // 수학 = 수학입력값 × 수학계수
+            // 탐구1 = 탐구입력값 × 탐구계수 + 탐구보정값
+            // 탐구2 = 탐구입력값 × 탐구계수 + 탐구보정값
+            
+            const koreanScore = k * formula.koreanCoef;
+            const mathScore = m * formula.mathCoef;
+            const tamgu1Score = t1 * formula.tamguCoef + formula.tamguBonus;
+            const tamgu2Score = t2 * formula.tamguCoef + formula.tamguBonus;
+            
+            // 영어/한국사 감점 추가
+            let englishScore = 0;
+            let historyScore = 0;
+            
+            const deduction = deductions[univ.formulaId];
+            if (deduction) {
+                // 영어 감점 (등급별)
+                englishScore = deduction.englishDeduction || 0;
+                
+                // 한국사 감점 (등급별)
+                if (history >= 1 && history <= 9) {
+                    historyScore = deduction.historyDeductions[history - 1] || 0;
+                }
+            }
+            
+            // 최종 환산점수 = 국어 + 수학 + 탐구1 + 탐구2 + 영어 + 한국사
+            const score = koreanScore + mathScore + tamgu1Score + tamgu2Score + englishScore + historyScore;
+
+            return score;
+        }
+
+        // 합격 가능성 판정
+        function getProbability(myScore, univ) {
+            if (!univ.safeScore || !univ.challengeScore) {
+                return { status: 'unknown', label: '정보없음', class: 'status-difficult', order: 5 };
+            }
+
+            if (myScore >= univ.safeScore) {
+                return { status: 'safe', label: '안정', class: 'status-safe', order: 1 };
+            } else if (myScore >= univ.appropriateScore) {
+                return { status: 'appropriate', label: '적정', class: 'status-appropriate', order: 2 };
+            } else if (myScore >= univ.expectedScore) {
+                return { status: 'expected', label: '소신', class: 'status-expected', order: 3 };
+            } else if (myScore >= univ.challengeScore) {
+                return { status: 'challenge', label: '도전', class: 'status-challenge', order: 4 };
+            } else {
+                return { status: 'difficult', label: '어려움', class: 'status-difficult', order: 5 };
+            }
+        }
+
+        // 계열 배지 클래스
+        function getTrackClass(track) {
+            if (track === '자연') return 'track-natural';
+            if (track === '인문') return 'track-humanities';
+            return 'track-combined';
+        }
+
+        // 점수 분석
+        function calculateScores() {
+            const korean = parseFloat(document.getElementById('korean').value) || 0;
+            const koreanPct = parseInt(document.getElementById('koreanPct').value) || 0;
+            const math = parseFloat(document.getElementById('math').value) || 0;
+            const mathPct = parseInt(document.getElementById('mathPct').value) || 0;
+            const tamgu1 = parseFloat(document.getElementById('tamgu1').value) || 0;
+            const tamgu2 = parseFloat(document.getElementById('tamgu2').value) || 0;
+            const tamgu1Pct = parseInt(document.getElementById('tamgu1Pct').value) || 0;
+            const tamgu2Pct = parseInt(document.getElementById('tamgu2Pct').value) || 0;
+            const english = parseInt(document.getElementById('english').value) || 1;
+            const history = parseInt(document.getElementById('history').value) || 1;
+            const tamguType = document.getElementById('tamguType').value;
+            const trackFilter = document.getElementById('trackFilter').value;
+            const probabilityFilter = document.getElementById('probabilityFilter').value;
+            const univSearch = document.getElementById('universitySearch').value.toLowerCase().trim();
+            const deptSearch = document.getElementById('departmentSearch').value.toLowerCase().trim();
+
+            // 요약 정보 표시
+            const totalScore = korean + math + tamgu1 + tamgu2;
+            const avgScore = totalScore / 4;
+            document.getElementById('totalScore').textContent = totalScore.toFixed(0);
+            document.getElementById('avgScore').textContent = avgScore.toFixed(1);
+            document.getElementById('scoreSummary').style.display = 'flex';
+
+            calculatedResults = [];
+
+            universities.forEach(univ => {
+                // 필터 적용
+                if (trackFilter !== 'all' && univ.track !== trackFilter) return;
+                if (univSearch && !univ.university.toLowerCase().includes(univSearch)) return;
+                if (deptSearch && !univ.department.toLowerCase().includes(deptSearch)) return;
+
+                // 백엔드 로직 그대로 사용
+                const formulaId = String(univ.formulaId);
+                const formula = formulas[formulaId];
+                if (!formula) return;
+                
+                const koreanScore = korean * formula.koreanCoef;
+                const mathScore = math * formula.mathCoef;
+                const tamgu1Score = tamgu1 * formula.tamguCoef + formula.tamguBonus;
+                const tamgu2Score = tamgu2 * formula.tamguCoef + formula.tamguBonus;
+                
+                const deduction = deductions[formulaId] || {};
+                const englishScore = deduction.englishDeduction || 0;
+                const historyScore = (deduction.historyDeductions && history >= 1 && history <= 9) 
+                    ? (deduction.historyDeductions[history - 1] || 0) 
+                    : 0;
+                const fixedBonus = deduction.fixedBonus || 0;
+                
+                const myScore = koreanScore + mathScore + tamgu1Score + tamgu2Score + englishScore + historyScore + fixedBonus;
+                const probability = getProbability(myScore, univ);
+
+                // 합격가능성 필터
+                if (probabilityFilter !== 'all') {
+                    const filterOrder = {
+                        'safe': 1,
+                        'appropriate': 2,
+                        'expected': 3,
+                        'challenge': 4
+                    };
+                    if (probability.order > filterOrder[probabilityFilter]) return;
+                }
+
+                calculatedResults.push({
+                    ...univ,
+                    myScore: myScore,
+                    probability: probability
+                });
+            });
+
+            // 지원 가능 학과 수 (도전 이상)
+            const possibleCount = calculatedResults.filter(r => r.probability.order <= 4).length;
+            document.getElementById('possibleCount').textContent = possibleCount;
+
+            // 탭별 개수 업데이트
+            document.getElementById('countGa').textContent = calculatedResults.filter(r => r.gun === '가').length;
+            document.getElementById('countNa').textContent = calculatedResults.filter(r => r.gun === '나').length;
+            document.getElementById('countDa').textContent = calculatedResults.filter(r => r.gun === '다').length;
+
+            renderResults();
+        }
+
+        // 탭 전환
+        function switchTab(gun) {
+            currentGun = gun;
+
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.gun === gun);
+            });
+
+            document.getElementById('resultsTitle').textContent = `${gun}군 배치표`;
+            renderResults();
+        }
+
+        // 결과 렌더링
+        function renderResults() {
+            const tbody = document.getElementById('resultsBody');
+            const sortBy = document.getElementById('sortBy').value;
+            let filteredResults = calculatedResults.filter(r => r.gun === currentGun);
+
+            // 정렬
+            if (sortBy === 'probability') {
+                filteredResults.sort((a, b) => a.probability.order - b.probability.order || b.myScore - a.myScore);
+            } else if (sortBy === 'score') {
+                filteredResults.sort((a, b) => b.myScore - a.myScore);
+            } else if (sortBy === 'university') {
+                filteredResults.sort((a, b) => a.university.localeCompare(b.university));
+            }
+
+            if (filteredResults.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" class="no-results">해당하는 학과가 없습니다.</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = filteredResults.map(r => {
+                const ratioText = r.koreanRatio && r.mathRatio && r.tamguRatio
+                    ? `${(r.koreanRatio * 100).toFixed(0)}/${(r.mathRatio * 100).toFixed(0)}/${(r.tamguRatio * 100 * 2).toFixed(0)}`
+                    : '-';
+
+                const scoreMethodBadge = r.scoreMethod === '백분위' ? '📊' : r.scoreMethod === '표점/만점' ? '📌' : '📈';
+
+                const highlightClass = r.probability.order <= 2 ? 'highlight' : '';
+
+                return `
+                    <tr class="${highlightClass}">
+                        <td><strong>${r.university}</strong></td>
+                        <td>${r.department}</td>
+                        <td><span class="track-badge ${getTrackClass(r.track)}">${r.track}</span></td>
+                        <td title="${r.scoreMethod}" style="cursor: help;">${scoreMethodBadge} ${r.myScore.toFixed(2)}</td>
+                        <td class="score-cell">${r.safeScore ? r.safeScore.toFixed(1) : '-'}</td>
+                        <td class="score-cell">${r.appropriateScore ? r.appropriateScore.toFixed(1) : '-'}</td>
+                        <td class="score-cell">${r.expectedScore ? r.expectedScore.toFixed(1) : '-'}</td>
+                        <td class="score-cell">${r.challengeScore ? r.challengeScore.toFixed(1) : '-'}</td>
+                        <td><span class="${r.probability.class}">${r.probability.label}</span></td>
+                        <td>${ratioText}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // 초기화
+        document.addEventListener('DOMContentLoaded', loadData);
+
+        // 엔터 키로 분석
+        document.querySelectorAll('input').forEach(input => {
+            input.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    calculateScores();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

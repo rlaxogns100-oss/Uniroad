@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>계산 테스트</title>
+</head>
+<body>
+    <h1>환산점수 계산 테스트</h1>
+    <div id="result"></div>
+
+    <script>
+        async function test() {
+            const [univRes, formulaRes, deductRes] = await Promise.all([
+                fetch('universities.json'),
+                fetch('formulas_extracted.json'),
+                fetch('deduction_tables.json')
+            ]);
+
+            const universities = await univRes.json();
+            const formulas = await formulaRes.json();
+            const deductions = await deductRes.json();
+
+            // 연세대 시스템반도체 찾기
+            const univ = universities.find(u => u.id === '가1');
+            const formula = formulas['5'];
+            const deduction = deductions['5'];
+
+            // 계산
+            const korean = 133;
+            const math = 124;
+            const tamgu1 = 63.97;
+            const tamgu2 = 63.97;
+            const history = 1;
+
+            const koreanScore = korean * formula.koreanCoef;
+            const mathScore = math * formula.mathCoef;
+            const tamgu1Score = tamgu1 * formula.tamguCoef + formula.tamguBonus;
+            const tamgu2Score = tamgu2 * formula.tamguCoef + formula.tamguBonus;
+            const historyScore = deduction.historyDeductions[history - 1];
+
+            const total = koreanScore + mathScore + tamgu1Score + tamgu2Score + historyScore;
+
+            document.getElementById('result').innerHTML = `
+                <h2>연세대 시스템반도체공학과</h2>
+                <p>국어: ${koreanScore.toFixed(2)}</p>
+                <p>수학: ${mathScore.toFixed(2)}</p>
+                <p>탐구1: ${tamgu1Score.toFixed(2)}</p>
+                <p>탐구2: ${tamgu2Score.toFixed(2)}</p>
+                <p>한국사: ${historyScore.toFixed(2)}</p>
+                <p><strong>총점: ${total.toFixed(3)}</strong></p>
+                <p>예상컷: ${univ.expectedScore}</p>
+                <p>${Math.abs(total - 650.927) < 0.01 ? '✅ 정확!' : '❌ 오류'}</p>
+            `;
+        }
+
+        test().catch(console.error);
+    </script>
+</body>
+</html>

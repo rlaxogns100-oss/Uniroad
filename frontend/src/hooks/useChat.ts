@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
 import { useAuth } from '../contexts/AuthContext'
+import { getSessionId, getUTMParams } from '../utils/tracking'
 
 export interface ChatSession {
   id: string
@@ -62,13 +63,15 @@ export function useChat() {
       const token = localStorage.getItem('access_token')
       if (!token) return
 
+      console.log('📥 [useChat] 메시지 로드 시작:', sessionId)
       const response = await axios.get(`/api/sessions/${sessionId}/messages`, {
         headers: { Authorization: `Bearer ${token}` }
       })
 
+      console.log('✅ [useChat] 메시지 로드 완료:', response.data?.length, '개', response.data)
       setMessages(response.data || [])
     } catch (error) {
-      console.error('메시지 불러오기 실패:', error)
+      console.error('❌ [useChat] 메시지 불러오기 실패:', error)
       setMessages([])
     } finally {
       setLoading(false)
@@ -83,8 +86,21 @@ export function useChat() {
       const token = localStorage.getItem('access_token')
       if (!token) return null
 
+      // UTM 정보와 브라우저 세션 ID 가져오기
+      const browserSessionId = getSessionId()
+      const utm = getUTMParams()
+
       const response = await axios.post('/api/sessions/', 
-        { title: title.substring(0, 100) },
+        { 
+          title: title.substring(0, 100),
+          browser_session_id: browserSessionId,
+          utm_source: utm.utm_source,
+          utm_medium: utm.utm_medium,
+          utm_campaign: utm.utm_campaign,
+          utm_content: utm.utm_content,
+          utm_term: utm.utm_term,
+          referrer: document.referrer
+        },
         { headers: { Authorization: `Bearer ${token}` } }
       )
 
@@ -145,6 +161,32 @@ export function useChat() {
     }
   }, [isAuthenticated, loadSessions])
 
+  // 세션 삭제
+  const deleteSession = useCallback(async (sessionId: string) => {
+    if (!isAuthenticated) return
+
+    try {
+      const token = localStorage.getItem('access_token')
+      if (!token) return
+
+      await axios.delete(`/api/sessions/${sessionId}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      )
+
+      // 삭제된 세션이 현재 선택된 세션이면 초기화
+      if (currentSessionId === sessionId) {
+        setCurrentSessionId(null)
+        setMessages([])
+      }
+
+      // 세션 목록 새로고침
+      await loadSessions()
+    } catch (error) {
+      console.error('세션 삭제 실패:', error)
+      throw error
+    }
+  }, [isAuthenticated, currentSessionId, loadSessions])
+
   // 초기 로드
   useEffect(() => {
     if (isAuthenticated && user?.id) {
@@ -164,6 +206,7 @@ export function useChat() {
     selectSession,
     startNewChat,
     updateSessionTitle,
+    deleteSession,
   }
 }
 

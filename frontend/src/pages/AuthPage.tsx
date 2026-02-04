@@ -4,12 +4,13 @@ import { useAuth } from '../contexts/AuthContext'
 
 export default function AuthPage() {
   const navigate = useNavigate()
-  const { signIn, signUp } = useAuth()
+  const { signIn, signUp, quickSignIn } = useAuth()
   
   const [isSignUp, setIsSignUp] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [name, setName] = useState('')
+  const [quickName, setQuickName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -19,12 +20,14 @@ export default function AuthPage() {
     setLoading(true)
 
     try {
+      let user = null
       if (isSignUp) {
-        await signUp(email, password, name)
+        user = await signUp(email, password, name)
       } else {
-        await signIn(email, password)
+        user = await signIn(email, password)
       }
-      navigate('/')
+      // 관리자(김도균)는 관리자 페이지로, 그 외는 채팅 페이지로
+      navigate(user?.name === '김도균' ? '/chat/login/admin' : '/chat/login')
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -183,6 +186,33 @@ export default function AuthPage() {
               </button>
             </div>
           )}
+
+          {/* 빠른 로그인 (테스트용) */}
+          <div className="mt-8 pt-6 border-t border-gray-200">
+            <p className="text-sm text-gray-500 text-center mb-4">⚡ 빠른 로그인 (테스트용)</p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={quickName}
+                onChange={(e) => setQuickName(e.target.value)}
+                placeholder="이름만 입력"
+                className="flex-1 px-4 py-3 text-base border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (quickName.trim()) {
+                    const name = quickName.trim()
+                    quickSignIn(name)
+                    navigate(name === '김도균' ? '/chat/login/admin' : '/chat/login')
+                  }
+                }}
+                className="px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
+              >
+                입장
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* 부가 정보 */}

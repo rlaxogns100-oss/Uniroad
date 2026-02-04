@@ -1,0 +1,952 @@
+[
+  {
+    "univ": "서울대학교",
+    "major": "인문계열(지역균형)",
+    "recruit_count": 23,
+    "competition_rate": 1.61,
+    "cut_70_score": 394.2,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "정치외교학부(지역균형)",
+    "recruit_count": 10,
+    "competition_rate": 1.7,
+    "cut_70_score": 393.5,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "경제학부(지역균형)",
+    "recruit_count": 20,
+    "competition_rate": 2.2,
+    "cut_70_score": 398.9,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "인류학과(지역균형)",
+    "recruit_count": 7,
+    "competition_rate": 3.29,
+    "cut_70_score": 394.2,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "광역(공과대학)(지역균형)",
+    "recruit_count": 36,
+    "competition_rate": 2.17,
+    "cut_70_score": 402.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "약학계열(지역균형)",
+    "recruit_count": 10,
+    "competition_rate": 2.6,
+    "cut_70_score": 408.2,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "의예과(지역균형)",
+    "recruit_count": 10,
+    "competition_rate": 3.1,
+    "cut_70_score": 419.4,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "첨단융합학부(지역균형)",
+    "recruit_count": 20,
+    "competition_rate": 2.3,
+    "cut_70_score": 400.8,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "치의학과(지역균형)",
+    "recruit_count": 10,
+    "competition_rate": 1.8,
+    "cut_70_score": 411.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "인문계열(일반)",
+    "recruit_count": 66,
+    "competition_rate": 2.63,
+    "cut_70_score": 395.8,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "역사학부(일반)",
+    "recruit_count": 10,
+    "competition_rate": 3.1,
+    "cut_70_score": 393.8,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "정치외교학부(일반)",
+    "recruit_count": 15,
+    "competition_rate": 3.69,
+    "cut_70_score": 394.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "경제학부(일반)",
+    "recruit_count": 56,
+    "competition_rate": 2.43,
+    "cut_70_score": 397.3,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "사회학과(일반)",
+    "recruit_count": 10,
+    "competition_rate": 4.3,
+    "cut_70_score": 395.4,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "심리학과(일반)",
+    "recruit_count": 9,
+    "competition_rate": 3.22,
+    "cut_70_score": 395.4,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "지리학과(일반)",
+    "recruit_count": 8,
+    "competition_rate": 4.13,
+    "cut_70_score": 397.3,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "사회복지학과(일반)",
+    "recruit_count": 6,
+    "competition_rate": 2.33,
+    "cut_70_score": 391.3,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "언론정보학과(일반)",
+    "recruit_count": 7,
+    "competition_rate": 3.86,
+    "cut_70_score": 394.2,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "수리과학부(일반)",
+    "recruit_count": 9,
+    "competition_rate": 3.78,
+    "cut_70_score": 413.4,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "통계학과(일반)",
+    "recruit_count": 7,
+    "competition_rate": 5.29,
+    "cut_70_score": 405.9,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "물리·천문학부 물리학전공(일반)",
+    "recruit_count": 12,
+    "competition_rate": 4.0,
+    "cut_70_score": 403.6,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "물리·천문학부 천문학전공(일반)",
+    "recruit_count": 5,
+    "competition_rate": 4.8,
+    "cut_70_score": 401.5,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "화학부(일반)",
+    "recruit_count": 14,
+    "competition_rate": 3.86,
+    "cut_70_score": 400.8,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "생명과학부(일반)",
+    "recruit_count": 21,
+    "competition_rate": 4.1,
+    "cut_70_score": 401.5,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "지구환경과학부(일반)",
+    "recruit_count": 10,
+    "competition_rate": 4.9,
+    "cut_70_score": 399.2,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "간호대학(일반)",
+    "recruit_count": 23,
+    "competition_rate": 5.13,
+    "cut_70_score": 394.8,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "경영대학(일반)",
+    "recruit_count": 54,
+    "competition_rate": 2.61,
+    "cut_70_score": 399.8,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "건설환경공학부(일반)",
+    "recruit_count": 20,
+    "competition_rate": 5.05,
+    "cut_70_score": 399.9,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "기계공학부(일반)",
+    "recruit_count": 33,
+    "competition_rate": 3.55,
+    "cut_70_score": 399.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "재료공학부(일반)",
+    "recruit_count": 32,
+    "competition_rate": 3.28,
+    "cut_70_score": 400.6,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "전기·정보공학부(일반)",
+    "recruit_count": 53,
+    "competition_rate": 3.94,
+    "cut_70_score": 406.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "컴퓨터공학부(일반)",
+    "recruit_count": 27,
+    "competition_rate": 4.11,
+    "cut_70_score": 411.4,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "화학생물공학부(일반)",
+    "recruit_count": 27,
+    "competition_rate": 4.48,
+    "cut_70_score": 401.8,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "건축학과(일반)",
+    "recruit_count": 15,
+    "competition_rate": 4.13,
+    "cut_70_score": 399.3,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "산업공학과(일반)",
+    "recruit_count": 12,
+    "competition_rate": 5.33,
+    "cut_70_score": 402.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "에너지자원공학과(일반)",
+    "recruit_count": 4,
+    "competition_rate": 10.0,
+    "cut_70_score": 396.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "원자핵공학과(일반)",
+    "recruit_count": 7,
+    "competition_rate": 5.71,
+    "cut_70_score": 400.3,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "조선해양공학과(일반)",
+    "recruit_count": 17,
+    "competition_rate": 3.59,
+    "cut_70_score": 399.5,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "항공우주공학과(일반)",
+    "recruit_count": 12,
+    "competition_rate": 4.75,
+    "cut_70_score": 401.1,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "농경제사회학부(일반)",
+    "recruit_count": 13,
+    "competition_rate": 5.46,
+    "cut_70_score": 396.9,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "식물생산과학부(일반)",
+    "recruit_count": 25,
+    "competition_rate": 3.44,
+    "cut_70_score": 396.9,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "산림과학부(일반)",
+    "recruit_count": 18,
+    "competition_rate": 3.65,
+    "cut_70_score": 396.9,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "식품·동물생명공학부(일반)",
+    "recruit_count": 20,
+    "competition_rate": 3.4,
+    "cut_70_score": 397.7,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "응용생물화학부(일반)",
+    "recruit_count": 16,
+    "competition_rate": 5.88,
+    "cut_70_score": 397.7,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "조경·지역시스템공학부(일반)",
+    "recruit_count": 16,
+    "competition_rate": 3.94,
+    "cut_70_score": 397.8,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "바이오시스템·소재학부(일반)",
+    "recruit_count": 14,
+    "competition_rate": 6.36,
+    "cut_70_score": 400.3,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "스마트시스템과학과(일반)",
+    "recruit_count": 10,
+    "competition_rate": 4.6,
+    "cut_70_score": 398.7,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "동양화과(일반)",
+    "recruit_count": 15,
+    "competition_rate": 5.27,
+    "cut_70_score": 238.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "서양화과(일반)",
+    "recruit_count": 21,
+    "competition_rate": 5.67,
+    "cut_70_score": 252.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "조소과(일반)",
+    "recruit_count": 20,
+    "competition_rate": 6.15,
+    "cut_70_score": 236.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "공예과(일반)",
+    "recruit_count": 16,
+    "competition_rate": 6.19,
+    "cut_70_score": 257.5,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "디자인과(일반)",
+    "recruit_count": 21,
+    "competition_rate": 6.62,
+    "cut_70_score": 384.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "국어교육과(일반)",
+    "recruit_count": 10,
+    "competition_rate": 2.9,
+    "cut_70_score": 395.8,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "영어교육과(일반)",
+    "recruit_count": 8,
+    "competition_rate": 2.75,
+    "cut_70_score": 395.4,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "사회교육과(일반)",
+    "recruit_count": 6,
+    "competition_rate": 3.5,
+    "cut_70_score": 394.4,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "역사교육과(일반)",
+    "recruit_count": 8,
+    "competition_rate": 9.75,
+    "cut_70_score": 395.1,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "지리교육과(일반)",
+    "recruit_count": 7,
+    "competition_rate": 3.57,
+    "cut_70_score": 393.7,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "윤리교육과(일반)",
+    "recruit_count": 6,
+    "competition_rate": 4.83,
+    "cut_70_score": 393.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "수학교육과(일반)",
+    "recruit_count": 10,
+    "competition_rate": 4.2,
+    "cut_70_score": 396.9,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "물리교육과(일반)",
+    "recruit_count": 11,
+    "competition_rate": 2.91,
+    "cut_70_score": 398.3,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "화학교육과(일반)",
+    "recruit_count": 8,
+    "competition_rate": 4.0,
+    "cut_70_score": 398.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "생물교육과(일반)",
+    "recruit_count": 10,
+    "competition_rate": 4.3,
+    "cut_70_score": 396.2,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "지구과학교육과(일반)",
+    "recruit_count": 8,
+    "competition_rate": 6.13,
+    "cut_70_score": 396.5,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "체육교육과(일반)",
+    "recruit_count": 31,
+    "competition_rate": 3.77,
+    "cut_70_score": 387.8,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "소비자학전공(일반)",
+    "recruit_count": 8,
+    "competition_rate": 5.13,
+    "cut_70_score": 393.4,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "아동가족학전공(일반)",
+    "recruit_count": 8,
+    "competition_rate": 5.5,
+    "cut_70_score": 394.5,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "식품영양학과(일반)",
+    "recruit_count": 14,
+    "competition_rate": 3.5,
+    "cut_70_score": 396.5,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "의류학과(일반)",
+    "recruit_count": 10,
+    "competition_rate": 4.3,
+    "cut_70_score": 395.7,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "수의예과(일반)",
+    "recruit_count": 15,
+    "competition_rate": 4.93,
+    "cut_70_score": 407.7,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "약학계열(일반)",
+    "recruit_count": 10,
+    "competition_rate": 5.0,
+    "cut_70_score": 410.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "성악과(일반)",
+    "recruit_count": 26,
+    "competition_rate": 6.38,
+    "cut_70_score": 179.2,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "작곡과(일반)",
+    "recruit_count": 11,
+    "competition_rate": 4.18,
+    "cut_70_score": 191.5,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "음악학과(일반)",
+    "recruit_count": 8,
+    "competition_rate": 4.0,
+    "cut_70_score": 245.2,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "의예과(일반)",
+    "recruit_count": 29,
+    "competition_rate": 3.55,
+    "cut_70_score": 421.6,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "첨단융합학부(일반)",
+    "recruit_count": 54,
+    "competition_rate": 3.81,
+    "cut_70_score": 401.7,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "광역(학부대학)(일반)",
+    "recruit_count": 36,
+    "competition_rate": 4.47,
+    "cut_70_score": 401.8,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "자유전공학부(일반)",
+    "recruit_count": 52,
+    "competition_rate": 3.13,
+    "cut_70_score": 401.2,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "치의학과(일반)",
+    "recruit_count": 11,
+    "competition_rate": 4.82,
+    "cut_70_score": 415.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "인문대학(농어촌)",
+    "recruit_count": 6,
+    "competition_rate": 3.0,
+    "cut_70_score": 390.7,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "사회과학대학(농어촌)",
+    "recruit_count": 7,
+    "competition_rate": 2.14,
+    "cut_70_score": 393.8,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "자연과학대학(농어촌)",
+    "recruit_count": 7,
+    "competition_rate": 2.86,
+    "cut_70_score": 393.4,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "공과대학(농어촌)",
+    "recruit_count": 17,
+    "competition_rate": 2.76,
+    "cut_70_score": 393.1,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "농업생명과학대학(농어촌)",
+    "recruit_count": 12,
+    "competition_rate": 2.17,
+    "cut_70_score": 386.5,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "사범대학(체육제외)(농어촌)",
+    "recruit_count": 8,
+    "competition_rate": 2.25,
+    "cut_70_score": 380.2,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "수의과대학(농어촌)",
+    "recruit_count": 4,
+    "competition_rate": 3.5,
+    "cut_70_score": 395.3,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "첨단융합학부(농어촌)",
+    "recruit_count": 5,
+    "competition_rate": 2.4,
+    "cut_70_score": 392.7,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "인문대학(저소득)",
+    "recruit_count": 7,
+    "competition_rate": 2.29,
+    "cut_70_score": 387.9,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "사회과학대학(저소득)",
+    "recruit_count": 8,
+    "competition_rate": 1.88,
+    "cut_70_score": 373.6,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "자연과학대학(저소득)",
+    "recruit_count": 7,
+    "competition_rate": 1.86,
+    "cut_70_score": 376.8,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "공과대학(저소득)",
+    "recruit_count": 17,
+    "competition_rate": 1.59,
+    "cut_70_score": 381.6,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "농업생명과학대학(저소득)",
+    "recruit_count": 12,
+    "competition_rate": 1.58,
+    "cut_70_score": 370.8,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "사범대학(체육제외)(저소득)",
+    "recruit_count": 8,
+    "competition_rate": 1.88,
+    "cut_70_score": 364.6,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "인문"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "수의과대학(저소득)",
+    "recruit_count": 4,
+    "competition_rate": 2.0,
+    "cut_70_score": 383.1,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "약학대학(저소득)",
+    "recruit_count": 5,
+    "competition_rate": 3.0,
+    "cut_70_score": 388.0,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  },
+  {
+    "univ": "서울대학교",
+    "major": "첨단융합학부(저소득)",
+    "recruit_count": 5,
+    "competition_rate": 1.8,
+    "cut_70_score": 379.1,
+    "total_scale": 600,
+    "type": "일반",
+    "field": "자연"
+  }
+]

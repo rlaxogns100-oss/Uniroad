@@ -1,475 +1,595 @@
-import React from 'react'
-
-interface UsedChunk {
-  id: string
-  content: string
-  title: string
-  source: string
-  file_url: string
-  metadata?: Record<string, any>
-}
+import { useState, useEffect } from 'react'
 
 interface ChatMessageProps {
   message: string
   isUser: boolean
   sources?: string[]
-  source_urls?: string[]
-  used_chunks?: UsedChunk[]
+  source_urls?: string[]  // 다운로드 URL (기존 방식용)
+  userQuery?: string  // AI 답변일 때 연결된 사용자 질문
+  isStreaming?: boolean  // 스트리밍 중인지 여부
+  onRegenerate?: () => void  // 재생성 콜백
+  imageUrl?: string  // 이미지 첨부 시 미리보기 URL
+  showLoginPrompt?: boolean  // 로그인 유도 메시지 표시 여부
+  onLoginClick?: () => void  // 로그인 버튼 클릭 콜백
 }
 
-export default function ChatMessage({ message, isUser, sources, source_urls, used_chunks }: ChatMessageProps) {
+export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming, onRegenerate, imageUrl, showLoginPrompt, onLoginClick }: ChatMessageProps) {
+  const [showFactCheck, setShowFactCheck] = useState(false)
+  const [showGlow, setShowGlow] = useState(false)
+  const [liked, setLiked] = useState<boolean | null>(null)  // null: 선택 안함, true: 좋아요, false: 싫어요
+  
+  // AI 답변 스트리밍이 완료되면 글로우 효과 트리거
+  useEffect(() => {
+    if (!isUser && !isStreaming && message) {
+      // 스트리밍 완료 후 짧은 딜레이 후 글로우 시작
+      const timer = setTimeout(() => {
+        setShowGlow(true)
+        // 3초 후 글로우 효과 제거 (1.5초 × 2회 반복)
+        setTimeout(() => setShowGlow(false), 3000)
+      }, 200)
+      
+      return () => clearTimeout(timer)
+    }
+  }, [isUser, isStreaming, message])
+  
+  // ChatGPT에서 같은 질문하기
+  const openChatGPT = () => {
+    if (userQuery) {
+      const encodedQuery = encodeURIComponent(userQuery)
+      window.open(`https://chatgpt.com/?q=${encodedQuery}`, '_blank')
+    }
+  }
+  
+  // 후처리된 메시지 생성 (섹션 마크, 마크다운, 대괄호 제거)
+  const getCleanedMessage = () => {
+    return message
+      .replace(/===SECTION_START(?::\w+)?===\s*/g, '')  // 섹션 마크 제거
+      .replace(/===SECTION_END===\s*/g, '')
+      .replace(/<cite[^>]*>([\s\S]*?)<\/cite>/g, '$1')  // cite 태그 제거
+      .replace(/\*\*([^*]+)\*\*/g, '$1')  // **볼드** → 볼드
+      .replace(/【([^】]+)】/g, '$1')  // 【타이틀】 → 타이틀
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')  // [텍스트](링크) → 텍스트
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  }
+  
+  // 복사하기
+  const handleCopy = () => {
+    navigator.clipboard.writeText(getCleanedMessage())
+    alert('답변이 복사되었습니다.')
+  }
+  
+  // 좋아요
+  const handleLike = () => {
+    setLiked(liked === true ? null : true)
+  }
+  
+  // 싫어요
+  const handleDislike = () => {
+    setLiked(liked === false ? null : false)
+  }
+  
+  // 공유하기
+  const handleShare = () => {
+    if (navigator.share) {
+      navigator.share({
+        title: '유니로드 답변',
+        text: getCleanedMessage(),
+      }).catch(() => {})
+    } else {
+      handleCopy()
+    }
+  }
+  
+  // 재생성
+  const handleRegenerate = () => {
+    if (onRegenerate) {
+      onRegenerate()
+    }
+  }
+  // **텍스트** 형식을 볼드체로 파싱하는 헬퍼 함수
+  const parseBold = (text: string | React.ReactNode): React.ReactNode => {
+    if (typeof text !== 'string') return text
+
+    const parts: React.ReactNode[] = []
+    const boldRegex = /\*\*([^*]+)\*\*/g
+    let lastIndex = 0
+    let match
+    let keyIndex = 0
+
+    while ((match = boldRegex.exec(text)) !== null) {
+      // 볼드 이전 텍스트
+      if (match.index > lastIndex) {
+        parts.push(
+          <span key={`text-${keyIndex++}`}>
+            {text.substring(lastIndex, match.index)}
+          </span>
+        )
+      }
+
+      // 볼드 부분
+      parts.push(
+        <strong key={`bold-${keyIndex++}`} className="font-semibold">
+          {match[1]}
+        </strong>
+      )
+
+      lastIndex = boldRegex.lastIndex
+    }
+
+    // 마지막 남은 텍스트
+    if (lastIndex < text.length) {
+      parts.push(
+        <span key={`text-${keyIndex++}`}>
+          {text.substring(lastIndex)}
+        </span>
+      )
+    }
+
+    return parts.length > 0 ? parts : text
+  }
+
+  // 【】로 감싸진 타이틀을 파싱하는 헬퍼 함수
+  const parseTitles = (text: string) => {
+    const parts: React.ReactNode[] = []
+    const titleRegex = /【([^】]+)】/g
+    let lastIndex = 0
+    let match
+    let keyIndex = 0
+
+    while ((match = titleRegex.exec(text)) !== null) {
+      // 타이틀 이전 텍스트 (볼드 파싱 적용)
+      if (match.index > lastIndex) {
+        parts.push(
+          <span key={`text-${keyIndex++}`}>
+            {parseBold(text.substring(lastIndex, match.index))}
+          </span>
+        )
+      }
+
+      // 타이틀 부분 (18.5px, 볼드, 대괄호 제거)
+      parts.push(
+        <span key={`title-${keyIndex++}`} className="text-[18.5px] font-bold">
+          {match[1]}
+        </span>
+      )
+
+      lastIndex = titleRegex.lastIndex
+    }
+
+    // 마지막 남은 텍스트 (볼드 파싱 적용)
+    if (lastIndex < text.length) {
+      parts.push(
+        <span key={`text-${keyIndex++}`}>
+          {parseBold(text.substring(lastIndex))}
+        </span>
+      )
+    }
+
+    return parts.length > 0 ? parts : parseBold(text)
+  }
+
+  // 불릿 포인트 라인을 감지해서 들여쓰기 스타일 적용
+  const wrapBulletLines = (content: React.ReactNode): React.ReactNode => {
+    if (typeof content === 'string') {
+      const lines = content.split('\n')
+      return lines.map((line, idx) => {
+        const isBullet = /^[\s]*[•\-\*]\s/.test(line)
+        if (isBullet) {
+          return (
+            <span key={idx} className="bullet-line">
+              {line}
+              {idx < lines.length - 1 && '\n'}
+            </span>
+          )
+        }
+        return idx < lines.length - 1 ? line + '\n' : line
+      })
+    }
+
+    // React 노드 배열인 경우
+    if (Array.isArray(content)) {
+      return content.map((node, idx) => {
+        if (typeof node === 'string') {
+          return wrapBulletLines(node)
+        }
+        return node
+      })
+    }
+
+    return content
+  }
+
+  // ___DIVIDER___ 마커를 <hr> 구분선으로 변환
+  const addSectionDividers = (content: React.ReactNode): React.ReactNode => {
+    if (typeof content === 'string') {
+      if (!content.includes('___DIVIDER___')) return content
+
+      const parts = content.split('___DIVIDER___')
+      const result: React.ReactNode[] = []
+
+      parts.forEach((part, idx) => {
+        if (idx > 0) {
+          result.push(
+            <hr
+              key={`divider-${idx}`}
+              className="hidden sm:block"
+              style={{
+                border: 'none',
+                borderTop: '1.2px solid #dddddd',
+                marginTop: '2.0em',
+                marginBottom: '0.1em'
+              }}
+            />
+          )
+        }
+        if (part) {
+          result.push(<span key={`section-${idx}`}>{part}</span>)
+        }
+      })
+
+      return result
+    }
+
+    // 배열인 경우 각 요소 재귀 처리
+    if (Array.isArray(content)) {
+      const result: React.ReactNode[] = []
+      content.forEach((node, idx) => {
+        const processed = addSectionDividers(node)
+        if (Array.isArray(processed)) {
+          result.push(...processed)
+        } else {
+          result.push(processed)
+        }
+      })
+      return result
+    }
+
+    // React 요소의 children 처리
+    if (content && typeof content === 'object' && 'props' in content) {
+      const element = content as React.ReactElement
+      if (element.props && element.props.children) {
+        const processedChildren = addSectionDividers(element.props.children)
+        // children이 변경된 경우 새 요소 반환
+        if (processedChildren !== element.props.children) {
+          return { ...element, props: { ...element.props, children: processedChildren } }
+        }
+      }
+    }
+
+    return content
+  }
+
+  // cite 태그 개수 세기
+  const countCiteTags = () => {
+    const newCiteRegex = /<cite\s+data-source="([^"]*)"(?:\s+data-url="([^"]*)")?\s*>([\s\S]*?)<\/cite>/g
+    const oldCiteRegex = /<cite>(.*?)<\/cite>/g
+    
+    const newMatches = message.match(newCiteRegex)
+    const oldMatches = message.match(oldCiteRegex)
+    
+    return (newMatches?.length || 0) + (oldMatches?.length || 0)
+  }
+
+  // <cite> 태그를 파싱해서 희미한 밑줄 + 출처 표시
   const renderMessage = () => {
     if (isUser) {
       return <div className="whitespace-pre-wrap">{message}</div>
     }
 
-    // 메시지 파싱 및 렌더링
-    return (
-      <div className="leading-relaxed">
-        {parseAndRenderMessage(message, sources, source_urls)}
-      </div>
-    )
+    // 1. 섹션 경계를 구분선 마커로 변환 (===SECTION_END=== ... ===SECTION_START=== → ___DIVIDER___)
+    let cleanedMessage = message.replace(/===SECTION_END===\s*===SECTION_START(?::\w+)?===/g, '___DIVIDER___')
+
+    // 남은 섹션 마커 제거 (맨 처음/끝에 있는 것들)
+    cleanedMessage = cleanedMessage.replace(/===SECTION_(START|END)(:\w+)?===/g, '')
+
+    // 연속 줄바꿈 정리
+    cleanedMessage = cleanedMessage.replace(/\n{3,}/g, '\n\n').trim()
+
+    // JSON 형식인지 확인 ({ 로 시작하고 } 로 끝남)
+    const trimmed = cleanedMessage.trim()
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        // JSON 파싱 가능한지 확인
+        const parsed = JSON.parse(trimmed)
+        // 파싱 성공하면 보기 좋게 표시
+        const formatted = JSON.stringify(parsed, null, 2)
+        return (
+          <pre className="whitespace-pre-wrap font-mono text-sm bg-gray-50 p-3 rounded-lg overflow-x-auto">
+            {formatted}
+          </pre>
+        )
+      } catch {
+        // JSON 아니면 일반 처리
+      }
+    }
+
+    // 2. 새로운 cite 형식 파싱: <cite data-source="..." data-url="...">...</cite>
+    const parts: React.ReactNode[] = []
+    let lastIndex = 0
+    
+    // 새로운 형식: <cite data-source="..." data-url="...">...</cite>
+    const newCiteRegex = /<cite\s+data-source="([^"]*)"(?:\s+data-url="([^"]*)")?\s*>([\s\S]*?)<\/cite>/g
+    // 기존 형식: <cite>...</cite>
+    const oldCiteRegex = /<cite>(.*?)<\/cite>/g
+    
+    // 새 형식이 있는지 먼저 확인
+    const hasNewFormat = newCiteRegex.test(cleanedMessage)
+    newCiteRegex.lastIndex = 0 // reset regex
+    
+    if (hasNewFormat) {
+      // 새로운 형식으로 파싱
+      let match
+      while ((match = newCiteRegex.exec(cleanedMessage)) !== null) {
+        // cite 이전 텍스트
+        if (match.index > lastIndex) {
+          const textBefore = cleanedMessage.substring(lastIndex, match.index)
+          parts.push(
+            <span key={`text-${lastIndex}`}>
+              {parseTitles(textBefore)}
+            </span>
+          )
+        }
+
+        const sourceText = match[1]  // data-source 값 (문서명 + 페이지)
+        const sourceUrl = match[2]   // data-url 값 (PDF URL)
+        const citedContent = match[3] // 인용 내용
+
+        parts.push(
+          <span key={`cite-${match.index}`}>
+            <span className={showFactCheck ? "bg-yellow-200/60 px-0.5" : ""}>
+              {parseBold(citedContent)}
+            </span>
+            {showFactCheck && (sourceUrl && sourceUrl.length > 0 ? (
+              <a
+                href={sourceUrl}
+                download
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-600 rounded-md whitespace-nowrap hover:bg-blue-100 cursor-pointer transition-colors ml-1"
+                title="클릭하면 원본 PDF를 다운로드합니다"
+              >
+                📄 {sourceText}
+              </a>
+            ) : sourceText ? (
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-600 rounded-md whitespace-nowrap ml-1">
+                📄 {sourceText}
+              </span>
+            ) : null)}
+          </span>
+        )
+
+        lastIndex = newCiteRegex.lastIndex
+      }
+
+      // 마지막 남은 텍스트
+      if (lastIndex < cleanedMessage.length) {
+        const remainingText = cleanedMessage.substring(lastIndex)
+        parts.push(
+          <span key={`text-${lastIndex}`}>
+            {parseTitles(remainingText)}
+          </span>
+        )
+      }
+
+      const content = wrapBulletLines(parts.length > 0 ? parts : parseTitles(cleanedMessage))
+      return <div className="whitespace-pre-wrap">{addSectionDividers(content)}</div>
+    }
+
+    // 기존 형식 처리 (하위 호환성)
+    const citeMatches = cleanedMessage.match(oldCiteRegex)
+    const citeCount = citeMatches ? citeMatches.length : 0
+    const sourcesCount = sources ? sources.length : 0
+
+    // cite 태그와 sources가 매칭되지 않으면 cite 무시하고 일반 텍스트로 표시
+    if (citeCount > 0 && sourcesCount === 0) {
+      // cite 태그 제거하고 일반 텍스트로
+      const finalClean = cleanedMessage.replace(/<\/?cite>/g, '')
+      const content = wrapBulletLines(parseTitles(finalClean))
+      return <div className="whitespace-pre-wrap">{addSectionDividers(content)}</div>
+    }
+
+    // 기존 <cite>...</cite> 패턴 찾기
+    let match
+    let citeIndex = 0
+
+    while ((match = oldCiteRegex.exec(cleanedMessage)) !== null) {
+      // <cite> 이전 텍스트
+      if (match.index > lastIndex) {
+        const textBefore = cleanedMessage.substring(lastIndex, match.index)
+        parts.push(
+          <span key={`text-${lastIndex}`}>
+            {parseTitles(textBefore)}
+          </span>
+        )
+      }
+
+      // 출처가 있는지 확인
+      const sourceText = sources && citeIndex < sources.length ? sources[citeIndex] : null
+      const sourceUrl = source_urls && citeIndex < source_urls.length ? source_urls[citeIndex] : null
+      
+      if (sourceText) {
+        // 출처가 있으면 형광펜 + 다운로드 가능한 출처 버블
+        parts.push(
+          <span key={`cite-${match.index}`}>
+            <span className={showFactCheck ? "bg-yellow-200/60 px-0.5" : ""}>
+              {parseBold(match[1])}
+            </span>
+            {showFactCheck && (sourceUrl ? (
+              <a
+                href={sourceUrl}
+                download
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-600 rounded-md whitespace-nowrap hover:bg-blue-100 cursor-pointer transition-colors ml-1"
+                title="클릭하면 원본 PDF를 다운로드합니다"
+              >
+                {sourceText}
+              </a>
+            ) : (
+              <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] bg-blue-50 text-blue-600 rounded-md whitespace-nowrap ml-1">
+                {sourceText}
+              </span>
+            ))}
+          </span>
+        )
+      } else {
+        // 출처가 없으면 일반 텍스트로
+        parts.push(
+          <span key={`cite-${match.index}`}>
+            {parseTitles(match[1])}
+          </span>
+        )
+      }
+
+      citeIndex++
+      lastIndex = oldCiteRegex.lastIndex
+    }
+
+    // 마지막 남은 텍스트
+    if (lastIndex < cleanedMessage.length) {
+      const remainingText = cleanedMessage.substring(lastIndex)
+      parts.push(
+        <span key={`text-${lastIndex}`}>
+          {parseTitles(remainingText)}
+        </span>
+      )
+    }
+
+    const content = wrapBulletLines(parts.length > 0 ? parts : parseTitles(cleanedMessage))
+    return <div className="whitespace-pre-wrap">{addSectionDividers(content)}</div>
+  }
+
+  // 메시지에서 [이미지 첨부] 태그 제거
+  const getDisplayMessage = () => {
+    return message.replace(/^\[이미지 첨부\]\s*/, '')
   }
 
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-6`}>
-      <div className="flex flex-col max-w-[85%] sm:max-w-[75%]">
-        <div
-          className={`rounded-2xl px-4 py-3 text-sm sm:text-base ${
-            isUser
-              ? 'bg-blue-600 text-white shadow-sm'
-              : 'bg-white text-gray-900 shadow-sm'
-          }`}
-        >
-          {renderMessage()}
-        </div>
-        
-        {/* 팩트 체크 섹션 - 접을 수 있게 */}
-        {!isUser && used_chunks && used_chunks.length > 0 && (
-          <details className="mt-4 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden group">
-            {/* 헤더 (summary) */}
-            <summary className="bg-gray-50 px-4 py-3 border-b border-gray-200 cursor-pointer list-none">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div className="w-5 h-5 rounded border-2 border-gray-400 flex items-center justify-center flex-shrink-0 group-open:bg-blue-100 group-open:border-blue-500 transition-colors">
-                    <svg className="w-3 h-3 text-gray-600 group-open:text-blue-600 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-semibold text-gray-900">팩트 체크</h3>
-                    <p className="text-xs text-gray-500 mt-0.5">답변에 인용된 부분이에요</p>
-                  </div>
-                </div>
-                <svg 
-                  className="w-5 h-5 text-gray-400 group-open:rotate-180 transition-transform flex-shrink-0" 
-                  fill="none" 
-                  stroke="currentColor" 
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
-              </div>
-            </summary>
-            
-            {/* 청크 목록 (접혔을 때는 보이지 않음) */}
-            <div className="divide-y divide-gray-100">
-              {used_chunks.map((chunk, index) => {
-                const handleDownload = () => {
-                  // 청크 내용을 텍스트 파일로 다운로드
-                  const content = `제목: ${chunk.title || '문서 내용'}\n출처: ${chunk.source || ''}\n\n${chunk.content}`
-                  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
-                  const url = URL.createObjectURL(blob)
-                  const link = document.createElement('a')
-                  link.href = url
-                  link.download = `${chunk.title || '문서'}_${index + 1}.txt`
-                  document.body.appendChild(link)
-                  link.click()
-                  document.body.removeChild(link)
-                  URL.revokeObjectURL(url)
-                }
-
-                return (
-                  <div key={chunk.id || index} className="px-4 py-4">
-                    {/* 출처 정보 */}
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="w-6 h-6 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
-                        <span className="text-xs font-bold text-blue-700">
-                          {chunk.source ? chunk.source.charAt(0) : chunk.title ? chunk.title.charAt(0) : '문'}
-                        </span>
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-bold text-gray-900 truncate">
-                          {chunk.title || '문서 내용'}
-                        </p>
-                        {chunk.source && (
-                          <p className="text-xs text-gray-500 truncate">{chunk.source}</p>
-                        )}
-                      </div>
-                    </div>
-                    
-                    {/* 청크 내용 */}
-                    <div className="text-xs text-gray-700 whitespace-pre-wrap leading-relaxed mb-3">
-                      {chunk.content}
-                    </div>
-                    
-                    {/* 자료 다운 버튼 */}
-                    <button
-                      onClick={handleDownload}
-                      className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-lg border border-gray-200 transition-colors"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                      </svg>
-                      자료 다운
-                    </button>
-                  </div>
-                )
-              })}
+    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
+      {isUser ? (
+        // 사용자 메시지: 말풍선 스타일 유지
+        <div className="max-w-[70%]">
+          {/* 이미지가 있으면 이미지 먼저 표시 */}
+          {imageUrl && (
+            <div className="mb-2 flex justify-end">
+              <img 
+                src={imageUrl} 
+                alt="첨부된 이미지" 
+                className="max-w-full max-h-64 rounded-lg border border-gray-200 shadow-sm"
+              />
             </div>
-          </details>
-        )}
-      </div>
+          )}
+          <div className="rounded-2xl px-4 py-3 text-gray-800" style={{ backgroundColor: '#F1F5FB' }}>
+            <div className="whitespace-pre-wrap">{getDisplayMessage()}</div>
+          </div>
+        </div>
+      ) : (
+        // AI 답변: Gemini 스타일 (말풍선 없이, 폰트/간격 조정)
+        <div className="w-full">
+          <div className="text-gray-900 ai-response mb-4">
+            {renderMessage()}
+          </div>
+          
+          {/* 로그인 유도 버튼 - Rate Limit 초과 시 */}
+          {showLoginPrompt && (
+            <button
+              onClick={onLoginClick}
+              className="mt-4 px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+              </svg>
+              로그인하기
+            </button>
+          )}
+          
+          {/* 버튼 영역 - 스트리밍 완료 후에만 표시, 로그인 유도 시 숨김 */}
+          {!isStreaming && !showLoginPrompt && (
+          <div className="flex gap-1 mt-3 items-center">
+            {/* 복사 */}
+            <button
+              onClick={handleCopy}
+              className="custom-tooltip p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+              data-tooltip="복사"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+            </button>
+            
+            {/* 좋아요 */}
+            <button
+              onClick={handleLike}
+              className={`custom-tooltip p-2 rounded-lg transition-colors ${
+                liked === true 
+                  ? 'text-blue-600 bg-blue-100 hover:bg-blue-200' 
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
+              }`}
+              data-tooltip="좋아요"
+            >
+              <svg className="w-5 h-5" fill={liked === true ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
+              </svg>
+            </button>
+            
+            {/* 싫어요 */}
+            <button
+              onClick={handleDislike}
+              className={`custom-tooltip p-2 rounded-lg transition-colors ${
+                liked === false 
+                  ? 'text-red-600 bg-red-100 hover:bg-red-200' 
+                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
+              }`}
+              data-tooltip="싫어요"
+            >
+              <svg className="w-5 h-5" fill={liked === false ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
+              </svg>
+            </button>
+            
+            {/* 재생성 */}
+            <button
+              onClick={handleRegenerate}
+              className="custom-tooltip p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+              data-tooltip="재생성"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+            
+            {/* GPT (아이콘만) */}
+            <button
+              onClick={openChatGPT}
+              disabled={!userQuery}
+              className="custom-tooltip p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              data-tooltip="ChatGPT 답변 비교하기"
+            >
+              <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M22.282 9.821a5.985 5.985 0 0 0-.516-4.91 6.046 6.046 0 0 0-6.51-2.9A6.065 6.065 0 0 0 4.981 4.18a5.985 5.985 0 0 0-3.998 2.9 6.046 6.046 0 0 0 .743 7.097 5.98 5.98 0 0 0 .51 4.911 6.051 6.051 0 0 0 6.515 2.9A5.985 5.985 0 0 0 13.26 24a6.056 6.056 0 0 0 5.772-4.206 5.99 5.99 0 0 0 3.997-2.9 6.056 6.056 0 0 0-.747-7.073zM13.26 22.43a4.476 4.476 0 0 1-2.876-1.04l.141-.081 4.779-2.758a.795.795 0 0 0 .392-.681v-6.737l2.02 1.168a.071.071 0 0 1 .038.052v5.583a4.504 4.504 0 0 1-4.494 4.494zM3.6 18.304a4.47 4.47 0 0 1-.535-3.014l.142.085 4.783 2.759a.771.771 0 0 0 .78 0l5.843-3.369v2.332a.08.08 0 0 1-.033.062L9.74 19.95a4.5 4.5 0 0 1-6.14-1.646zM2.34 7.896a4.485 4.485 0 0 1 2.366-1.973V11.6a.766.766 0 0 0 .388.676l5.815 3.355-2.02 1.168a.076.076 0 0 1-.071 0l-4.83-2.786A4.504 4.504 0 0 1 2.34 7.872zm16.597 3.855l-5.833-3.387L15.119 7.2a.076.076 0 0 1 .071 0l4.83 2.791a4.494 4.494 0 0 1-.676 8.105v-5.678a.79.79 0 0 0-.407-.667zm2.01-3.023l-.141-.085-4.774-2.782a.776.776 0 0 0-.785 0L9.409 9.23V6.897a.066.066 0 0 1 .028-.061l4.83-2.787a4.5 4.5 0 0 1 6.68 4.66zm-12.64 4.135l-2.02-1.164a.08.08 0 0 1-.038-.057V6.075a4.5 4.5 0 0 1 7.375-3.453l-.142.08L8.704 5.46a.795.795 0 0 0-.393.681zm1.097-2.365l2.602-1.5 2.607 1.5v2.999l-2.597 1.5-2.607-1.5z"/>
+              </svg>
+            </button>
+            
+            {/* 출처 확인하기 (맨 오른쪽) */}
+            <button
+              onClick={() => setShowFactCheck(!showFactCheck)}
+              className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                showFactCheck
+                  ? 'bg-green-100 text-green-700 hover:bg-green-200'
+                  : 'text-gray-500 hover:bg-gray-50'
+              } ${showGlow ? 'animate-pulse-glow' : ''}`}
+            >
+              <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              출처 확인하기{countCiteTags() > 0 && `(${countCiteTags()})`}
+            </button>
+          </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
 
-/**
- * 마크다운 표 파싱 및 렌더링
- * 텍스트에서 표를 찾아 위치와 함께 반환
- */
-function findAndParseTable(text: string, keyPrefix: string): { 
-  found: boolean
-  beforeTable: string
-  table?: JSX.Element
-  afterTable: string 
-} {
-  const lines = text.split('\n')
-  
-  // 표 시작 위치 찾기
-  let tableStartIdx = -1
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].trim().match(/^\|.+\|$/)) {
-      // 다음 줄이 구분선인지 확인
-      if (i + 1 < lines.length && lines[i + 1].trim().match(/^\|[-:\s|]+\|$/)) {
-        tableStartIdx = i
-        break
-      }
-    }
-  }
-  
-  if (tableStartIdx === -1) {
-    return { found: false, beforeTable: text, afterTable: '' }
-  }
-  
-  // 표 줄들 수집
-  const tableLines: string[] = []
-  let tableEndIdx = tableStartIdx
-  
-  for (let i = tableStartIdx; i < lines.length; i++) {
-    if (lines[i].trim().match(/^\|.+\|$/) || lines[i].trim().match(/^\|[-:\s|]+\|$/)) {
-      tableLines.push(lines[i])
-      tableEndIdx = i
-    } else {
-      break
-    }
-  }
-  
-  if (tableLines.length < 3) {  // 헤더 + 구분선 + 최소 1개 데이터
-    return { found: false, beforeTable: text, afterTable: '' }
-  }
-  
-  // 헤더 파싱
-  const headerLine = tableLines[0]
-  const headers = headerLine.split('|').filter(h => h.trim()).map(h => h.trim())
-  
-  // 데이터 행 파싱 (구분선 제외)
-  const rows = tableLines.slice(2).map(line => 
-    line.split('|').filter(c => c.trim() !== '' || c.includes(' ')).map(cell => cell.trim())
-  ).filter(row => row.length > 0)
-  
-  // HTML 테이블 생성
-  const table = (
-    <table key={keyPrefix} className="w-full my-2 border-collapse border border-gray-300 text-sm">
-      <thead className="bg-gray-100">
-        <tr>
-          {headers.map((header, idx) => (
-            <th key={idx} className="border border-gray-300 px-2 py-1.5 text-left font-semibold text-gray-800 whitespace-nowrap">
-              {header}
-            </th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row, rowIdx) => (
-          <tr key={rowIdx} className={rowIdx % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
-            {row.map((cell, cellIdx) => (
-              <td key={cellIdx} className="border border-gray-300 px-2 py-1.5 text-gray-700">
-                {cell}
-              </td>
-            ))}
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  )
-  
-  const beforeTable = lines.slice(0, tableStartIdx).join('\n')
-  const afterTable = lines.slice(tableEndIdx + 1).join('\n')
-  
-  return { found: true, beforeTable, table, afterTable }
-}
-
-/**
- * 메시지 파싱 및 렌더링
- * - 【타이틀】 → 볼드 타이틀
- * - <cite data-source="..." data-url="...">...</cite> → 밑줄 (출처는 문단 끝에 모음)
- * - <cite>...</cite> (기존 형식) → 밑줄 (출처는 문단 끝에 모음)
- * - | ... | 표 형식 → HTML 테이블
- */
-// 텍스트를 줄바꿈 포함하여 렌더링
-// • 로 시작하는 소분류 항목은 위아래 마진(mb-4) 적용
-function renderTextWithBreaks(text: string, keyPrefix: string): React.ReactNode[] {
-  // 연속 줄바꿈을 하나로 정리
-  const cleanedText = text.replace(/\n\s*\n/g, '\n').trim()
-  if (!cleanedText) return []
-  
-  const lines = cleanedText.split('\n')
-  return lines.map((line, idx) => {
-    const trimmedLine = line.trim()
-    const isBulletPoint = trimmedLine.startsWith('•') || trimmedLine.startsWith('-')
-    
-    if (isBulletPoint) {
-      // 소분류 항목: 위아래 마진 적용
-      return (
-        <div key={`${keyPrefix}-${idx}`} className="my-4">
-          {line}
-        </div>
-      )
-    }
-    
-    // 일반 텍스트
-    return (
-      <React.Fragment key={`${keyPrefix}-${idx}`}>
-        {line}
-        {idx < lines.length - 1 && <br />}
-      </React.Fragment>
-    )
-  })
-}
-
-function parseAndRenderMessage(
-  message: string,
-  sources?: string[],
-  source_urls?: string[]
-): React.ReactNode[] {
-  const result: React.ReactNode[] = []
-  
-  // 메시지를 섹션 단위로 분리 (빈 줄 2개 기준)
-  const paragraphs = message.split(/\n\n+/).filter(p => p.trim())
-  
-  paragraphs.forEach((paragraph, paragraphIndex) => {
-    const paragraphResult: React.ReactNode[] = []
-    const paragraphSources: Array<{ text: string; url: string }> = []
-    let remaining = paragraph
-    let keyIndex = 0
-    let simpleCiteIndex = 0
-
-    while (remaining.length > 0) {
-      // 표 패턴 먼저 체크
-      const tableResult = findAndParseTable(remaining, `table-${paragraphIndex}-${keyIndex}`)
-      if (tableResult.found && tableResult.table) {
-        // 표 이전 텍스트가 있으면 먼저 처리
-        if (tableResult.beforeTable.trim()) {
-          const textNodes = renderTextWithBreaks(tableResult.beforeTable.trim(), `tbl-before-${keyIndex}`)
-          if (textNodes.length > 0) {
-            paragraphResult.push(<span key={`text-${keyIndex++}`}>{textNodes}</span>)
-          }
-        }
-        paragraphResult.push(tableResult.table)
-        keyIndex++
-        remaining = tableResult.afterTable
-        continue
-      }
-
-      // 【타이틀】 패턴 찾기
-      const titleMatch = remaining.match(/【([^】]+)】/)
-      
-      // <cite data-source="..." data-url="...">...</cite> 패턴 찾기
-      const dataCiteMatch = remaining.match(/<cite\s+data-source="([^"]*?)"\s+data-url="([^"]*?)">([\s\S]*?)<\/cite>/)
-      
-      // <cite>...</cite> (기존 형식) 패턴 찾기
-      const simpleCiteMatch = remaining.match(/<cite>([\s\S]*?)<\/cite>/)
-
-      // 어떤 패턴이 먼저 나오는지 확인
-      const matches = [
-        { type: 'title', match: titleMatch, index: titleMatch?.index ?? Infinity },
-        { type: 'dataCite', match: dataCiteMatch, index: dataCiteMatch?.index ?? Infinity },
-        { type: 'simpleCite', match: simpleCiteMatch, index: simpleCiteMatch?.index ?? Infinity },
-      ].filter(m => m.match !== null)
-        .sort((a, b) => a.index - b.index)
-
-      if (matches.length === 0) {
-        // 더 이상 패턴 없음 - 나머지 텍스트 추가 (줄바꿈 처리)
-        const textNodes = renderTextWithBreaks(remaining, `text-${keyIndex}`)
-        if (textNodes.length > 0) {
-          paragraphResult.push(<span key={`text-${keyIndex++}`}>{textNodes}</span>)
-        }
-        break
-      }
-
-      const firstMatch = matches[0]
-      const matchIndex = firstMatch.index
-
-      // 패턴 이전 텍스트 추가 (타이틀 앞 텍스트는 trim)
-      if (matchIndex > 0) {
-        const beforeText = remaining.substring(0, matchIndex)
-        const trimmedText = firstMatch.type === 'title' ? beforeText.trim() : beforeText.trim()
-        if (trimmedText) {
-          const textNodes = renderTextWithBreaks(trimmedText, `before-${keyIndex}`)
-          if (textNodes.length > 0) {
-            paragraphResult.push(<span key={`text-${keyIndex++}`}>{textNodes}</span>)
-          }
-        }
-      }
-
-      // 패턴 처리
-      if (firstMatch.type === 'title' && titleMatch) {
-        // 【타이틀】 → 볼드 타이틀 (하단 여백 mb-4)
-        paragraphResult.push(
-          <div key={`title-${keyIndex++}`} className="font-bold text-gray-900 mt-3 mb-4 text-base sm:text-lg leading-tight">
-            {titleMatch[1]}
-          </div>
-        )
-        // 타이틀 뒤 줄바꿈과 공백 모두 제거
-        let afterTitle = remaining.substring(matchIndex + titleMatch[0].length)
-        afterTitle = afterTitle.replace(/^[\s\n]+/, '')
-        remaining = afterTitle
-      } 
-      else if (firstMatch.type === 'dataCite' && dataCiteMatch) {
-        // <cite data-source="..." data-url="...">...</cite>
-        const sourceText = dataCiteMatch[1]
-        const sourceUrl = dataCiteMatch[2]
-        const citedText = dataCiteMatch[3].trim()
-
-        // 인용된 텍스트를 시각적으로 강조 (배경색, 아이콘)
-        if (citedText) {
-          const textNodes = renderTextWithBreaks(citedText, `cite-${keyIndex}`)
-          if (textNodes.length > 0) {
-            paragraphResult.push(
-              <span 
-                key={`cite-${keyIndex++}`}
-                className="inline-flex items-center gap-1 bg-blue-50 text-blue-900 px-1.5 py-0.5 rounded border border-blue-200"
-                title={`인용: ${sourceText}`}
-              >
-                <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                {textNodes}
-              </span>
-            )
-          }
-        }
-
-        // 출처 정보 저장 (중복 제거)
-        if (sourceText && !paragraphSources.some(s => s.text === sourceText && s.url === sourceUrl)) {
-          paragraphSources.push({ text: sourceText, url: sourceUrl })
-        }
-
-        remaining = remaining.substring(matchIndex + dataCiteMatch[0].length)
-      }
-      else if (firstMatch.type === 'simpleCite' && simpleCiteMatch) {
-        // <cite>...</cite> (기존 형식)
-        const citedText = simpleCiteMatch[1].trim()
-        const sourceText = sources && simpleCiteIndex < sources.length ? sources[simpleCiteIndex] : null
-        const sourceUrl = source_urls && simpleCiteIndex < source_urls.length ? source_urls[simpleCiteIndex] : null
-
-        // 인용된 텍스트를 시각적으로 강조 (배경색, 아이콘)
-        if (citedText) {
-          const textNodes = renderTextWithBreaks(citedText, `scite-${keyIndex}`)
-          if (textNodes.length > 0) {
-            paragraphResult.push(
-              <span 
-                key={`cite-${keyIndex++}`}
-                className="inline-flex items-center gap-1 bg-blue-50 text-blue-900 px-1.5 py-0.5 rounded border border-blue-200"
-                title={sourceText ? `인용: ${sourceText}` : '인용된 내용'}
-              >
-                <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                </svg>
-                {textNodes}
-              </span>
-            )
-          }
-        }
-
-        // 출처 정보 저장 (중복 제거)
-        if (sourceText && !paragraphSources.some(s => s.text === sourceText && s.url === sourceUrl)) {
-          paragraphSources.push({ text: sourceText || '', url: sourceUrl || '' })
-        }
-
-        simpleCiteIndex++
-        remaining = remaining.substring(matchIndex + simpleCiteMatch[0].length)
-      }
-    }
-
-    // 문단 결과 추가 (섹션 간 여백 충분히, 마지막 섹션 제외)
-    result.push(
-      <div key={`para-${paragraphIndex}`} className="mb-6 last:mb-0">
-        {paragraphResult}
-        {/* 문단 끝에 출처 표시 - 깔끔하게 */}
-        {paragraphSources.length > 0 && (
-          <div className="mt-2 flex flex-wrap gap-1.5 items-center">
-            {paragraphSources.map((source, idx) => {
-              // 하드코딩 URL (수능 점수 변환 및 추정 방법 PDF)
-              const SCORE_GUIDE_URL = "https://rnitmphvahpkosvxjshw.supabase.co/storage/v1/object/public/document/pdfs/efe55407-d51c-4cab-8c20-aabb2445ac2b.pdf"
-              
-              // "환산" 관련 출처는 모두 "수능 점수 변환 및 추정 방법"으로 통일
-              let finalText = source.text
-              let finalUrl = source.url
-              
-              if (source.text.includes("환산") || source.text.includes("추정") || source.text.includes("변환")) {
-                finalText = "수능 점수 변환 및 추정 방법"
-                finalUrl = SCORE_GUIDE_URL
-              }
-              
-              // URL 없으면 클릭 불가능한 span
-              if (!finalUrl) {
-                return (
-                  <span
-                    key={idx}
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium text-gray-400 bg-gray-100 rounded"
-                  >
-                    <svg className="w-3 h-3 flex-shrink-0 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    {finalText}
-                  </span>
-                )
-              }
-              
-              // URL 있으면 클릭 가능 - 새 탭에서 열기 (가장 단순하고 확실한 방법)
-              return (
-                <a
-                  key={idx}
-                  href={finalUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium text-gray-500 bg-gray-100 hover:bg-gray-200 rounded transition-colors cursor-pointer group"
-                  title={`출처: ${finalText} (클릭하여 열기)`}
-                >
-                  <svg className="w-3 h-3 flex-shrink-0 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <span className="group-hover:underline">{finalText}</span>
-                </a>
-              )
-            })}
-          </div>
-        )}
-      </div>
-    )
-  })
-
-  return result
-}

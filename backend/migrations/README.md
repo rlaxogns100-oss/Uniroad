@@ -50,6 +50,14 @@ Supabase PostgreSQL 데이터베이스 스키마 마이그레이션 파일들입
 - `file_url` 컬럼 추가
 - PDF 다운로드 공개 URL 저장
 
+### 9️⃣ 임베딩 기반 문서 스키마
+
+```sql
+-- 09_create_documents_tables.sql
+```
+- `documents`, `document_sections`, `document_chunks` 테이블 생성
+- 768차원 임베딩 기준 `match_document_chunks` RPC 생성
+
 ---
 
 ## 🧪 테스트 데이터

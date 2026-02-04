@@ -146,14 +146,72 @@ async def refresh_token(refresh_token: str):
     """
     try:
         response = supabase_service.client.auth.refresh_session(refresh_token)
-        
+
         if response.session is None:
             raise HTTPException(status_code=401, detail="토큰 갱신 실패")
-        
+
         return {
             "access_token": response.session.access_token,
             "refresh_token": response.session.refresh_token,
         }
     except Exception as e:
         raise HTTPException(status_code=401, detail=f"토큰 갱신 실패: {str(e)}")
+
+
+class OAuthRequest(BaseModel):
+    provider: str  # "google" or "kakao"
+    redirect_to: Optional[str] = None
+
+
+@router.post("/oauth/url")
+async def get_oauth_url(request: OAuthRequest):
+    """
+    OAuth 로그인 URL 반환
+    """
+    try:
+        redirect_to = request.redirect_to or "http://localhost:5173"
+
+        response = supabase_service.client.auth.sign_in_with_oauth({
+            "provider": request.provider,
+            "options": {
+                "redirect_to": redirect_to,
+            }
+        })
+
+        return {"url": response.url}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"OAuth URL 생성 실패: {str(e)}")
+
+
+class OAuthCallbackRequest(BaseModel):
+    code: str
+
+
+@router.post("/oauth/callback")
+async def oauth_callback(request: OAuthCallbackRequest):
+    """
+    OAuth 코드를 토큰으로 교환
+    """
+    try:
+        response = supabase_service.client.auth.exchange_code_for_session({
+            "auth_code": request.code
+        })
+
+        if response.session is None:
+            raise HTTPException(status_code=400, detail="토큰 교환 실패")
+
+        return {
+            "access_token": response.session.access_token,
+            "refresh_token": response.session.refresh_token,
+            "user": {
+                "id": response.user.id,
+                "email": response.user.email,
+                "name": response.user.user_metadata.get("name") or response.user.user_metadata.get("full_name") or response.user.email.split("@")[0],
+                "avatar_url": response.user.user_metadata.get("avatar_url"),
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"OAuth 콜백 처리 실패: {str(e)}")
 
