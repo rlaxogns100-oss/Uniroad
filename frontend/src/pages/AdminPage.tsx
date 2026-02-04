@@ -288,13 +288,7 @@ export default function AdminPage() {
               📤 업로드 페이지
             </button>
             <button
-              onClick={() => navigate('/analytics')}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-            >
-              📊 분석 대시보드
-            </button>
-            <button
-              onClick={() => navigate('/chat')}
+              onClick={() => navigate('/chat/login')}
               className="px-4 py-2 bg-gray-800 text-white rounded-lg hover:bg-gray-700 transition-colors"
             >
               ← 채팅으로
@@ -329,13 +323,15 @@ export default function AdminPage() {
               <span className="text-2xl">💬</span>
               <span className="text-sm text-center">댓글 봇</span>
             </button>
-            <button
-              onClick={() => navigate('/analytics')}
+            <a
+              href="https://analytics.google.com/analytics/web/?hl=ko#/analysis/a382271955p521910579/edit/iAeobtq1RAOuwPn3j53_fA"
+              target="_blank"
+              rel="noopener noreferrer"
               className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors font-medium border border-blue-200"
             >
               <span className="text-2xl">📊</span>
-              <span className="text-sm text-center">분석 대시보드</span>
-            </button>
+              <span className="text-sm text-center">GA4 Analytics</span>
+            </a>
           </div>
         </div>
       </div>

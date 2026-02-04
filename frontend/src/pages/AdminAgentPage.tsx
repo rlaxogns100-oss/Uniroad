@@ -9,7 +9,6 @@ import {
   hasLocalStorageLogs,
   ExecutionLog 
 } from '../utils/adminLogger'
-import { trackEvaluationToggle, trackEvaluationSkip, trackEvent, GA4Events } from '../utils/ga4'
 
 // Admin Agent 평가 함수 (백그라운드에서 비동기 실행, 백엔드 API 호출)
 async function evaluateLog(log: ExecutionLog): Promise<void> {
@@ -427,8 +426,6 @@ export default function AdminAgentPage() {
     
     await updateLogEvaluation(log.id, skippedEvaluation)
     setLogs(getLogs())
-    // GA4 이벤트 추적
-    trackEvaluationSkip(log.id)
   }
 
   // 전체 삭제 핸들러
@@ -446,8 +443,6 @@ export default function AdminAgentPage() {
       try {
         localStorage.setItem(EVALUATION_PAUSED_KEY, String(next))
       } catch {}
-      // GA4 이벤트 추적
-      trackEvaluationToggle(next)
       return next
     })
   }

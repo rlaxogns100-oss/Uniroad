@@ -9,8 +9,6 @@ import AdminAgentPage from './pages/AdminAgentPage'
 import AuthPage from './pages/AuthPage'
 import TimingDashboard from './pages/TimingDashboard'
 import AutoReplyPage from './pages/AutoReplyPage'
-import AnalyticsDashboard from './pages/AnalyticsDashboard'
-import { trackPageView } from './utils/ga4'
 import { useEffect } from 'react'
 
 // 보호된 라우트 (로그인 필요)
@@ -55,7 +53,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   }
   
   if (user?.name !== '김도균') {
-    return <Navigate to="/chat" replace />
+    return <Navigate to="/chat/login" replace />
   }
   
   return <>{children}</>
@@ -65,20 +63,32 @@ function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <PageTracker />
         <Routes>
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/" element={<LandingPage />} />
-          {/* /chat/admin 먼저 정의 (더 구체적 경로) */}
+          
+          {/* 로그인 후 채팅 페이지 */}
           <Route
-            path="/chat/admin"
+            path="/chat/login/admin"
             element={
               <AdminRoute>
                 <AdminPage />
               </AdminRoute>
             }
           />
+          <Route
+            path="/chat/login"
+            element={
+              <ProtectedRoute>
+                <ChatPage />
+              </ProtectedRoute>
+            }
+          />
+          
+          {/* 로그인 없이 접근 가능한 채팅 */}
           <Route path="/chat" element={<ChatPage />} />
+          
+          {/* 관리자 페이지들 */}
           <Route
             path="/upload"
             element={
@@ -111,31 +121,12 @@ function App() {
               </AdminRoute>
             }
           />
-          <Route
-            path="/analytics"
-            element={
-              <AdminRoute>
-                <AnalyticsDashboard />
-              </AdminRoute>
-            }
-          />
           <Route path="/auto-reply" element={<AutoReplyPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
     </BrowserRouter>
   )
-}
-
-// 페이지 변경 추적 컴포넌트
-function PageTracker() {
-  const location = useLocation()
-
-  useEffect(() => {
-    trackPageView(location.pathname)
-  }, [location.pathname])
-
-  return null
 }
 
 export default App

@@ -51,9 +51,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(userData)
           setLoading(false)
 
-          // OAuth 로그인 성공 시: 관리자(김도균)는 /chat/admin, 그 외는 /chat
+          // OAuth 로그인 성공 시: 관리자(김도균)는 /chat/login/admin, 그 외는 /chat/login
           const isAdmin = userData?.name === '김도균'
-          window.location.href = isAdmin ? '/chat/admin' : '/chat'
+          window.location.href = isAdmin ? '/chat/login/admin' : '/chat/login'
           return
         } catch (error) {
           console.error('OAuth 콜백 처리 실패:', error)

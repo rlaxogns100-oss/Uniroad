@@ -26,8 +26,8 @@ export default function AuthPage() {
       } else {
         user = await signIn(email, password)
       }
-      // 관리자(김도균)는 관리자 페이지로, 그 외는 랜딩으로
-      navigate(user?.name === '김도균' ? '/chat/admin' : '/')
+      // 관리자(김도균)는 관리자 페이지로, 그 외는 채팅 페이지로
+      navigate(user?.name === '김도균' ? '/chat/login/admin' : '/chat/login')
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -204,7 +204,7 @@ export default function AuthPage() {
                   if (quickName.trim()) {
                     const name = quickName.trim()
                     quickSignIn(name)
-                    navigate(name === '김도균' ? '/chat/admin' : '/')
+                    navigate(name === '김도균' ? '/chat/login/admin' : '/chat/login')
                   }
                 }}
                 className="px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 transition-colors"
