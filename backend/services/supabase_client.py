@@ -198,8 +198,8 @@ class SupabaseService:
 
         try:
             response = client.table('documents')\
-                .select('id, school_name, filename, summary, file_url, metadata, created_at')\
-                .order('created_at', desc=True)\
+                .select('id, school_name, filename, summary, file_url, metadata')\
+                .order('id', desc=True)\
                 .execute()
 
             if not response.data:
@@ -217,7 +217,7 @@ class SupabaseService:
                     'fileName': row.get('filename', ''),
                     'fileUrl': row.get('file_url'),
                     'category': '미분류',
-                    'uploadedAt': row.get('created_at'),
+                    'uploadedAt': metadata.get('uploaded_at', ''),
                     'hashtags': metadata.get('hashtags', []),
                     'schoolName': row.get('school_name')
                 })
