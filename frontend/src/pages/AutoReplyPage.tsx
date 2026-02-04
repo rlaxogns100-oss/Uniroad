@@ -541,6 +541,27 @@ export default function AutoReplyPage() {
     })
   }
 
+  // 빠른 삭제 (쓰레기통 버튼) - 바로 '기타' 사유로 취소
+  const handleQuickDelete = (commentId: string) => {
+    // 즉시 로컬 상태 업데이트 (Optimistic Update)
+    setComments(prev => prev.map(c => 
+      c.id === commentId ? { ...c, status: 'cancelled' as const, cancel_reason: '기타' } : c
+    ))
+    
+    // 백그라운드에서 API 호출
+    fetch(`${API_BASE}/comments/${commentId}/cancel`, { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: '기타' })
+    }).then(res => {
+      if (!res.ok) {
+        fetchComments()
+      }
+    }).catch(() => {
+      fetchComments()
+    })
+  }
+
   const openEditModal = (record: CommentRecord) => {
     setEditingComment(record)
     setEditCommentText(record.comment)
@@ -1545,6 +1566,17 @@ export default function AutoReplyPage() {
                                   >
                                     {isLoading ? '...' : '재생성'}
                                   </button>
+                                  {/* 쓰레기통 버튼 - 빠른 삭제 */}
+                                  <button
+                                    onClick={() => handleQuickDelete(record.id!)}
+                                    disabled={isLoading}
+                                    className="p-1.5 text-red-500 hover:bg-red-100 rounded transition-colors disabled:opacity-50"
+                                    title="빠른 삭제 (기타 사유)"
+                                  >
+                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                    </svg>
+                                  </button>
                                 </div>
                               )}
                               {record.status === 'posted' && (
@@ -1848,8 +1880,7 @@ export default function AutoReplyPage() {
                   { value: '부적절한 글', label: '1. 부적절한 글' },
                   { value: '잘못된 쿼리', label: '2. 잘못된 쿼리' },
                   { value: '함수결과부족', label: '3. 함수결과부족' },
-                  { value: '최종답변부실', label: '4. 최종답변부실' },
-                  { value: '기타', label: '5. 기타' }
+                  { value: '최종답변부실', label: '4. 최종답변부실' }
                 ].map((option) => (
                   <label
                     key={option.value}
