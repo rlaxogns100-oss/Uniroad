@@ -9,6 +9,7 @@ import AdminAgentPage from './pages/AdminAgentPage'
 import AuthPage from './pages/AuthPage'
 import TimingDashboard from './pages/TimingDashboard'
 import AutoReplyPage from './pages/AutoReplyPage'
+import AnalyticsDashboard from './pages/AnalyticsDashboard'
 import { useEffect } from 'react'
 
 // 보호된 라우트 (로그인 필요)
@@ -122,6 +123,14 @@ function App() {
             }
           />
           <Route path="/auto-reply" element={<AutoReplyPage />} />
+          <Route
+            path="/analytics"
+            element={
+              <AdminRoute>
+                <AnalyticsDashboard />
+              </AdminRoute>
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>
