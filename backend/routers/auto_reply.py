@@ -21,6 +21,7 @@ class BotConfigUpdate(BaseModel):
     comments_per_hour_max: Optional[int] = None
     rest_minutes: Optional[int] = None
     keywords: Optional[List[str]] = None
+    banned_keywords: Optional[List[str]] = None  # 금지 키워드 목록
 
 
 class BotStartRequest(BaseModel):

@@ -439,7 +439,8 @@ class BotManager:
             "comments_per_hour_min": 5,
             "comments_per_hour_max": 10,
             "rest_minutes": 3,
-            "keywords": []  # 검색 키워드 목록
+            "keywords": [],  # 검색 키워드 목록
+            "banned_keywords": []  # 금지 키워드 목록
         }
         
         if os.path.exists(self.config_file):

@@ -32,6 +32,7 @@ interface BotConfig {
   comments_per_hour_max: number
   rest_minutes: number
   keywords?: string[]
+  banned_keywords?: string[]  // 금지 키워드 목록
 }
 
 interface CommentRecord {
@@ -48,6 +49,7 @@ interface CommentRecord {
   action_history?: Array<{action: string, timestamp: string, old_comment?: string, reason?: string}>
   posted_at?: string | null
   cancel_reason?: string  // 취소 사유
+  is_duplicate?: boolean  // 중복 댓글 여부 (이전에 단 댓글이 있어서 게시완료로 분류된 경우)
 }
 
 interface PosterStatus {
@@ -131,6 +133,9 @@ export default function AutoReplyPage() {
   const [keywords, setKeywords] = useState<string[]>([])
   const [keywordsText, setKeywordsText] = useState('')  // 텍스트 입력용
   const [keywordsExpanded, setKeywordsExpanded] = useState(false)
+  const [bannedKeywords, setBannedKeywords] = useState<string[]>([])  // 금지 키워드
+  const [bannedKeywordsText, setBannedKeywordsText] = useState('')  // 금지 키워드 텍스트 입력용
+  const [bannedKeywordsExpanded, setBannedKeywordsExpanded] = useState(false)
   const [configChanged, setConfigChanged] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())  // ID 기반으로 변경
   // 프롬프트 편집 (Query + Answer 2개)
@@ -212,6 +217,9 @@ export default function AutoReplyPage() {
       const loadedKeywords = data.config.keywords ?? []
       setKeywords(loadedKeywords)
       setKeywordsText(loadedKeywords.join(', '))
+      const loadedBannedKeywords = data.config.banned_keywords ?? []
+      setBannedKeywords(loadedBannedKeywords)
+      setBannedKeywordsText(loadedBannedKeywords.join(', '))
       setConfigChanged(false)
       // 계정 정보 설정
       if (data.current_account && !selectedAccount) {
@@ -648,7 +656,8 @@ export default function AutoReplyPage() {
           comments_per_hour_min: commentsPerHourMin,
           comments_per_hour_max: commentsPerHourMax,
           rest_minutes: restMinutes,
-          keywords: keywords
+          keywords: keywords,
+          banned_keywords: bannedKeywords
         })
       })
       const data = await res.json()
@@ -667,6 +676,14 @@ export default function AutoReplyPage() {
     // 콤마로 분리하고 빈 값 제거
     const newKeywords = text.split(',').map(k => k.trim()).filter(k => k.length > 0)
     setKeywords(newKeywords)
+    setConfigChanged(true)
+  }
+
+  const handleBannedKeywordsChange = (text: string) => {
+    setBannedKeywordsText(text)
+    // 콤마로 분리하고 빈 값 제거
+    const newBannedKeywords = text.split(',').map(k => k.trim()).filter(k => k.length > 0)
+    setBannedKeywords(newBannedKeywords)
     setConfigChanged(true)
   }
 
@@ -1095,6 +1112,56 @@ export default function AutoReplyPage() {
           )}
         </div>
 
+        {/* 금지 키워드 설정 */}
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden mb-8">
+          <button
+            onClick={() => setBannedKeywordsExpanded(!bannedKeywordsExpanded)}
+            className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
+          >
+            <div className="flex items-center gap-3">
+              <h2 className="text-lg font-semibold text-gray-800">금지 키워드 설정</h2>
+              <span className="text-sm text-gray-500">({bannedKeywords.length}개)</span>
+            </div>
+            <svg
+              className={`w-5 h-5 text-gray-500 transition-transform ${bannedKeywordsExpanded ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+          
+          {bannedKeywordsExpanded && (
+            <div className="px-6 pb-6">
+              <p className="text-sm text-gray-500 mb-4">
+                이 키워드가 포함된 글은 무조건 건너뜁니다. 콤마(,)로 구분하여 입력하세요.
+              </p>
+              
+              <input
+                type="text"
+                value={bannedKeywordsText}
+                onChange={(e) => handleBannedKeywordsChange(e.target.value)}
+                placeholder="광고, 홍보, 과외, 학원, ..."
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 font-mono text-sm"
+              />
+              
+              <div className="mt-3 flex items-center justify-between">
+                <span className="text-sm text-gray-500">
+                  현재 {bannedKeywords.length}개 금지 키워드
+                </span>
+                <button
+                  onClick={handleSaveConfig}
+                  disabled={!configChanged || actionLoading}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white font-medium rounded-lg transition-colors"
+                >
+                  {actionLoading ? '저장 중...' : '설정 저장'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* 실시간 로그 뷰어 */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden mb-8">
           <button
@@ -1481,7 +1548,12 @@ export default function AutoReplyPage() {
                                 </div>
                               )}
                               {record.status === 'posted' && (
-                                <span className="text-xs text-green-600">게시완료</span>
+                                <div className="flex items-center gap-1">
+                                  <span className="text-xs text-green-600">게시완료</span>
+                                  {record.is_duplicate && (
+                                    <span className="px-1.5 py-0.5 text-xs bg-orange-100 text-orange-700 rounded">중복</span>
+                                  )}
+                                </div>
                               )}
                               {(record.status === 'cancelled' || record.status === 'failed') && record.id && (
                                 <div className="flex flex-wrap gap-1 items-center">
@@ -1776,7 +1848,8 @@ export default function AutoReplyPage() {
                   { value: '부적절한 글', label: '1. 부적절한 글' },
                   { value: '잘못된 쿼리', label: '2. 잘못된 쿼리' },
                   { value: '함수결과부족', label: '3. 함수결과부족' },
-                  { value: '최종답변부실', label: '4. 최종답변부실' }
+                  { value: '최종답변부실', label: '4. 최종답변부실' },
+                  { value: '기타', label: '5. 기타' }
                 ].map((option) => (
                   <label
                     key={option.value}
