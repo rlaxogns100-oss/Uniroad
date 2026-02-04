@@ -893,7 +893,7 @@ target_range 옵션 (새로운 판정 기준):
         
         return {"success": False, "message": "댓글을 찾을 수 없습니다."}
     
-    def cancel_comment(self, comment_id: str) -> Dict[str, Any]:
+    def cancel_comment(self, comment_id: str, reason: str = None) -> Dict[str, Any]:
         """댓글 취소 - 게시하지 않음"""
         history = self._load_comment_history()
         
@@ -903,10 +903,13 @@ target_range 옵션 (새로운 판정 기준):
                     return {"success": False, "message": f"현재 상태({comment.get('status')})에서는 취소할 수 없습니다."}
                 
                 comment["status"] = "cancelled"
+                if reason:
+                    comment["cancel_reason"] = reason
                 if "action_history" not in comment:
                     comment["action_history"] = []
                 comment["action_history"].append({
                     "action": "cancelled",
+                    "reason": reason,
                     "timestamp": datetime.now().isoformat()
                 })
                 

@@ -160,6 +160,11 @@ export default function AutoReplyPage() {
   const [editingComment, setEditingComment] = useState<CommentRecord | null>(null)
   const [editCommentText, setEditCommentText] = useState('')
   const [actionLoading2, setActionLoading2] = useState<Set<string>>(new Set())  // 여러 개 병렬 처리 가능
+  
+  // 취소 사유 모달
+  const [cancelModalOpen, setCancelModalOpen] = useState(false)
+  const [cancelingCommentId, setCancelingCommentId] = useState<string | null>(null)
+  const [cancelReason, setCancelReason] = useState('')
 
   const handlePasswordSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -413,17 +418,37 @@ export default function AutoReplyPage() {
     }
   }
 
-  const handleCancel = async (commentId: string) => {
-    setActionLoading2(prev => new Set(prev).add(commentId))
+  const handleCancelClick = (commentId: string) => {
+    setCancelingCommentId(commentId)
+    setCancelReason('')
+    setCancelModalOpen(true)
+  }
+
+  const handleCancelConfirm = async () => {
+    if (!cancelingCommentId || !cancelReason) {
+      alert('취소 사유를 선택해주세요')
+      return
+    }
+    
+    setActionLoading2(prev => new Set(prev).add(cancelingCommentId))
     try {
-      const res = await fetch(`${API_BASE}/comments/${commentId}/cancel`, { method: 'POST' })
+      const res = await fetch(`${API_BASE}/comments/${cancelingCommentId}/cancel`, { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: cancelReason })
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || '취소 실패')
       
       // 즉시 로컬 상태 업데이트 (Optimistic Update)
       setComments(prev => prev.map(c => 
-        c.id === commentId ? { ...c, status: 'cancelled' as const } : c
+        c.id === cancelingCommentId ? { ...c, status: 'cancelled' as const } : c
       ))
+      
+      // 모달 닫기
+      setCancelModalOpen(false)
+      setCancelingCommentId(null)
+      setCancelReason('')
       
       // 백그라운드에서 전체 새로고침 (await 제거)
       fetchComments()
@@ -432,7 +457,7 @@ export default function AutoReplyPage() {
     } finally {
       setActionLoading2(prev => {
         const next = new Set(prev)
-        next.delete(commentId)
+        next.delete(cancelingCommentId)
         return next
       })
     }
@@ -1309,7 +1334,7 @@ export default function AutoReplyPage() {
                                     </button>
                                   )}
                                   <button
-                                    onClick={() => handleCancel(record.id!)}
+                                    onClick={() => handleCancelClick(record.id!)}
                                     disabled={isLoading}
                                     className="px-2 py-0.5 text-xs bg-gray-400 hover:bg-gray-500 text-white rounded disabled:opacity-50"
                                   >
@@ -1689,6 +1714,65 @@ export default function AutoReplyPage() {
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors disabled:opacity-50"
                 >
                   {editingComment?.id && actionLoading2.has(editingComment.id) ? '저장 중...' : '저장'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 취소 사유 선택 모달 */}
+      {cancelModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full mx-4">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-800">취소 사유 선택</h3>
+            </div>
+            <div className="p-6">
+              <div className="space-y-3">
+                {[
+                  { value: '부적절한 글', label: '1. 부적절한 글' },
+                  { value: '잘못된 쿼리', label: '2. 잘못된 쿼리' },
+                  { value: '함수결과부족', label: '3. 함수결과부족' },
+                  { value: '최종답변부실', label: '4. 최종답변부실' }
+                ].map((option) => (
+                  <label
+                    key={option.value}
+                    className={`flex items-center p-3 border rounded-lg cursor-pointer transition-colors ${
+                      cancelReason === option.value
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="cancelReason"
+                      value={option.value}
+                      checked={cancelReason === option.value}
+                      onChange={(e) => setCancelReason(e.target.value)}
+                      className="w-4 h-4 text-blue-600"
+                    />
+                    <span className="ml-3 text-sm text-gray-700">{option.label}</span>
+                  </label>
+                ))}
+              </div>
+              <div className="flex justify-end gap-3 mt-6">
+                <button
+                  onClick={() => {
+                    setCancelModalOpen(false)
+                    setCancelingCommentId(null)
+                    setCancelReason('')
+                  }}
+                  className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg transition-colors"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleCancelConfirm}
+                  disabled={!cancelReason || (cancelingCommentId ? actionLoading2.has(cancelingCommentId) : false)}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {cancelingCommentId && actionLoading2.has(cancelingCommentId) ? '취소 중...' : '확인'}
                 </button>
               </div>
             </div>

@@ -313,6 +313,10 @@ class CommentEditRequest(BaseModel):
     """댓글 수정 요청"""
     new_comment: str
 
+class CommentCancelRequest(BaseModel):
+    """댓글 취소 요청"""
+    reason: str
+
 
 @router.post("/comments/{comment_id}/approve")
 async def approve_comment(comment_id: str):
@@ -331,14 +335,14 @@ async def approve_comment(comment_id: str):
 
 
 @router.post("/comments/{comment_id}/cancel")
-async def cancel_comment(comment_id: str):
+async def cancel_comment(comment_id: str, body: CommentCancelRequest):
     """
     댓글 취소 - 게시하지 않음
     
     취소된 댓글은 기록에 남지만 게시되지 않습니다.
     """
     manager = get_bot_manager()
-    result = manager.cancel_comment(comment_id)
+    result = manager.cancel_comment(comment_id, reason=body.reason)
     
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", "취소 실패"))
