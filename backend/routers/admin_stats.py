@@ -4,11 +4,40 @@
 """
 
 from fastapi import APIRouter, HTTPException, Depends
+from pydantic import BaseModel
+from typing import List, Optional
 from middleware.auth import get_current_user
 from utils.admin_filter import is_admin_account
 from services.supabase_client import supabase_service
 
 router = APIRouter()
+
+PATH_EXCEL_KEY = "path_excel"
+
+
+class PathRowPayload(BaseModel):
+    step: str
+    sessionSource: str
+    activeUsers: int
+    completionRate: float
+    exits: int
+    bounceRate: float
+
+
+class PathExcelPayload(BaseModel):
+    pathData: List[PathRowPayload]
+    selectedPathSource: Optional[str] = ""
+
+
+def _path_row_to_payload(row: dict) -> dict:
+    return {
+        "step": row.get("step", ""),
+        "sessionSource": row.get("sessionSource", row.get("session_source", "")),
+        "activeUsers": int(row.get("activeUsers", row.get("active_users", 0))),
+        "completionRate": float(row.get("completionRate", row.get("completion_rate", 0))),
+        "exits": int(row.get("exits", 0)),
+        "bounceRate": float(row.get("bounceRate", row.get("bounce_rate", 0))),
+    }
 
 
 @router.get("/stats/users/count")
@@ -321,3 +350,54 @@ async def get_log_by_id(log_id: str, user: dict = Depends(get_current_user)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/stats/path-excel")
+async def get_path_excel(user: dict = Depends(get_current_user)):
+    """
+    관리자 공용 유입경로 엑셀 데이터 조회. 한 번 넣어두면 모든 관리자가 동일하게 봄.
+    """
+    if not is_admin_account(email=user.get("email")):
+        raise HTTPException(status_code=403, detail="Admin only")
+    try:
+        client = supabase_service.get_admin_client()
+        result = (
+            client.table("admin_settings")
+            .select("value")
+            .eq("key", PATH_EXCEL_KEY)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data or []
+        if not rows:
+            return {"pathData": [], "selectedPathSource": ""}
+        val = rows[0].get("value") or {}
+        path_data = val.get("pathData", [])
+        selected = val.get("selectedPathSource", "") or ""
+        # 정규화: 프론트 기대 필드명 (camelCase)
+        path_data = [_path_row_to_payload(r) for r in path_data]
+        return {"pathData": path_data, "selectedPathSource": selected}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get path excel: {str(e)}. Run migration 26_create_admin_settings.sql if needed.")
+
+
+@router.put("/stats/path-excel")
+async def put_path_excel(body: PathExcelPayload, user: dict = Depends(get_current_user)):
+    """
+    관리자 공용 유입경로 엑셀 데이터 저장. 저장 후 다른 관리자도 동일하게 조회됨.
+    """
+    if not is_admin_account(email=user.get("email")):
+        raise HTTPException(status_code=403, detail="Admin only")
+    try:
+        client = supabase_service.get_admin_client()
+        value = {
+            "pathData": [r.model_dump() for r in body.pathData],
+            "selectedPathSource": body.selectedPathSource or "",
+        }
+        client.table("admin_settings").upsert(
+            {"key": PATH_EXCEL_KEY, "value": value},
+            on_conflict="key",
+        ).execute()
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save path excel: {str(e)}")

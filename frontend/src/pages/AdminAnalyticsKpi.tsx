@@ -84,42 +84,85 @@ export default function AdminAnalyticsKpi() {
   const [seriesError, setSeriesError] = useState<string | null>(null)
   const [questionSeries, setQuestionSeries] = useState<QuestionCumulativePoint[]>([])
   const [questionSeriesError, setQuestionSeriesError] = useState<string | null>(null)
-  const [pathData, setPathData] = useState<PathRow[]>(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY_PATH)
-      if (raw) return JSON.parse(raw) as PathRow[]
-    } catch {}
-    return []
-  })
+  const [pathData, setPathData] = useState<PathRow[]>([])
   const [pathUploadError, setPathUploadError] = useState<string | null>(null)
-  const [selectedPathSource, setSelectedPathSource] = useState<string>(() => {
-    return localStorage.getItem(STORAGE_KEY_SOURCE) ?? ''
-  })
+  const [selectedPathSource, setSelectedPathSource] = useState<string>('')
+  // 서버에 저장 (한 번 넣어두면 다른 관리자도 동일하게 봄)
+  const savePathExcel = useCallback(
+    (data: PathRow[], source: string) => {
+      if (!accessToken) return
+      axios
+        .put(
+          '/api/admin/stats/path-excel',
+          { pathData: data, selectedPathSource: source },
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        )
+        .catch(() => { /* 저장 실패 시 무시(로컬에는 반영됨) */ })
+    },
+    [accessToken]
+  )
 
+  // 페이지 로드 시 서버에서 공용 엑셀 데이터 조회
+  useEffect(() => {
+    if (!accessToken) return
+    let cancelled = false
+    axios
+      .get<{ pathData: PathRow[]; selectedPathSource: string }>('/api/admin/stats/path-excel', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      })
+      .then((res) => {
+        if (cancelled) return
+        const data = res.data?.pathData || []
+        const source = res.data?.selectedPathSource ?? ''
+        if (data.length > 0) {
+          setPathData(data)
+          setSelectedPathSource(source)
+        } else {
+          // 서버에 없으면 로컬 저장값으로 초기화 (이전 브라우저 데이터)
+          try {
+            const raw = localStorage.getItem(STORAGE_KEY_PATH)
+            if (raw) {
+              const local = JSON.parse(raw) as PathRow[]
+              if (local.length > 0) {
+                setPathData(local)
+                setSelectedPathSource(localStorage.getItem(STORAGE_KEY_SOURCE) ?? '')
+              }
+            }
+          } catch {}
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [accessToken])
+
+  // 로컬에도 동기화 (오프라인/캐시용)
   useEffect(() => {
     if (pathData.length > 0) localStorage.setItem(STORAGE_KEY_PATH, JSON.stringify(pathData))
   }, [pathData])
-
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_SOURCE, selectedPathSource)
   }, [selectedPathSource])
 
-  const handlePathFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    e.target.value = ''
-    setPathUploadError(null)
-    if (!file) return
-    if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
-      setPathUploadError('엑셀 파일(.xlsx, .xls)만 업로드 가능합니다.')
-      return
-    }
-    parsePathExcel(file)
-      .then((parsed) => {
-        setPathData(parsed)
-        setSelectedPathSource('')
-      })
-      .catch((err) => setPathUploadError(err?.message ?? '파싱 실패'))
-  }, [])
+  const handlePathFile = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0]
+      e.target.value = ''
+      setPathUploadError(null)
+      if (!file) return
+      if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+        setPathUploadError('엑셀 파일(.xlsx, .xls)만 업로드 가능합니다.')
+        return
+      }
+      parsePathExcel(file)
+        .then((parsed) => {
+          setPathData(parsed)
+          setSelectedPathSource('')
+          savePathExcel(parsed, '')
+        })
+        .catch((err) => setPathUploadError(err?.message ?? '파싱 실패'))
+    },
+    [savePathExcel]
+  )
 
   const pathSessionSources = (() => {
     const set = new Set(pathData.map((r) => r.sessionSource))
@@ -281,7 +324,11 @@ export default function AdminAnalyticsKpi() {
               <span className="font-medium text-gray-700">세션 소스:</span>
               <select
                 value={selectedPathSource}
-                onChange={(e) => setSelectedPathSource(e.target.value)}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setSelectedPathSource(v)
+                  savePathExcel(pathData, v)
+                }}
                 className="rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 min-w-[180px]"
               >
                 <option value="">전체 (단계별 최대)</option>
