@@ -2,16 +2,13 @@ import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
 import {
-  ChartBarIcon,
   UserGroupIcon,
   QuestionMarkCircleIcon,
-  DevicePhoneMobileIcon,
   ArrowTrendingUpIcon,
   ArrowLeftIcon,
   ArrowPathIcon,
   FunnelIcon,
   ChatBubbleLeftRightIcon,
-  GlobeAltIcon,
   ClockIcon
 } from '@heroicons/react/24/outline'
 
@@ -33,72 +30,49 @@ interface UTMConversion {
   }
 }
 
-interface DeviceStats {
-  name: string
-  count: number
-  percentage: number
+interface UserLogEntry {
+  id: string
+  timestamp: string
+  userQuestion: string
+  finalAnswer: string
 }
 
-interface PatternStats {
-  pattern: string
+interface UserWithLogs {
+  userId: string | null
+  label: string
+  logs: UserLogEntry[]
   count: number
-  percentage: number
-  sample_questions: string[]
-}
-
-interface UTMQuestion {
-  utm_source: string
-  utm_medium: string
-  utm_campaign: string | null
-  total_questions: number
-  pattern_percentages: Record<string, number>
-  top_patterns: [string, number][]
-  sample_questions: string[]
 }
 
 export default function AdminAnalytics() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'funnel' | 'questions' | 'devices' | 'utm'>('funnel')
+  const [activeTab, setActiveTab] = useState<'funnel' | 'users'>('funnel')
   const [timeRange, setTimeRange] = useState(7)
   
   // 데이터 상태
   const [funnelData, setFunnelData] = useState<any>(null)
-  const [deviceData, setDeviceData] = useState<any>(null)
-  const [questionData, setQuestionData] = useState<any>(null)
-  const [utmQuestions, setUtmQuestions] = useState<any>(null)
   const [loginStats, setLoginStats] = useState<any>(null)
   const [userSummary, setUserSummary] = useState<any>(null)
+  const [logsByUser, setLogsByUser] = useState<{ users: UserWithLogs[]; totalLogs: number } | null>(null)
+  const [expandedUserId, setExpandedUserId] = useState<string | null>(null)
 
   // 데이터 로드
   const loadData = async () => {
     setLoading(true)
     try {
-      console.log('데이터 로드 시작...')
-      const [funnel, devices, questions, utm, login, summary] = await Promise.all([
+      const token = localStorage.getItem('access_token')
+      const headers = token ? { Authorization: `Bearer ${token}` } : {}
+      const [funnel, login, summary, byUser] = await Promise.all([
         axios.get(`/api/analytics/funnel?days=${timeRange}`),
-        axios.get(`/api/analytics/device-stats?days=${timeRange}`),
-        axios.get(`/api/analytics/popular-questions?days=${timeRange}`),
-        axios.get(`/api/analytics/utm-questions?days=${timeRange}`),
         axios.get('/api/analytics/login-stats'),
-        axios.get('/api/analytics/user-summary')
+        axios.get('/api/analytics/user-summary'),
+        axios.get('/api/admin/logs/by-user?limit=2000', { headers })
       ])
-      
-      console.log('API 응답:', {
-        funnel: funnel.data,
-        devices: devices.data,
-        questions: questions.data,
-        utm: utm.data,
-        login: login.data,
-        summary: summary.data
-      })
-      
       setFunnelData(funnel.data)
-      setDeviceData(devices.data)
-      setQuestionData(questions.data)
-      setUtmQuestions(utm.data)
       setLoginStats(login.data)
       setUserSummary(summary.data)
+      setLogsByUser(byUser.data)
     } catch (error) {
       console.error('데이터 로드 실패:', error)
       alert('데이터를 불러오는데 실패했습니다. 콘솔을 확인해주세요.')
@@ -245,175 +219,51 @@ export default function AdminAnalytics() {
     )
   }
 
-  // 질문 분석 렌더링
-  const renderQuestions = () => {
-    if (!questionData) return null
-    
+  // 유저별 질문·답변 (admin_logs)
+  const renderUsersLogs = () => {
+    if (!logsByUser?.users?.length) {
+      return (
+        <div className="bg-white rounded-lg shadow p-6">
+          <p className="text-gray-500">유저별 로그가 없습니다. (admin_logs 테이블 기준)</p>
+        </div>
+      )
+    }
     return (
-      <div className="space-y-6">
-        {/* 질문 패턴 분석 */}
+      <div className="space-y-4">
         <div className="bg-white rounded-lg shadow p-6">
           <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
             <ChatBubbleLeftRightIcon className="w-5 h-5" />
-            질문 패턴 분석
+            유저별 질문·답변 내역 (admin_logs)
           </h3>
-          
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            {questionData.pattern_stats.slice(0, 6).map((pattern: PatternStats) => (
-              <div key={pattern.pattern} className="border rounded-lg p-4">
-                <div className="flex justify-between items-start mb-2">
-                  <h4 className="font-medium">{pattern.pattern}</h4>
-                  <span className="text-sm text-gray-500">{pattern.count}개 ({pattern.percentage}%)</span>
-                </div>
-                <div className="space-y-1">
-                  {pattern.sample_questions.slice(0, 2).map((q: string, idx: number) => (
-                    <p key={idx} className="text-sm text-gray-600 truncate">
-                      • {q}
-                    </p>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-          
-          {/* 인기 키워드 */}
-          <div>
-            <h4 className="font-medium mb-2">자주 사용된 키워드</h4>
-            <div className="flex flex-wrap gap-2">
-              {questionData.top_keywords.slice(0, 15).map((kw: any) => (
-                <span
-                  key={kw.keyword}
-                  className="px-3 py-1 bg-gray-100 text-gray-700 rounded-full text-sm"
+          <p className="text-sm text-gray-500 mb-4">
+            총 {logsByUser.totalLogs}건 · 유저 {logsByUser.users.length}명
+          </p>
+          <div className="space-y-2">
+            {logsByUser.users.map((u) => (
+              <div key={u.userId ?? '__guest__'} className="border rounded-lg overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setExpandedUserId(expandedUserId === (u.userId ?? '__guest__') ? null : (u.userId ?? '__guest__'))}
+                  className="w-full px-4 py-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 text-left"
                 >
-                  {kw.keyword} ({kw.count})
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // UTM별 질문 분석
-  const renderUTMQuestions = () => {
-    if (!utmQuestions) return null
-    
-    return (
-      <div className="space-y-6">
-        <div className="bg-white rounded-lg shadow p-6">
-          <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-            <GlobeAltIcon className="w-5 h-5" />
-            매체별 질문 특성
-          </h3>
-          
-          <div className="space-y-6">
-            {utmQuestions.utm_analysis.slice(0, 5).map((utm: UTMQuestion, idx: number) => (
-              <div key={idx} className="border rounded-lg p-4">
-                <div className="flex justify-between items-start mb-3">
-                  <div>
-                    <h4 className="font-medium">
-                      {utm.utm_source || 'direct'} / {utm.utm_medium || 'none'}
-                    </h4>
-                    {utm.utm_campaign && (
-                      <p className="text-sm text-gray-500">{utm.utm_campaign}</p>
-                    )}
-                  </div>
-                  <span className="text-sm font-medium text-gray-600">
-                    {utm.total_questions}개 질문
-                  </span>
-                </div>
-                
-                {/* 주요 패턴 */}
-                <div className="mb-3">
-                  <p className="text-sm text-gray-600 mb-1">주요 관심사:</p>
-                  <div className="flex gap-2">
-                    {utm.top_patterns.map(([pattern, percentage]) => (
-                      <span
-                        key={pattern}
-                        className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-sm"
-                      >
-                        {pattern} ({percentage}%)
-                      </span>
+                  <span className="font-medium">{u.label}</span>
+                  <span className="text-sm text-gray-500">{u.count}건</span>
+                </button>
+                {expandedUserId === (u.userId ?? '__guest__') && (
+                  <div className="p-4 space-y-4 max-h-96 overflow-y-auto">
+                    {u.logs.map((log) => (
+                      <div key={log.id} className="border-l-4 border-blue-200 pl-3 py-2 space-y-1">
+                        <p className="text-xs text-gray-500">
+                          {log.timestamp ? new Date(log.timestamp).toLocaleString('ko-KR') : '-'}
+                        </p>
+                        <p className="font-medium text-gray-800">Q: {log.userQuestion}</p>
+                        <p className="text-sm text-gray-600 whitespace-pre-wrap">A: {log.finalAnswer || '(답변 없음)'}</p>
+                      </div>
                     ))}
                   </div>
-                </div>
-                
-                {/* 샘플 질문 */}
-                <div>
-                  <p className="text-sm text-gray-600 mb-1">대표 질문:</p>
-                  <ul className="space-y-1">
-                    {utm.sample_questions.slice(0, 2).map((q: string, qIdx: number) => (
-                      <li key={qIdx} className="text-sm text-gray-700">
-                        • {q}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
+                )}
               </div>
             ))}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // 디바이스 통계
-  const renderDevices = () => {
-    if (!deviceData) return null
-    
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* 디바이스 타입 */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-              <DevicePhoneMobileIcon className="w-5 h-5" />
-              디바이스 타입
-            </h3>
-            <div className="space-y-3">
-              {deviceData.device_stats.map((device: DeviceStats) => (
-                <div key={device.name} className="flex justify-between items-center">
-                  <span className="font-medium capitalize">{device.name}</span>
-                  <div className="text-right">
-                    <span className="text-sm text-gray-600">{device.count}명</span>
-                    <span className="ml-2 font-medium">{device.percentage}%</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          
-          {/* 브라우저 */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-semibold mb-4">브라우저</h3>
-            <div className="space-y-3">
-              {deviceData.browser_stats.map((browser: DeviceStats) => (
-                <div key={browser.name} className="flex justify-between items-center">
-                  <span className="font-medium">{browser.name}</span>
-                  <div className="text-right">
-                    <span className="text-sm text-gray-600">{browser.count}명</span>
-                    <span className="ml-2 font-medium">{browser.percentage}%</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-          
-          {/* 운영체제 */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-semibold mb-4">운영체제</h3>
-            <div className="space-y-3">
-              {deviceData.os_stats.map((os: DeviceStats) => (
-                <div key={os.name} className="flex justify-between items-center">
-                  <span className="font-medium">{os.name}</span>
-                  <div className="text-right">
-                    <span className="text-sm text-gray-600">{os.count}명</span>
-                    <span className="ml-2 font-medium">{os.percentage}%</span>
-                  </div>
-                </div>
-              ))}
-            </div>
           </div>
         </div>
       </div>
@@ -454,9 +304,11 @@ export default function AdminAnalytics() {
                 onChange={(e) => setTimeRange(Number(e.target.value))}
                 className="px-3 py-1.5 border rounded-lg text-sm"
               >
-                <option value={7}>최근 7일</option>
-                <option value={30}>최근 30일</option>
-                <option value={90}>최근 90일</option>
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((d) => (
+                  <option key={d} value={d}>
+                    {d === 1 ? '최근 1일' : `최근 ${d}일`}
+                  </option>
+                ))}
               </select>
               
               {/* 새로고침 */}
@@ -497,8 +349,8 @@ export default function AdminAnalytics() {
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">오늘 로그인</p>
-                <p className="text-2xl font-bold">{loginStats?.today_count || 0}</p>
+                <p className="text-sm text-gray-600">기간 내 로그인</p>
+                <p className="text-2xl font-bold">{funnelData?.total_stats?.logged_in ?? 0}</p>
               </div>
               <ClockIcon className="w-8 h-8 text-purple-500" />
             </div>
@@ -507,8 +359,8 @@ export default function AdminAnalytics() {
           <div className="bg-white rounded-lg shadow p-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-gray-600">총 질문 수</p>
-                <p className="text-2xl font-bold">{questionData?.total_questions || 0}</p>
+                <p className="text-sm text-gray-600">로그 질문 수</p>
+                <p className="text-2xl font-bold">{logsByUser?.totalLogs ?? 0}</p>
               </div>
               <QuestionMarkCircleIcon className="w-8 h-8 text-orange-500" />
             </div>
@@ -530,34 +382,14 @@ export default function AdminAnalytics() {
                 전환 깔때기
               </button>
               <button
-                onClick={() => setActiveTab('utm')}
+                onClick={() => setActiveTab('users')}
                 className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'utm'
+                  activeTab === 'users'
                     ? 'border-blue-500 text-blue-600'
                     : 'border-transparent text-gray-500 hover:text-gray-700'
                 }`}
               >
-                매체별 질문
-              </button>
-              <button
-                onClick={() => setActiveTab('questions')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'questions'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                질문 분석
-              </button>
-              <button
-                onClick={() => setActiveTab('devices')}
-                className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
-                  activeTab === 'devices'
-                    ? 'border-blue-500 text-blue-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700'
-                }`}
-              >
-                디바이스
+                유저별 질문·답변
               </button>
             </nav>
           </div>
@@ -572,9 +404,7 @@ export default function AdminAnalytics() {
           ) : (
             <>
               {activeTab === 'funnel' && renderFunnel()}
-              {activeTab === 'utm' && renderUTMQuestions()}
-              {activeTab === 'questions' && renderQuestions()}
-              {activeTab === 'devices' && renderDevices()}
+              {activeTab === 'users' && renderUsersLogs()}
             </>
           )}
         </div>

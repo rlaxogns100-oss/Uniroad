@@ -9,6 +9,7 @@ import RollingPlaceholder from '../components/RollingPlaceholder'
 import ProfileForm from '../components/ProfileForm'
 import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
+import { getSessionId } from '../utils/tracking'
 import { FrontendTimingLogger } from '../utils/timingLogger'
 import { addLog } from '../utils/adminLogger'
 
@@ -117,7 +118,8 @@ export default function ChatPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [sessionId, setSessionId] = useState(() => `session-${Date.now()}`)
+  // 트래킹(events)과 동일한 user_session 사용 → 로그인/비로그인 모두 동일 세션으로 연동
+  const [sessionId, setSessionId] = useState(() => getSessionId())
   const [isSideNavOpen, setIsSideNavOpen] = useState(() => {
     // 데스크톱에서는 기본적으로 열림, 모바일에서는 닫힘
     return window.innerWidth >= 640
@@ -187,18 +189,16 @@ export default function ChatPage() {
   }, [messages, sessionId])
 
   // 초기 로드 시 sessionStorage에서 메시지 복구 (비로그인 또는 새로고침 시)
+  // API 호출용 세션은 항상 getSessionId()로 통일해 events와 session_chat_messages 연동 유지
   useEffect(() => {
     const savedChatMessages = sessionStorage.getItem('uniroad_chat_messages')
-    const savedSessionId = sessionStorage.getItem('uniroad_chat_session_id')
 
     if (savedChatMessages && messages.length === 0 && !currentSessionId) {
       try {
         const parsed = JSON.parse(savedChatMessages)
         if (Array.isArray(parsed) && parsed.length > 0) {
           setMessages(parsed)
-          if (savedSessionId) {
-            setSessionId(savedSessionId)
-          }
+          setSessionId(getSessionId())
         }
       } catch (e) {
         console.error('채팅 메시지 복구 실패:', e)
@@ -490,9 +490,9 @@ export default function ChatPage() {
         setSessionId(currentSessionId)
         // 메시지는 loadMessages가 완료되면 savedMessages에 반영되고, 아래 useEffect에서 처리됨
       } else if (!currentSessionId) {
-        // 새 채팅인 경우
+        // 새 채팅인 경우 — 트래킹과 동일한 user_session 유지
         setMessages([])
-        setSessionId(`session-${Date.now()}`)
+        setSessionId(getSessionId())
       }
     }
   }, [currentSessionId, isAuthenticated])

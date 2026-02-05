@@ -26,6 +26,10 @@ app.add_middleware(
         settings.FRONTEND_URL,
         "http://localhost:5173",
         "http://localhost:5174",
+        "http://localhost:8147",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5174",
+        "http://127.0.0.1:8147",
         "http://localhost:3000",  # Next.js 호환
         "http://3.107.178.26",  # 프로덕션 서버
         "http://172.30.1.20:5173",  # 로컬 네트워크 접근
@@ -81,7 +85,7 @@ async def startup_event():
     try:
         from services.supabase_client import SupabaseService
         client = SupabaseService.get_client()
-        client.table("chat_sessions").select("id").limit(1).execute()
+        client.table("events").select("id").limit(1).execute()
         print("   ✅ Supabase 연결 Warm-up 완료")
     except Exception as e:
         print(f"   ⚠️ Supabase Warm-up 실패 (무시하고 계속): {e}")

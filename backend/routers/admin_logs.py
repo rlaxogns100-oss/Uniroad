@@ -78,7 +78,8 @@ class LogResponse(BaseModel):
 
 @router.get("/logs")
 async def get_logs(limit: int = 500, offset: int = 0):
-    """모든 로그 조회 (최신순)"""
+    """모든 로그 조회 (최신순). Excel 내보내기 시 limit=10000 등으로 요청 가능."""
+    limit = min(max(1, limit), 10000)  # 1~10000 허용
     try:
         result = supabase_service.client.table('admin_logs') \
             .select('*') \
@@ -119,6 +120,59 @@ async def get_logs(limit: int = 500, offset: int = 0):
     
     except Exception as e:
         print(f"❌ 로그 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/logs/by-user")
+async def get_logs_by_user(limit: int = 2000):
+    """
+    admin_logs를 user_id별로 묶어서 반환 (유저별 질문·답변 내역)
+    - user_id가 null이면 비로그인 사용자
+    """
+    try:
+        result = supabase_service.client.table('admin_logs') \
+            .select('id, user_id, timestamp, user_question, final_answer') \
+            .order('timestamp', desc=True) \
+            .limit(limit) \
+            .execute()
+        
+        # user_id별로 그룹화 (None → 'guest' 키로)
+        by_user: Dict[str, List[Dict[str, Any]]] = {}
+        for row in result.data or []:
+            uid = row.get('user_id')
+            key = str(uid) if uid else '__guest__'
+            if key not in by_user:
+                by_user[key] = []
+            by_user[key].append({
+                'id': row['id'],
+                'timestamp': row.get('timestamp'),
+                'userQuestion': row.get('user_question', ''),
+                'finalAnswer': row.get('final_answer') or '',
+            })
+        
+        # 리스트 형태로 반환 (비로그인 먼저, 그 다음 user_id 순)
+        users = []
+        if '__guest__' in by_user:
+            users.append({
+                'userId': None,
+                'label': '비로그인',
+                'logs': by_user['__guest__'],
+                'count': len(by_user['__guest__']),
+            })
+        for uid, logs in by_user.items():
+            if uid == '__guest__':
+                continue
+            users.append({
+                'userId': uid,
+                'label': uid[:8] + '…' if len(uid) > 8 else uid,
+                'logs': logs,
+                'count': len(logs),
+            })
+        
+        return {'users': users, 'totalLogs': sum(len(u['logs']) for u in users)}
+    
+    except Exception as e:
+        print(f"❌ 유저별 로그 조회 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

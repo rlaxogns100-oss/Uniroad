@@ -23,8 +23,71 @@ from utils.timing_logger import TimingLogger
 from utils.admin_filter import should_skip_logging
 from middleware.auth import optional_auth
 from middleware.rate_limit import check_and_increment_usage, get_client_ip
+import uuid
+from datetime import datetime
 
 router = APIRouter()
+
+
+def _record_question_sent(session_id: str, user_id: Optional[str]) -> None:
+    """실제 채팅 전송 시 events에 question_sent 기록 (깔때기 메시지 전송 수 집계용)"""
+    if should_skip_logging(user_id=user_id):
+        return
+    try:
+        client = supabase_service.get_client()
+        utm_row = (
+            client.table("events")
+            .select("utm_source, utm_medium, utm_campaign, utm_content, utm_term")
+            .eq("user_session", session_id)
+            .order("event_time", desc=False)
+            .limit(1)
+            .execute()
+        )
+        utm = utm_row.data[0] if utm_row.data else {}
+        event_data = {
+            "event_time": datetime.now().isoformat(),
+            "event_type": "question_sent",
+            "utm_source": utm.get("utm_source"),
+            "utm_medium": utm.get("utm_medium"),
+            "utm_campaign": utm.get("utm_campaign"),
+            "utm_content": utm.get("utm_content"),
+            "utm_term": utm.get("utm_term"),
+            "user_id": user_id,
+            "user_session": session_id,
+        }
+        client.table("events").insert(event_data).execute()
+    except Exception as e:
+        print(f"⚠️ question_sent 기록 실패 (무시): {e}")
+
+
+def _save_messages_to_session_chat(
+    user_session: str,
+    user_id: Optional[str],
+    user_content: str,
+    assistant_content: str,
+    sources: Optional[List[str]] = None,
+    source_urls: Optional[List[str]] = None,
+) -> None:
+    """session_chat_messages 테이블에 사용자 메시지와 AI 응답 저장"""
+    client = supabase_service.client
+    user_msg_id = str(uuid.uuid4())
+    ai_msg_id = str(uuid.uuid4())
+    client.table("session_chat_messages").insert({
+        "user_session": user_session,
+        "message_id": user_msg_id,
+        "role": "user",
+        "content": user_content,
+        "user_id": user_id,
+    }).execute()
+    client.table("session_chat_messages").insert({
+        "user_session": user_session,
+        "message_id": ai_msg_id,
+        "role": "assistant",
+        "content": assistant_content,
+        "sources": sources,
+        "source_urls": source_urls,
+        "user_id": user_id,
+    }).execute()
 
 # 실시간 로그를 위한 큐
 log_queues: Dict[str, asyncio.Queue] = {}
@@ -35,29 +98,22 @@ conversation_sessions: Dict[str, List[Dict[str, Any]]] = {}
 
 async def load_history_from_db(session_id: str) -> List[Dict[str, Any]]:
     """
-    DB에서 세션 히스토리 로드 (메모리에 없을 경우)
-    세션 전환 시 이전 대화 맥락을 AI에게 전달하기 위함
+    DB에서 세션 히스토리 로드 (session_chat_messages)
     """
     try:
-        # chat_messages 테이블에서 해당 세션의 메시지 가져오기
-        messages_response = supabase_service.client.table("chat_messages")\
+        messages_response = supabase_service.client.table("session_chat_messages")\
             .select("role, content")\
-            .eq("session_id", session_id)\
+            .eq("user_session", session_id)\
             .order("created_at")\
             .limit(20)\
             .execute()
-        
         if messages_response.data:
-            history = []
-            for msg in messages_response.data:
-                history.append({
-                    "role": msg.get("role", "user"),
-                    "content": msg.get("content", "")
-                })
-            return history
+            return [
+                {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+                for msg in messages_response.data
+            ]
     except Exception as e:
         print(f"⚠️ DB에서 히스토리 로드 실패 (무시): {e}")
-    
     return []
 
 
@@ -169,19 +225,7 @@ async def chat(
             else:
                 conversation_sessions[session_id] = []
         history = conversation_sessions[session_id][-20:]
-        
-        # 세션에서 user_id 조회 (프로필 점수 활용용)
-        user_id = None
-        if session_id and session_id != "default":
-            try:
-                session_response = supabase_service.client.table("chat_sessions")\
-                    .select("user_id")\
-                    .eq("id", session_id)\
-                    .execute()
-                if session_response.data and len(session_response.data) > 0:
-                    user_id = session_response.data[0].get("user_id")
-            except Exception as e:
-                log_and_emit(f"⚠️ 세션 user_id 조회 실패 (무시): {e}")
+        # user_id는 optional_auth에서 이미 설정됨 (프로필 점수 활용용)
 
         # ========================================
         # 1단계: Orchestration Agent
@@ -275,51 +319,17 @@ async def chat(
             
             print(f"🟢 [REQUEST_END] {request_id}\n")
 
-            # 메시지를 DB에 저장 (즉시 응답 경로)
+            # 메시지를 session_chat_messages에 저장 + question_sent 이벤트 기록
             try:
-                print(f"📝 메시지 저장 시도: session_id={session_id}")
-                session_check = supabase_service.client.table("chat_sessions")\
-                    .select("id, user_id")\
-                    .eq("id", session_id)\
-                    .execute()
-                
-                print(f"🔍 세션 확인 결과: {session_check.data}")
-                
-                if session_check.data:
-                    print(f"✅ 세션 존재 확인, 메시지 저장 중...")
-                    
-                    # 관리자 계정 확인 (로깅 제외)
-                    user_id = session_check.data[0].get("user_id") if session_check.data else None
-                    is_admin = should_skip_logging(user_id=user_id)
-                    
-                    if is_admin:
-                        print(f"⏭️ 관리자 계정 - 메시지 저장 건너뜀")
-                    else:
-                        # 사용자 메시지 저장
-                        user_msg = supabase_service.client.table("chat_messages").insert({
-                            "session_id": session_id,
-                            "role": "user",
-                            "content": message
-                        }).execute()
-                        print(f"   ✓ 사용자 메시지 저장: {user_msg.data}")
-                        
-                        # AI 응답 메시지 저장
-                        ai_msg = supabase_service.client.table("chat_messages").insert({
-                            "session_id": session_id,
-                            "role": "assistant",
-                            "content": direct_response
-                        }).execute()
-                        print(f"   ✓ AI 응답 메시지 저장: {ai_msg.data}")
-                    
-                    # 세션 updated_at 갱신 (관리자도 갱신)
-                    supabase_service.client.table("chat_sessions")\
-                        .update({"updated_at": "now()"})\
-                        .eq("id", session_id)\
-                        .execute()
-                    
+                if not should_skip_logging(user_id=user_id):
+                    _record_question_sent(session_id, user_id)
+                    _save_messages_to_session_chat(
+                        user_session=session_id,
+                        user_id=user_id,
+                        user_content=message,
+                        assistant_content=direct_response,
+                    )
                     print(f"💾 메시지 저장 완료: {session_id}")
-                else:
-                    print(f"⚠️ 세션이 DB에 존재하지 않음: {session_id}")
             except Exception as save_error:
                 print(f"⚠️ 메시지 저장 실패: {save_error}")
                 import traceback
@@ -432,45 +442,19 @@ async def chat(
         
         print(f"🟢 [REQUEST_END] {request_id}\n")
 
-        # 메시지를 DB에 저장 (세션이 유효한 경우에만) 
-
+        # 메시지를 session_chat_messages에 저장 + question_sent 이벤트 기록
         try:
-            print(f"📝 메시지 저장 시도: session_id={session_id}")
-            # 세션이 존재하는지 확인
-            session_check = supabase_service.client.table("chat_sessions")\
-                .select("id, user_id")\
-                .eq("id", session_id)\
-                .execute()
-            
-            print(f"🔍 세션 확인 결과: {session_check.data}")
-            
-            if session_check.data:
-                print(f"✅ 세션 존재 확인, 메시지 저장 중...")
-                # 사용자 메시지 저장
-                user_msg = supabase_service.client.table("chat_messages").insert({
-                    "session_id": session_id,
-                    "role": "user",
-                    "content": message
-                }).execute()
-                print(f"   ✓ 사용자 메시지 저장: {user_msg.data}")
-                
-                # AI 응답 메시지 저장
-                ai_msg = supabase_service.client.table("chat_messages").insert({
-                    "session_id": session_id,
-                    "role": "assistant",
-                    "content": final_answer
-                }).execute()
-                print(f"   ✓ AI 응답 메시지 저장: {ai_msg.data}")
-                
-                # 세션 updated_at 갱신
-                supabase_service.client.table("chat_sessions")\
-                    .update({"updated_at": "now()"})\
-                    .eq("id", session_id)\
-                    .execute()
-                
+            if not should_skip_logging(user_id=user_id):
+                _record_question_sent(session_id, user_id)
+                _save_messages_to_session_chat(
+                    user_session=session_id,
+                    user_id=user_id,
+                    user_content=message,
+                    assistant_content=final_answer,
+                    sources=sources,
+                    source_urls=source_urls,
+                )
                 print(f"💾 메시지 저장 완료: {session_id}")
-            else:
-                print(f"⚠️ 세션이 DB에 존재하지 않음: {session_id} (로그인이 필요하거나 임시 세션)")
         except Exception as save_error:
             print(f"⚠️ 메시지 저장 실패 (계속 진행): {save_error}")
             import traceback
@@ -668,39 +652,19 @@ async def chat_stream_v2_with_image(
             
             pipeline_time = time.time() - pipeline_start
             
-            # 메시지 저장 (세션 기반 채팅 내역)
+            # 메시지 저장 (session_chat_messages) + question_sent 이벤트 기록
             try:
-                session_check = supabase_service.client.table("chat_sessions")\
-                    .select("id")\
-                    .eq("id", session_id)\
-                    .execute()
-                
-                if session_check.data:
-                    print(f"✅ 세션 존재 확인, 메시지 저장 중... ({session_id})")
-                    
-                    # 사용자 메시지 저장 (이미지 포함 표시)
-                    supabase_service.client.table("chat_messages").insert({
-                        "session_id": session_id,
-                        "role": "user",
-                        "content": user_content
-                    }).execute()
-                    
-                    # AI 응답 메시지 저장
-                    supabase_service.client.table("chat_messages").insert({
-                        "session_id": session_id,
-                        "role": "assistant",
-                        "content": full_response
-                    }).execute()
-                    
-                    # 세션 updated_at 갱신
-                    supabase_service.client.table("chat_sessions")\
-                        .update({"updated_at": "now()"})\
-                        .eq("id", session_id)\
-                        .execute()
-                    
+                if not should_skip_logging(user_id=user_id):
+                    _record_question_sent(session_id, user_id)
+                    _save_messages_to_session_chat(
+                        user_session=session_id,
+                        user_id=user_id,
+                        user_content=user_content,
+                        assistant_content=full_response,
+                        sources=sources,
+                        source_urls=source_urls,
+                    )
                     print(f"💾 메시지 저장 완료: {session_id}")
-                else:
-                    print(f"⚠️ 세션 없음, 메시지 저장 건너뜀: {session_id}")
             except Exception as e:
                 print(f"❌ 메시지 저장 실패: {e}")
             
@@ -789,20 +753,8 @@ async def chat_stream_v2(
         if session_id not in conversation_sessions:
             conversation_sessions[session_id] = []
         history = conversation_sessions[session_id][-20:]
-        
-        # 세션에서 user_id 조회 (프로필 점수 활용용)
-        user_id = None
-        if session_id and session_id != "default":
-            try:
-                session_response = supabase_service.client.table("chat_sessions")\
-                    .select("user_id")\
-                    .eq("id", session_id)\
-                    .execute()
-                if session_response.data and len(session_response.data) > 0:
-                    user_id = session_response.data[0].get("user_id")
-            except Exception as e:
-                print(f"⚠️ 세션 user_id 조회 실패 (무시): {e}")
-        
+        # user_id는 optional_auth에서 온 클로저 변수 사용 (프로필/저장용)
+
         full_response = ""
         timing = {}
         function_results = {}
@@ -846,43 +798,21 @@ async def chat_stream_v2(
             
             pipeline_time = time.time() - pipeline_start
             
-            # 메시지 저장 (세션 기반 채팅 내역)
+            # 메시지 저장 (session_chat_messages) + question_sent 이벤트 기록
             try:
-                # 세션 존재 여부 확인
-                session_check = supabase_service.client.table("chat_sessions")\
-                    .select("id")\
-                    .eq("id", session_id)\
-                    .execute()
-                
-                if session_check.data:
-                    print(f"✅ 세션 존재 확인, 메시지 저장 중... ({session_id})")
-                    
-                    # 사용자 메시지 저장
-                    user_msg = supabase_service.client.table("chat_messages").insert({
-                        "session_id": session_id,
-                        "role": "user",
-                        "content": message
-                    }).execute()
-                    
-                    # AI 응답 메시지 저장
-                    ai_msg = supabase_service.client.table("chat_messages").insert({
-                        "session_id": session_id,
-                        "role": "assistant",
-                        "content": full_response
-                    }).execute()
-                    
-                    # 세션 updated_at 갱신
-                    supabase_service.client.table("chat_sessions")\
-                        .update({"updated_at": "now()"})\
-                        .eq("id", session_id)\
-                        .execute()
-                    
+                if not should_skip_logging(user_id=user_id):
+                    _record_question_sent(session_id, user_id)
+                    _save_messages_to_session_chat(
+                        user_session=session_id,
+                        user_id=user_id,
+                        user_content=message,
+                        assistant_content=full_response,
+                        sources=sources,
+                        source_urls=source_urls,
+                    )
                     print(f"💾 메시지 저장 완료: {session_id}")
-                else:
-                    print(f"⚠️ 세션 없음, 메시지 저장 건너뜀: {session_id}")
             except Exception as e:
                 print(f"❌ 메시지 저장 실패: {e}")
-                # 저장 실패해도 응답은 전송
             
             # 완료 이벤트 전송 (출처 정보 포함)
             done_event = {
@@ -1000,19 +930,7 @@ async def chat_stream(
                     conversation_sessions[session_id] = []
             history = conversation_sessions[session_id][-20:]
             timing_logger.mark("history_loaded")
-            
-            # 세션에서 user_id 조회 (프로필 점수 활용용)
-            user_id = None
-            if session_id and session_id != "default":
-                try:
-                    session_response = supabase_service.client.table("chat_sessions")\
-                        .select("user_id")\
-                        .eq("id", session_id)\
-                        .execute()
-                    if session_response.data and len(session_response.data) > 0:
-                        user_id = session_response.data[0].get("user_id")
-                except Exception as e:
-                    yield send_log(f"⚠️ 세션 user_id 조회 실패 (무시): {e}")
+            # user_id는 stream_v2 상단 optional_auth에서 설정됨 (클로저로 사용)
 
             # ========================================
             # 1단계: Orchestration Agent

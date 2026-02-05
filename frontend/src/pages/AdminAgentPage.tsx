@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
+import * as XLSX from 'xlsx'
 import { 
   getLogs, 
   fetchLogs, 
+  fetchLogsForExport,
   clearLogs, 
   updateLogEvaluation, 
   migrateLocalStorageLogs,
@@ -297,6 +299,7 @@ export default function AdminAgentPage() {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [showMigrateBanner, setShowMigrateBanner] = useState(false)
   const [migrating, setMigrating] = useState(false)
+  const [exporting, setExporting] = useState(false)
   // 평가 전체 중단 (true = 평가 안 함, false = 평가 함)
   const [evaluationPaused, setEvaluationPaused] = useState(() => {
     try {
@@ -436,6 +439,64 @@ export default function AdminAgentPage() {
     }
   }
 
+  // Excel 내보내기 (실행 로그 전부). 셀당 32000자 제한으로 Excel 호환.
+  const handleExportExcel = async () => {
+    setExporting(true)
+    try {
+      const allLogs = await fetchLogsForExport()
+      if (allLogs.length === 0) {
+        alert('내보낼 로그가 없습니다.')
+        return
+      }
+      const MAX_CELL = 32000 // Excel 셀 문자 수 제한
+      const toStr = (v: any): string => {
+        try {
+          if (v == null) return ''
+          if (typeof v === 'string') return v
+          if (Array.isArray(v)) return v.join('\n')
+          return typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)
+        } catch {
+          return ''
+        }
+      }
+      const truncate = (s: string) =>
+        s.length > MAX_CELL ? s.slice(0, MAX_CELL) + '\n...[잘림]' : s
+      const rows = allLogs.map((log) => ({
+        ID: log.id,
+        사용자ID: log.userId ?? '비회원',
+        일시: log.timestamp,
+        이전대화: truncate(toStr(log.conversationHistory)),
+        사용자질문: truncate(toStr(log.userQuestion)),
+        Router출력: truncate(toStr(log.routerOutput)),
+        Function결과: truncate(toStr(log.functionResult)),
+        최종답변: truncate(toStr(log.finalAnswer)),
+        소요시간ms: log.elapsedTime,
+        'R(초)': ((log.timing?.router ?? 0) / 1000).toFixed(2),
+        'F(초)': ((log.timing?.function ?? 0) / 1000).toFixed(2),
+        'M(초)': ((log.timing?.main_agent ?? 0) / 1000).toFixed(2),
+        Router평가: log.evaluation?.routerStatus ?? '',
+        Function평가: log.evaluation?.functionStatus ?? '',
+        답변평가: log.evaluation?.answerStatus ?? '',
+        시간평가: log.evaluation?.timeStatus ?? '',
+        Router코멘트: truncate(toStr(log.evaluation?.routerComment)),
+        Function코멘트: truncate(toStr(log.evaluation?.functionComment)),
+        답변코멘트: truncate(toStr(log.evaluation?.answerComment)),
+        시간코멘트: truncate(toStr(log.evaluation?.timeComment)),
+      }))
+      const ws = XLSX.utils.json_to_sheet(rows)
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, '실행로그')
+      const fileName = `admin_agent_logs_${new Date().toISOString().slice(0, 10)}_${Date.now()}.xlsx`
+      XLSX.writeFile(wb, fileName)
+    } catch (e: any) {
+      console.error('Excel 내보내기 오류:', e)
+      const msg = e?.message || String(e)
+      alert(`Excel 내보내기에 실패했습니다.${msg ? `\n${msg}` : ''}`)
+    } finally {
+      setExporting(false)
+    }
+  }
+
   // 평가 중단/시작 토글 (localStorage에 저장)
   const toggleEvaluationPaused = () => {
     setEvaluationPaused(prev => {
@@ -514,6 +575,14 @@ export default function AdminAgentPage() {
               className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors text-sm disabled:opacity-50"
             >
               {loading ? '로딩...' : '새로고침'}
+            </button>
+            <button
+              onClick={handleExportExcel}
+              disabled={exporting || logs.length === 0}
+              className="px-3 py-2 bg-green-100 hover:bg-green-200 text-green-800 rounded-lg transition-colors text-sm disabled:opacity-50"
+              title="실행 로그 전체를 Excel로 다운로드합니다"
+            >
+              {exporting ? '내보내는 중...' : 'Excel 내보내기'}
             </button>
             <button
               onClick={handleClearLogs}

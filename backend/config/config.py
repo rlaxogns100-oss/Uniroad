@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
+        extra = "ignore"  # .env의 VITE_* 등 미정의 변수 무시
 
 
 @lru_cache()
