@@ -46,6 +46,21 @@ export function parseUTMParams(): Record<string, string | null> {
 // UTM 파라미터 저장 (세션 동안 유지)
 const UTM_KEY = 'uniroad_utm_params'
 
+// 진입 URL (세션 동안 유지 - 사용자가 처음 들어온 랜딩 페이지 URL)
+const ENTRY_URL_KEY = 'uniroad_entry_url'
+
+/** 세션에서 진입 URL 가져오기 (처음 들어온 페이지의 전체 URL) */
+export function getEntryUrl(): string | null {
+  return sessionStorage.getItem(ENTRY_URL_KEY)
+}
+
+/** 진입 URL 저장 - 아직 없을 때만 저장 (첫 방문 페이지) */
+export function setEntryUrlIfEmpty(): void {
+  if (!sessionStorage.getItem(ENTRY_URL_KEY)) {
+    sessionStorage.setItem(ENTRY_URL_KEY, window.location.href)
+  }
+}
+
 export function saveUTMParams(): void {
   const utm = parseUTMParams()
   // UTM 파라미터가 있을 때만 저장
@@ -67,7 +82,7 @@ export function getPageType(pathname: string): string {
   if (pathname === '/') return 'landing'
   if (pathname.includes('/chat')) return 'chat'
   if (pathname.includes('/auth')) return 'auth'
-  if (pathname.includes('/admin') || pathname.includes('/upload') || pathname.includes('/analytics')) return 'admin'
+  if (pathname.includes('/admin') || pathname.includes('/upload')) return 'admin'
   return 'other'
 }
 
@@ -181,6 +196,8 @@ export function trackPageLeave(): void {
 
 // 자동 추적 초기화
 export function initializeTracking(): void {
+  // 진입 URL 저장 (첫 방문 페이지만, 세션당 한 번)
+  setEntryUrlIfEmpty()
   // UTM 파라미터 저장
   saveUTMParams()
   

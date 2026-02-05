@@ -208,14 +208,7 @@ export default function ChatPage() {
 
   // savedMessages가 변경되면 로컬 messages 상태에 동기화
   useEffect(() => {
-    console.log('🔄 [ChatPage] savedMessages 변경 감지:', {
-      savedMessagesLength: savedMessages?.length,
-      currentSessionId,
-      savedMessages
-    })
-    
     if (savedMessages && savedMessages.length > 0) {
-      // 메시지가 있을 때만 변환
       const convertedMessages: Message[] = savedMessages.map(msg => ({
         id: msg.id,
         text: msg.content,
@@ -223,20 +216,9 @@ export default function ChatPage() {
         sources: msg.sources,
         source_urls: msg.source_urls,
       }))
-      console.log('✅ [ChatPage] 메시지 변환 완료:', convertedMessages.length, '개')
       setMessages(convertedMessages)
     } else if (savedMessages && savedMessages.length === 0 && currentSessionId && !isStreamingRef.current) {
-      // 세션이 선택되었지만 메시지가 없는 경우 (새 세션)
-      // 단, 스트리밍 중이 아닐 때만 (메시지 전송 중에는 로컬 메시지 유지)
-      console.log('🆕 [ChatPage] 빈 세션으로 설정')
       setMessages([])
-    } else {
-      console.log('⚠️ [ChatPage] 조건 불일치:', { 
-        hasSavedMessages: !!savedMessages, 
-        length: savedMessages?.length, 
-        hasSessionId: !!currentSessionId,
-        isStreaming: isStreamingRef.current
-      })
     }
   }, [savedMessages, currentSessionId])
 

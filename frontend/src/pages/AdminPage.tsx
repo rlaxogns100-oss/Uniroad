@@ -324,29 +324,12 @@ export default function AdminPage() {
               <span className="text-sm text-center">댓글 봇</span>
             </button>
             <button
-              onClick={() => navigate('/analytics')}
-              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-indigo-100 text-indigo-800 hover:bg-indigo-200 transition-colors font-medium border border-indigo-200"
+              onClick={() => navigate('/admin-analytics')}
+              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors font-medium border border-amber-200"
             >
               <span className="text-2xl">📊</span>
-              <span className="text-sm text-center">실시간 분석</span>
-            </button>
-            <button
-              onClick={() => navigate('/admin-analytics')}
-              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-purple-100 text-purple-800 hover:bg-purple-200 transition-colors font-medium border border-purple-200"
-            >
-              <span className="text-2xl">📉</span>
               <span className="text-sm text-center">관리자 분석</span>
             </button>
-            <a
-              href="https://analytics.google.com/analytics/web/#/analysis/a382271955p521910579/edit/iAeobtq1RAOuwPn3j53_fA"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors font-medium border border-blue-200"
-              title="GA4 계정으로 로그인 후 방문하면 자동으로 분석 페이지가 열립니다"
-            >
-              <span className="text-2xl">📈</span>
-              <span className="text-sm text-center">GA4 Analytics</span>
-            </a>
           </div>
         </div>
       </div>

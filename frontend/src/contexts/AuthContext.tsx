@@ -95,10 +95,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = async (email: string, password: string): Promise<User | null> => {
     try {
-      const response = await axios.post('/api/auth/signin', { email, password })
+      const response = await axios.post('/api/auth/signin', { email, password }, { timeout: 15000 })
       const { access_token, user: userData } = response.data
-      
-      console.log('✅ 로그인 성공:', userData)
       
       setAccessToken(access_token)
       setUser(userData)
@@ -106,14 +104,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem('access_token', access_token)
       localStorage.setItem('user', JSON.stringify(userData))
       
-      // 로그인 성공 후 리다이렉트
       const isAdmin = userData?.name === '김도균' || userData?.email === 'herry0515@naver.com'
       window.location.href = isAdmin ? '/chat/login/admin' : '/chat/login'
       
       return userData
     } catch (error: any) {
-      console.error('❌ 로그인 실패:', error)
-      throw new Error(error.response?.data?.detail || '로그인 실패')
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        throw new Error('요청 시간이 초과되었습니다. 백엔드가 켜져 있는지 확인해 주세요.')
+      }
+      if (!error.response) {
+        throw new Error('서버에 연결할 수 없습니다. 네트워크와 백엔드를 확인해 주세요.')
+      }
+      const detail = error.response?.data?.detail
+      throw new Error(typeof detail === 'string' ? detail : '로그인 실패')
     }
   }
 

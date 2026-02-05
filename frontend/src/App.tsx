@@ -9,8 +9,9 @@ import AdminAgentPage from './pages/AdminAgentPage'
 import AuthPage from './pages/AuthPage'
 import TimingDashboard from './pages/TimingDashboard'
 import AutoReplyPage from './pages/AutoReplyPage'
-import AnalyticsDashboard from './pages/AnalyticsDashboard'
-import AdminAnalytics from './pages/AdminAnalytics'
+import AdminAnalyticsLayout from './pages/AdminAnalyticsLayout'
+import AdminAnalyticsKpi from './pages/AdminAnalyticsKpi'
+import AdminAnalyticsBehavior from './pages/AdminAnalyticsBehavior'
 import { useEffect } from 'react'
 import { initializeTracking, trackPageView } from './utils/tracking'
 
@@ -86,7 +87,7 @@ function App() {
   }, [])
   
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
         <PageTracker />
         <Routes>
@@ -96,6 +97,14 @@ function App() {
           {/* 로그인 후 채팅 페이지 */}
           <Route
             path="/chat/login/admin"
+            element={
+              <AdminRoute>
+                <AdminPage />
+              </AdminRoute>
+            }
+          />
+          <Route
+            path="/chat/admin"
             element={
               <AdminRoute>
                 <AdminPage />
@@ -148,22 +157,11 @@ function App() {
             }
           />
           <Route path="/auto-reply" element={<AutoReplyPage />} />
-          <Route
-            path="/analytics"
-            element={
-              <AdminRoute>
-                <AnalyticsDashboard />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/admin-analytics"
-            element={
-              <AdminRoute>
-                <AdminAnalytics />
-              </AdminRoute>
-            }
-          />
+          <Route path="/admin-analytics" element={<AdminRoute><AdminAnalyticsLayout /></AdminRoute>}>
+            <Route index element={<Navigate to="/admin-analytics/kpi" replace />} />
+            <Route path="kpi" element={<AdminAnalyticsKpi />} />
+            <Route path="behavior" element={<AdminAnalyticsBehavior />} />
+          </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AuthProvider>

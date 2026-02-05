@@ -2,6 +2,8 @@
  * Admin Logger - 실행 로그를 Supabase에 저장
  */
 
+import { getEntryUrl } from './tracking'
+
 export interface ExecutionLog {
   id: string
   userId?: string  // 사용자 ID (Supabase Auth)
@@ -12,6 +14,7 @@ export interface ExecutionLog {
   functionResult: any            // Function 결과
   finalAnswer: string            // 최종 답변
   elapsedTime: number            // 소요시간 (ms)
+  entryUrl?: string | null       // 진입한 랜딩 페이지 URL
   
   // 단계별 시간 측정 (ms)
   timing?: {
@@ -112,12 +115,15 @@ export async function addLog(
       } catch {}
     }
 
+    const entryUrl = getEntryUrl()
+
     const response = await fetch('/api/admin/logs', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...log,
-        userId
+        userId,
+        entryUrl: entryUrl || undefined
       })
     })
     

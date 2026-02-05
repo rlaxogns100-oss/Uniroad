@@ -49,6 +49,7 @@ class CreateLogRequest(BaseModel):
     elapsedTime: int = 0
     timing: Optional[TimingInfo] = None
     userId: Optional[str] = None
+    entryUrl: Optional[str] = None  # 진입한 랜딩 페이지 URL
 
 
 class UpdateEvaluationRequest(BaseModel):
@@ -72,6 +73,7 @@ class LogResponse(BaseModel):
     functionResult: Optional[Any] = None
     finalAnswer: Optional[str] = None
     elapsedTime: int
+    entryUrl: Optional[str] = None
     timing: Optional[TimingInfo] = None
     evaluation: Optional[EvaluationInfo] = None
 
@@ -99,6 +101,7 @@ async def get_logs(limit: int = 500, offset: int = 0):
                 'functionResult': row.get('function_result'),
                 'finalAnswer': row.get('final_answer'),
                 'elapsedTime': row.get('elapsed_time', 0),
+                'entryUrl': row.get('진입_url'),
                 'timing': {
                     'router': row.get('timing_router', 0),
                     'function': row.get('timing_function', 0),
@@ -204,8 +207,8 @@ async def create_log(request: CreateLogRequest):
         
         if not log_id:
             raise HTTPException(status_code=500, detail="ID 생성 실패")
-        
-        # 데이터 준비
+
+        # 데이터 준비 (필수 컬럼만)
         data = {
             'id': log_id,
             'user_id': request.userId if request.userId else None,
@@ -221,11 +224,35 @@ async def create_log(request: CreateLogRequest):
             'eval_router_status': 'pending',
             'eval_function_status': 'pending',
             'eval_answer_status': 'pending',
-            'eval_time_status': 'pending'
+            'eval_time_status': 'pending',
+            '진입_url': request.entryUrl,
         }
-        
-        result = supabase_service.client.table('admin_logs').insert(data).execute()
-        
+
+        # is_same_person: 컬럼이 있으면 설정 (없으면 제외하고 저장해 로그 유실 방지)
+        try:
+            if request.userId:
+                prev = supabase_service.client.table('admin_logs') \
+                    .select('id') \
+                    .eq('user_id', request.userId) \
+                    .limit(1) \
+                    .execute()
+                if prev.data and len(prev.data) > 0:
+                    data['is_same_person'] = request.userId
+                else:
+                    data['is_same_person'] = None
+        except Exception:
+            pass  # is_same_person 조회 실패해도 로그 저장은 진행
+
+        try:
+            result = supabase_service.client.table('admin_logs').insert(data).execute()
+        except Exception as insert_err:
+            # is_same_person 컬럼 없음 등으로 실패 시 해당 필드 제거 후 재시도
+            if 'is_same_person' in data:
+                data.pop('is_same_person', None)
+                result = supabase_service.client.table('admin_logs').insert(data).execute()
+            else:
+                raise insert_err
+
         if not result.data:
             raise HTTPException(status_code=500, detail="로그 저장 실패")
         
@@ -240,6 +267,7 @@ async def create_log(request: CreateLogRequest):
             'functionResult': row.get('function_result'),
             'finalAnswer': row.get('final_answer'),
             'elapsedTime': row.get('elapsed_time', 0),
+            'entryUrl': row.get('진입_url'),
             'timing': {
                 'router': row.get('timing_router', 0),
                 'function': row.get('timing_function', 0),
