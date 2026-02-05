@@ -29,17 +29,17 @@ ACCOUNTS = {
     "horse324": {
         "name": "수만휘 계정 (horse324)",
         "naver_id": "horse324",
-        "nicknames": ["하늘담아", "도군"]
+        "nicknames": ["하늘담아", "도군", "화궁"]
     },
     "hao_yj": {
         "name": "수험생카페 계정 (hao_yj)",
         "naver_id": "hao_yj",
-        "nicknames": ["포만한", "사르르녹는초코칩"]
+        "nicknames": ["포만한", "사르르녹는초코칩", "화궁"]
     },
     "herry0515": {
         "name": "맘카페 계정 (herry0515)",
         "naver_id": "herry0515",
-        "nicknames": []
+        "nicknames": ["화궁"]
     },
 }
 
