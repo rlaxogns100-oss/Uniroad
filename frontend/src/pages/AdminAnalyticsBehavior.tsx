@@ -250,8 +250,9 @@ export default function AdminAnalyticsBehavior() {
                   if (point?.persons?.length) fetchGroupDetails(point)
                 }}
                 cursor="pointer"
-                shape={(props: { cx: number; cy: number; index?: number }, index?: number) => {
-                  const { cx, cy } = props
+                shape={(props: { cx?: number; cy?: number; index?: number }, index?: number) => {
+                  const cx = props.cx ?? 0
+                  const cy = props.cy ?? 0
                   const i = typeof index === 'number' ? index : props.index ?? 0
                   const fill = COLORS[i % COLORS.length]
                   return (
