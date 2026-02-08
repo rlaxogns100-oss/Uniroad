@@ -342,9 +342,25 @@ async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
         
         try:
             if func_name == "univ":
+                # university와 query 파라미터 처리 (리스트 또는 문자열)
+                university_param = params.get("university", "")
+                query_param = params.get("query", "")
+                
+                # university: 리스트면 첫 번째 요소, 문자열이면 그대로
+                if isinstance(university_param, list):
+                    university = university_param[0] if university_param else ""
+                else:
+                    university = university_param
+                
+                # query: 리스트면 공백으로 조인, 문자열이면 그대로
+                if isinstance(query_param, list):
+                    query = " ".join(query_param)
+                else:
+                    query = query_param
+                
                 result = await rag.univ(
-                    university=params.get("university", ""),
-                    query=params.get("query", "")
+                    university=university,
+                    query=query
                 )
                 results[f"univ_{idx}"] = result
             

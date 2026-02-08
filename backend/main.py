@@ -7,10 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from config import settings
-from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs, admin_stats, profile, functions, auto_reply, tracking
+from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs, admin_stats, profile, functions, auto_reply, tracking, test_evaluate
 from routes import calculator
 import os
-# agent_admin은 router_agent 테스트 중 비활성화
+# agent_admin은 orchestration_agent 모듈 없어서 비활성화
 
 # FastAPI 앱 생성
 app = FastAPI(
@@ -26,10 +26,15 @@ app.add_middleware(
         settings.FRONTEND_URL,
         "http://localhost:5173",
         "http://localhost:5174",
+        "http://localhost:5175",
         "http://localhost:8147",
+        "http://localhost:8148",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
+        "http://127.0.0.1:5175",
         "http://127.0.0.1:8147",
+        "http://127.0.0.1:8148",
+        "http://127.0.0.1:8149",
         "http://localhost:3000",  # Next.js 호환
         "http://3.107.178.26",  # 프로덕션 서버
         "http://172.30.1.20:5173",  # 로컬 네트워크 접근
@@ -47,7 +52,7 @@ app.include_router(profile.router, prefix="/api/profile", tags=["프로필"])
 app.include_router(chat.router, prefix="/api/chat", tags=["채팅"])
 app.include_router(upload.router, prefix="/api/upload", tags=["업로드"])
 app.include_router(documents.router, prefix="/api/documents", tags=["문서관리"])
-# app.include_router(agent_admin.router, prefix="/api/agent", tags=["에이전트관리"])  # router_agent 테스트 중 비활성화
+# app.include_router(agent_admin.router, prefix="/api/agent", tags=["에이전트관리"])  # orchestration_agent 모듈 없어서 비활성화
 app.include_router(announcements.router, prefix="/api/announcements", tags=["공지사항"])
 app.include_router(admin_evaluate.router, prefix="/api/admin", tags=["관리자평가"])
 app.include_router(admin_logs.router, prefix="/api/admin", tags=["관리자로그"])
@@ -56,6 +61,7 @@ app.include_router(calculator.calculator_bp, prefix="/api/calculator", tags=["�
 app.include_router(functions.router, prefix="/api/functions", tags=["Functions"])
 app.include_router(auto_reply.router, prefix="/api/auto-reply", tags=["자동댓글봇"])
 app.include_router(tracking.router, tags=["추적"])
+app.include_router(test_evaluate.router, prefix="/api/test", tags=["테스트평가"])
 
 # 정적 파일 경로 설정
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

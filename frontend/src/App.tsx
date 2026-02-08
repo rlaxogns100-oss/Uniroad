@@ -12,6 +12,7 @@ import AutoReplyPage from './pages/AutoReplyPage'
 import AdminAnalyticsLayout from './pages/AdminAnalyticsLayout'
 import AdminAnalyticsKpi from './pages/AdminAnalyticsKpi'
 import AdminAnalyticsBehavior from './pages/AdminAnalyticsBehavior'
+import AgentTestPage from './pages/AgentTestPage'
 import { useEffect } from 'react'
 import { initializeTracking, trackPageView } from './utils/tracking'
 
@@ -157,6 +158,14 @@ function App() {
             }
           />
           <Route path="/auto-reply" element={<AutoReplyPage />} />
+          <Route
+            path="/agent-test"
+            element={
+              <AdminRoute>
+                <AgentTestPage />
+              </AdminRoute>
+            }
+          />
           <Route path="/admin-analytics" element={<AdminRoute><AdminAnalyticsLayout /></AdminRoute>}>
             <Route index element={<Navigate to="/admin-analytics/kpi" replace />} />
             <Route path="kpi" element={<AdminAnalyticsKpi />} />

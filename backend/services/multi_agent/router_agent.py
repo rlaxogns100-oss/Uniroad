@@ -33,42 +33,7 @@ ROUTER_CONFIG = {
 # ============================================================
 
 AVAILABLE_FUNCTIONS = [
-    {
-        "name": "univ",
-        "params": ["university", "query"],
-        "description": "특정 대학의 입시 정보 검색",
-        "examples": [
-            {"university": "서울대학교", "query": "2026학년도 기계공학부 정시"},
-            {"university": "경희대학교", "query": "2025학년도 정시 입결"}
-        ]
-    },
-    {
-        "name": "consult_jungsi",
-        "params": ["j_scores", "target_univ", "target_major", "target_range"],
-        "description": "정시 성적 기반 합격 가능성 분석 (환산점수 계산 포함)",
-        "score_format": "11232 = 국1/수1/영2/탐1=3/탐2=2",
-        "examples": [
-            {
-                "j_scores": {"국어": {"type": "등급", "value": 1}, "수학": {"type": "등급", "value": 1}},
-                "target_univ": ["경희대학교"],
-                "target_major": ["기계공학과"],
-                "target_range": ["도전"]
-            }
-        ]
-    },
-    {
-        "name": "consult_susi",
-        "params": ["s_scores", "university", "junhyung", "department"],
-        "description": "수시 전형결과 조회 (학과별, 전형별 70%컷, 경쟁률, 충원률 등)",
-        "examples": [
-            {
-                "s_scores": [1.4, 1.1],
-                "university": ["서울대학교"],
-                "junhyung": ["교과전형", "학생부종합전형"],
-                "department": ["기계공학과"]
-            }
-        ]
-    }
+
 ]
 
 
@@ -86,37 +51,25 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
 - "나 고1인데" -> 2028년도 입시, "나 18살인데" -> 2027년도 입시(나이에 맞는 입시 요강 우선 탐색)
 - 입시 결과는 최신 자료만 사용(2025학년도)
 
-## 사용 가능한 함수: "univ", "consult_jungsi", "consult_susi"
-** 학생의 질문이 '정시'에 관한 것인지 '수시'에 관한 것인지 정확하게 판단하여 consult_jungsi와 consult_susi 중 호출해야 할 것을 정하세요.
- - **univ:** 특정 대학의 입시 요강을 조회.
- - **consult_jungsi:** 대학의 정시 입결 조회, 정시 성적 대학별 환산, 정시 성적에 따른 합격 가능성 평가 및 대학 추천
- - **consult_susi:** 대학의 수시 전형결과 조회(학과별, 전형별 70%컷, 경쟁률, 충원률 등)
+## functions 목록: "univ", "consult_jungsi", "consult_susi"
+학생의 질문에 답하기 위해 어떤 정보가 필요할지 정확하게 판단하여 호출할 함수를 정하세요.
+ - **univ(university, query):** 특정 대학의 입시 요강, 작년도 입시 결과 조회
+ - **consult_jungsi(j_score, university, department, range):** 여러 대학의 정시 결과 조회, 정시 성적 대학별 환산, 정시 성적에 따른 합격 가능성 평가 및 대학 추천
+ - **consult_susi(s_scores, university, department, junhyung):** 여러 대학의 수시 전형결과 조회(학과별, 전형별 70%컷, 경쟁률, 충원률 등)
+### 구체적인 학생의 성적대와 비교할 때에는 consult_jungsi 또는 consult_susi 함수를 꼭 호출할 것
+### 위의 function-params 관계를 고수할 것. 예를 들어 consult_susi 함수를 호출할 때 range를 넣지 말 것.
 
 
-## univ(university, query) 함수 구조
+## params 목록: "university", "query", "range", "department", "junhyung", "j_scores", "s_scores"
+### 기본값은 빈 배열(단, Univ 함수의 university는 1개로 고정), 언급된 대학 전부 호출(sky 공대 -> 서울대, 연세대, 고려대, 중경외시 -> 중앙대학교, 연세대학교, 고려대학교, 서울시립대학교), 최대 개수는 8개
 - **university:** 대학 정식명칭 (서울대학교, 경희대학교)
-- **query:** 검색 쿼리 (연도 + 전형 + 학과 명시)
+- **query:** 검색 쿼리 (연도 + 학교 반드시 명시, 여러 전형이나 학과가 언급되면 모두 포함)
+- **range:** 분석 범위 리스트 ('안정', '적정', '소신', '도전', '어려움' 중 하나 선택, 없으면 [] = 전체 범위)
+- **department:** 학과/전공 명칭
+- **junhyung:** 잠재능력우수자, 가야인재 등의 대학별 전형 이름과 교과위주, 학생부종합 등의 일반적인 전형 이름을 모두 포함.
+- **j_scores:** 제시된 정시 성적
+- **s_scores:** 제시된 평균 내신
 
-### univ 함수 예시: 올해 수능으로 서울대 가려면 어떻게 해?
-```json
-{
-  "function_calls": [
-    {
-      "function": "univ",
-      "params": {
-        "university": "서울대학교",
-        "query": "2026학년도 서울대학교 정시 모집요강", "2025학년도 서울대학교 정시 입결"
-      }
-    }
-  ]
-}
-```
-
-## consult_jungsi(scores, target_univ, target_major, target_range) 함수 구조
-- **j_scores:** 성적 딕셔너리
-- **target_univ:** 분석 대상 대학 리스트 (대학 정식 명칭, 없으면 [])
-- **target_major:** 관심 학과 리스트 (정식 학과 명칭, 없으면 [])
-- **target_range:** 분석 범위 리스트 ('안정', '적정', '소신', '도전', '어려움' 중 하나 선택, 없으면 [] = 전체 범위)
 
 ### j_scores 입력 방법
  - 학생의 입력 값에 따라 과목별 '표준점수', '등급', '백분위' 중 하나로 구분하여 작성
@@ -138,15 +91,77 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
     "탐구2": {"type": "등급", "value": 2, "과목명": "사회문화"}
   }
 }
+
 ```
-- type: "등급", "표준점수", "백분위"
-- 탐구 과목은 키를 "탐구1", "탐구2"로 고정하고, 과목명이 언급된 경우 "과목명" 필드 추가
-- 한국사는 항상 포함 (미언급 시 1등급으로 기본 추정)
 
+* type: "등급", "표준점수", "백분위"
+* 탐구 과목은 키를 "탐구1", "탐구2"로 고정하고, 과목명이 언급된 경우 "과목명" 필드 추가
+* 한국사는 항상 포함 (미언급 시 1등급으로 기본 추정)
 
-## consult_jungsi 함수 예시(나 11232인데 경희대 갈 수 있어?)
+## 함수 사용 예시
 
-(나 11232인데 경희대 갈 수 있어?)
+### 질문1: 올해 수능으로 서울대 가려면 어떻게 해?
+
+```json
+{
+  "function_calls": [
+    {
+      "function": "univ",
+      "params": {
+        "university": ["서울대학교"],
+        "query": ["2026학년도 서울대학교 정시 모집요강", "2025학년도 서울대학교 정시 입결"]
+      }
+    }
+  ]
+}
+
+```
+
+### 질문2: 나 내신 1.4인데 1.1까지 올리면 서울대 기계공학과 갈 수 있을까?
+
+```json
+{
+  "function_calls": [
+    {
+      "function": "univ",
+      "params": {
+        "university": ["서울대학교"],
+        "query": ["2026학년도 서울대학교 정시 모집요강", "2025학년도 서울대학교 정시 입결"]
+      }
+    },
+    {
+      "function": "consult_susi",
+      "params": {
+        "university": ["서울대학교"],
+        "s_scores": ["1.1", "1.4"],
+        "department": ["기계공학과", "기계공학부"]
+      }
+    }
+  ]
+}
+
+```
+
+### 질문3(질문 2에 이어 연속 질문 Context 유지) : 그럼 어디 갈 수 있어?
+
+```json
+{
+  "function_calls": [
+    {
+      "function": "consult_susi",
+      "params": {
+        "university": [],
+        "s_scores": ["1.1", "1.4"],
+        "department": ["기계공학과", "기계공학부"]
+      }
+    }
+  ]
+}
+
+```
+
+### 질문4(복합질문): 나 11232인데 경희대 갈 수 있어? 아니면 아무 공대나 추천해 줘.
+
 ```json
 {
   "function_calls": [
@@ -160,50 +175,61 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
           "탐구1": {"type": "등급", "value": 3},
           "탐구2": {"type": "등급", "value": 2}
         },
-        "target_univ": ["경희대학교"],
-        "target_major": [],
-        "target_range": []
+        "university": ["경희대학교"],
+        "department": [],
+        "range": []
+      }
+    },
+    {
+      "function": "consult_jungsi",
+      "params": {
+        "j_scores": {
+          "국어": {"type": "등급", "value": 1},
+          "수학": {"type": "등급", "value": 1},
+          "영어": {"type": "등급", "value": 2},
+          "탐구1": {"type": "등급", "value": 3},
+          "탐구2": {"type": "등급", "value": 2}
+        },
+        "university": [""],
+        "department": [],
+        "range": ["안정", "적정", "도전"]
       }
     },
     {
       "function": "univ",
       "params": {
-        "university": "경희대학교",
-        "query": "2026학년도 경희대학교 정시 모집요강"
+        "university": ["경희대학교"],
+        "query": ["2026학년도 경희대학교 정시 모집요강"]
       }
     }
   ]
 }
+
 ```
 
-## consult_susi(s_scores, university, junhyung, department) 함수 구조
- - **s_scores:** 제시된 평균 내신 및 목표 내신
- - **university:** 정식 대학 명칭
- - **junhyung:** 잠재능력우수자, 가야인재 등의 대학별 전형 이름과 교과위주, 학생부종합 등의 일반적인 전형 이름을 모두 포함, 호출시 애매하면 두 가지를 같이 호출
- - **department:** 학과/전공 명칭
+```
 
-### consult_susi 함수 예시: 나 내신 1.4인데 1.1까지 올리면 서울대 기계공학과 갈 수 있을까?
+### 질문5(이전 히스토리를 반영한 쿼리생성): 각각 수능최저 알려줘
+
+#### 이전 대화: user: 연세대학교 수시 전형이 뭐가 있어? bot:학생부교과전형(추천형),학생부종합전형(활동우수형), 논술전형, 특기자전형
+
 ```json
 {
   "function_calls": [
     {
-      "function": "consult_susi",
+      "function": "univ",
       "params": {
-        "university": ["서울대학교"],
-        "s_scores": [1.4, 1.1],
-        "junhyung": ["교과전형", "학생부종합전형", "일반전형"],
-        "department": ["기계공학과", "기계공학부"]
+        "university": ["연세대학교"],
+        "query": ["2026학년도 연세대학교 학생부교과전형(추천형) 수능 최저학력기준", "2026학년도 연세대학교 학생부교과전형(추천형) 수능 최저학력기준", "2026학년도 연세대학교 논술전형 수능 최저학력기준","2026학년도 연세대학교 특기자전형 수능 최저학력기준"]
       }
     }
   ]
 }
+
 ```
 
 
-### 출력 형식
-**기본값은 빈 배열:** 함수 항목에 상관없이 언급되지 않으면 []
-**포괄적으로 호출:** 언급되었으나 애매하면 포괄적으로 호출 (예, sky 공대중에 내신 2.3으로 갈 곳 알려줘 -> consult_susi, univ(서울대, 연세대, 고려대) 호출)
-**연도 명시**: 항상 "XXXX학년도" 포함
+
 
 반드시 JSON만 출력하세요. 다른 텍스트 절대 금지.
 """
@@ -212,11 +238,13 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
 class RouterAgent:
     """Router Agent"""
     
-    def __init__(self):
+    def __init__(self, system_prompt: str = None):
+        prompt = system_prompt if system_prompt else ROUTER_SYSTEM_PROMPT
         self.model = genai.GenerativeModel(
             model_name=ROUTER_CONFIG["model"],
-            system_instruction=ROUTER_SYSTEM_PROMPT
+            system_instruction=prompt
         )
+        self.system_prompt = prompt  # 현재 사용 중인 프롬프트 저장
         self.generation_config = {
             "temperature": ROUTER_CONFIG["temperature"],
             "max_output_tokens": ROUTER_CONFIG["max_output_tokens"],
@@ -359,12 +387,34 @@ class RouterAgent:
 
 # 싱글톤
 _router = None
+_custom_prompt = None  # 프론트에서 설정한 커스텀 프롬프트
 
 def get_router() -> RouterAgent:
     global _router
     if _router is None:
         _router = RouterAgent()
     return _router
+
+
+def set_router_prompt(prompt: str) -> None:
+    """프론트엔드에서 프롬프트 동적 변경"""
+    global _router, _custom_prompt
+    _custom_prompt = prompt
+    # 새 프롬프트로 라우터 재생성
+    _router = RouterAgent(system_prompt=prompt)
+
+
+def get_router_prompt() -> str:
+    """현재 사용 중인 프롬프트 반환"""
+    global _custom_prompt
+    return _custom_prompt if _custom_prompt else ROUTER_SYSTEM_PROMPT
+
+
+def reset_router_prompt() -> None:
+    """기본 프롬프트로 리셋"""
+    global _router, _custom_prompt
+    _custom_prompt = None
+    _router = RouterAgent()
 
 
 async def route_query(message: str, history: List[Dict] = None, user_id: str = None) -> Dict[str, Any]:
