@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Router Agent JSON Generator</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        body {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .container {
+            display: flex;
+            gap: 20px;
+        }
+        .input-section {
+            flex: 1;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+        .output-section {
+            flex: 1;
+            background: #1e1e1e;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            position: sticky;
+            top: 20px;
+            max-height: 85vh;
+        }
+        .function-group {
+            margin-bottom: 20px;
+        }
+        .function-group-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #e3f2fd;
+            padding: 10px 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+        .function-group-header h3 {
+            margin: 0;
+            color: #1565C0;
+        }
+        .function-block {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            background: #fafafa;
+            position: relative;
+        }
+        .function-block-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .function-block-header span {
+            font-weight: bold;
+            color: #333;
+        }
+        .function-block.disabled {
+            opacity: 0.5;
+        }
+        label {
+            display: block;
+            margin: 10px 0 5px;
+            font-weight: bold;
+            color: #555;
+        }
+        input[type="text"], select, textarea {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        input[type="text"]:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #2196F3;
+        }
+        .hint {
+            font-size: 12px;
+            color: #888;
+            margin-top: 3px;
+        }
+        .checkbox-group {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
+        .checkbox-group label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-weight: normal;
+        }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        .btn-primary {
+            background: #2196F3;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #1976D2;
+        }
+        .btn-add {
+            background: #4CAF50;
+            color: white;
+            padding: 8px 15px;
+            font-size: 13px;
+        }
+        .btn-add:hover {
+            background: #388E3C;
+        }
+        .btn-remove {
+            background: #f44336;
+            color: white;
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        .btn-remove:hover {
+            background: #d32f2f;
+        }
+        .btn-success {
+            background: #4CAF50;
+            color: white;
+        }
+        .btn-success:hover {
+            background: #388E3C;
+        }
+        .btn-danger {
+            background: #f44336;
+            color: white;
+        }
+        .btn-danger:hover {
+            background: #d32f2f;
+        }
+        #output {
+            color: #d4d4d4;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 13px;
+            white-space: pre-wrap;
+            word-break: break-all;
+            min-height: 400px;
+            max-height: calc(85vh - 100px);
+            overflow-y: auto;
+        }
+        .output-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .output-header h2 {
+            color: white;
+            margin: 0;
+        }
+        .score-row {
+            display: grid;
+            grid-template-columns: 80px 100px 80px 120px;
+            gap: 10px;
+            margin-bottom: 8px;
+            align-items: center;
+        }
+        .score-row label {
+            margin: 0;
+        }
+        .score-row input, .score-row select {
+            padding: 5px 8px;
+        }
+        .scores-container {
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        .toggle-switch {
+            position: relative;
+            width: 50px;
+            height: 26px;
+        }
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: .3s;
+            border-radius: 26px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+        input:checked + .slider {
+            background-color: #2196F3;
+        }
+        input:checked + .slider:before {
+            transform: translateX(24px);
+        }
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+        .instance-number {
+            background: #2196F3;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+            margin-right: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎯 Router Agent JSON Generator</h1>
+    
+    <div class="container">
+        <div class="input-section">
+            <h2>함수 호출 설정</h2>
+            
+            <!-- UNIV Function Group -->
+            <div class="function-group" id="univ-group">
+                <div class="function-group-header">
+                    <h3>📚 univ(university, query)</h3>
+                    <button class="btn-add" onclick="addUnivBlock()">+ 추가</button>
+                </div>
+                <p class="hint">특정 대학의 입시 요강, 작년도 입시 결과 조회</p>
+                <div id="univ-blocks"></div>
+            </div>
+            
+            <!-- CONSULT_JUNGSI Function Group -->
+            <div class="function-group" id="jungsi-group">
+                <div class="function-group-header">
+                    <h3>📊 consult_jungsi</h3>
+                    <button class="btn-add" onclick="addJungsiBlock()">+ 추가</button>
+                </div>
+                <p class="hint">정시 성적 환산, 합격 가능성 평가 및 대학 추천</p>
+                <div id="jungsi-blocks"></div>
+            </div>
+            
+            <!-- CONSULT_SUSI Function Group -->
+            <div class="function-group" id="susi-group">
+                <div class="function-group-header">
+                    <h3>📝 consult_susi</h3>
+                    <button class="btn-add" onclick="addSusiBlock()">+ 추가</button>
+                </div>
+                <p class="hint">수시 전형결과 조회 (학과별, 전형별 70%컷, 경쟁률, 충원률 등)</p>
+                <div id="susi-blocks"></div>
+            </div>
+            
+            <div class="action-buttons">
+                <button class="btn-primary" onclick="updateOutput()">🔄 JSON 생성</button>
+                <button class="btn-danger" onclick="resetAll()">🗑️ 초기화</button>
+            </div>
+        </div>
+        
+        <div class="output-section">
+            <div class="output-header">
+                <h2>📋 Generated JSON</h2>
+                <button class="btn-success" onclick="copyToClipboard()">📋 복사</button>
+            </div>
+            <pre id="output"></pre>
+        </div>
+    </div>
+    
+    <script>
+        let univCounter = 0;
+        let jungsiCounter = 0;
+        let susiCounter = 0;
+        
+        function parseCommaSeparated(value) {
+            if (!value || !value.trim()) return [];
+            return value.split(',').map(s => s.trim()).filter(s => s);
+        }
+        
+        // UNIV Block
+        function addUnivBlock() {
+            univCounter++;
+            const container = document.getElementById('univ-blocks');
+            const block = document.createElement('div');
+            block.className = 'function-block';
+            block.id = `univ-block-${univCounter}`;
+            block.innerHTML = `
+                <div class="function-block-header">
+                    <span><span class="instance-number">#${univCounter}</span>univ</span>
+                    <button class="btn-remove" onclick="removeBlock('univ-block-${univCounter}')">삭제</button>
+                </div>
+                <label>university (쉼표로 구분)</label>
+                <input type="text" class="univ-university" placeholder="서울대학교, 연세대학교" oninput="updateOutput()">
+                <label>query (쉼표로 구분)</label>
+                <textarea class="univ-query" rows="2" placeholder="2026학년도 서울대학교 정시 모집요강, 2025학년도 서울대학교 정시 입결" oninput="updateOutput()"></textarea>
+            `;
+            container.appendChild(block);
+            updateOutput();
+        }
+        
+        // JUNGSI Block
+        function addJungsiBlock() {
+            jungsiCounter++;
+            const container = document.getElementById('jungsi-blocks');
+            const block = document.createElement('div');
+            block.className = 'function-block';
+            block.id = `jungsi-block-${jungsiCounter}`;
+            block.innerHTML = `
+                <div class="function-block-header">
+                    <span><span class="instance-number">#${jungsiCounter}</span>consult_jungsi</span>
+                    <button class="btn-remove" onclick="removeBlock('jungsi-block-${jungsiCounter}')">삭제</button>
+                </div>
+                <label>university (쉼표로 구분)</label>
+                <input type="text" class="jungsi-university" placeholder="경희대학교" oninput="updateOutput()">
+                <label>department (쉼표로 구분)</label>
+                <input type="text" class="jungsi-department" placeholder="컴퓨터공학과, 전자공학과" oninput="updateOutput()">
+                <label>range (선택)</label>
+                <div class="checkbox-group">
+                    <label><input type="checkbox" value="안정" onchange="updateOutput()"> 안정</label>
+                    <label><input type="checkbox" value="적정" onchange="updateOutput()"> 적정</label>
+                    <label><input type="checkbox" value="소신" onchange="updateOutput()"> 소신</label>
+                    <label><input type="checkbox" value="도전" onchange="updateOutput()"> 도전</label>
+                    <label><input type="checkbox" value="어려움" onchange="updateOutput()"> 어려움</label>
+                </div>
+                <div class="scores-container">
+                    <strong>j_scores (정시 성적)</strong>
+                    <div class="jungsi-scores">
+                        <div class="score-row">
+                            <label>국어</label>
+                            <select onchange="updateOutput()" class="score-type">
+                                <option value="등급">등급</option>
+                                <option value="표준점수">표준점수</option>
+                                <option value="백분위">백분위</option>
+                            </select>
+                            <input type="text" class="score-value" placeholder="1" oninput="updateOutput()">
+                            <span></span>
+                        </div>
+                        <div class="score-row">
+                            <label>수학</label>
+                            <select onchange="updateOutput()" class="score-type">
+                                <option value="등급">등급</option>
+                                <option value="표준점수">표준점수</option>
+                                <option value="백분위">백분위</option>
+                            </select>
+                            <input type="text" class="score-value" placeholder="1" oninput="updateOutput()">
+                            <span></span>
+                        </div>
+                        <div class="score-row">
+                            <label>영어</label>
+                            <select onchange="updateOutput()" class="score-type">
+                                <option value="등급">등급</option>
+                                <option value="표준점수">표준점수</option>
+                                <option value="백분위">백분위</option>
+                            </select>
+                            <input type="text" class="score-value" placeholder="2" oninput="updateOutput()">
+                            <span></span>
+                        </div>
+                        <div class="score-row">
+                            <label>한국사</label>
+                            <select onchange="updateOutput()" class="score-type">
+                                <option value="등급">등급</option>
+                                <option value="표준점수">표준점수</option>
+                                <option value="백분위">백분위</option>
+                            </select>
+                            <input type="text" class="score-value" placeholder="1" oninput="updateOutput()">
+                            <span></span>
+                        </div>
+                        <div class="score-row">
+                            <label>탐구1</label>
+                            <select onchange="updateOutput()" class="score-type">
+                                <option value="등급">등급</option>
+                                <option value="표준점수">표준점수</option>
+                                <option value="백분위">백분위</option>
+                            </select>
+                            <input type="text" class="score-value" placeholder="1" oninput="updateOutput()">
+                            <input type="text" class="score-subject" placeholder="과목명 (선택)" oninput="updateOutput()">
+                        </div>
+                        <div class="score-row">
+                            <label>탐구2</label>
+                            <select onchange="updateOutput()" class="score-type">
+                                <option value="등급">등급</option>
+                                <option value="표준점수">표준점수</option>
+                                <option value="백분위">백분위</option>
+                            </select>
+                            <input type="text" class="score-value" placeholder="2" oninput="updateOutput()">
+                            <input type="text" class="score-subject" placeholder="과목명 (선택)" oninput="updateOutput()">
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.appendChild(block);
+            updateOutput();
+        }
+        
+        // SUSI Block
+        function addSusiBlock() {
+            susiCounter++;
+            const container = document.getElementById('susi-blocks');
+            const block = document.createElement('div');
+            block.className = 'function-block';
+            block.id = `susi-block-${susiCounter}`;
+            block.innerHTML = `
+                <div class="function-block-header">
+                    <span><span class="instance-number">#${susiCounter}</span>consult_susi</span>
+                    <button class="btn-remove" onclick="removeBlock('susi-block-${susiCounter}')">삭제</button>
+                </div>
+                <label>university (쉼표로 구분)</label>
+                <input type="text" class="susi-university" placeholder="서울대학교" oninput="updateOutput()">
+                <label>department (쉼표로 구분)</label>
+                <input type="text" class="susi-department" placeholder="기계공학과, 기계공학부" oninput="updateOutput()">
+                <label>junhyung - 전형명 (쉼표로 구분)</label>
+                <input type="text" class="susi-junhyung" placeholder="학생부종합, 지역균형" oninput="updateOutput()">
+                <label>s_scores - 평균 내신 (쉼표로 구분)</label>
+                <input type="text" class="susi-scores" placeholder="1.1, 1.4" oninput="updateOutput()">
+            `;
+            container.appendChild(block);
+            updateOutput();
+        }
+        
+        function removeBlock(blockId) {
+            const block = document.getElementById(blockId);
+            if (block) {
+                block.remove();
+                updateOutput();
+            }
+        }
+        
+        function getJungsiScores(block) {
+            const scores = {};
+            const rows = block.querySelectorAll('.jungsi-scores .score-row');
+            
+            rows.forEach(row => {
+                const label = row.querySelector('label').textContent;
+                const type = row.querySelector('.score-type').value;
+                const valueInput = row.querySelector('.score-value');
+                const subjectInput = row.querySelector('.score-subject');
+                
+                const value = valueInput ? valueInput.value.trim() : '';
+                
+                if (value) {
+                    const numValue = parseFloat(value);
+                    if (!isNaN(numValue)) {
+                        const scoreObj = {
+                            "type": type,
+                            "value": numValue
+                        };
+                        
+                        if (subjectInput && subjectInput.value.trim()) {
+                            scoreObj["과목명"] = subjectInput.value.trim();
+                        }
+                        
+                        scores[label] = scoreObj;
+                    }
+                }
+            });
+            
+            return Object.keys(scores).length > 0 ? scores : null;
+        }
+        
+        function getSelectedRanges(block) {
+            const checkboxes = block.querySelectorAll('.checkbox-group input[type="checkbox"]:checked');
+            return Array.from(checkboxes).map(cb => cb.value);
+        }
+        
+        function updateOutput() {
+            const functionCalls = [];
+            
+            // UNIV blocks
+            document.querySelectorAll('#univ-blocks .function-block').forEach(block => {
+                const university = parseCommaSeparated(block.querySelector('.univ-university').value);
+                const query = parseCommaSeparated(block.querySelector('.univ-query').value);
+                
+                functionCalls.push({
+                    "function": "univ",
+                    "params": {
+                        "university": university,
+                        "query": query
+                    }
+                });
+            });
+            
+            // JUNGSI blocks
+            document.querySelectorAll('#jungsi-blocks .function-block').forEach(block => {
+                const university = parseCommaSeparated(block.querySelector('.jungsi-university').value);
+                const department = parseCommaSeparated(block.querySelector('.jungsi-department').value);
+                const range = getSelectedRanges(block);
+                const jScores = getJungsiScores(block);
+                
+                const params = {
+                    "university": university,
+                    "department": department,
+                    "range": range
+                };
+                
+                if (jScores) {
+                    params["j_scores"] = jScores;
+                }
+                
+                functionCalls.push({
+                    "function": "consult_jungsi",
+                    "params": params
+                });
+            });
+            
+            // SUSI blocks
+            document.querySelectorAll('#susi-blocks .function-block').forEach(block => {
+                const university = parseCommaSeparated(block.querySelector('.susi-university').value);
+                const department = parseCommaSeparated(block.querySelector('.susi-department').value);
+                const junhyung = parseCommaSeparated(block.querySelector('.susi-junhyung').value);
+                const sScores = parseCommaSeparated(block.querySelector('.susi-scores').value);
+                
+                const params = {
+                    "university": university,
+                    "department": department
+                };
+                
+                if (junhyung.length > 0) {
+                    params["junhyung"] = junhyung;
+                }
+                
+                if (sScores.length > 0) {
+                    params["s_scores"] = sScores;
+                }
+                
+                functionCalls.push({
+                    "function": "consult_susi",
+                    "params": params
+                });
+            });
+            
+            const output = {
+                "function_calls": functionCalls
+            };
+            
+            document.getElementById('output').textContent = JSON.stringify(output, null, 2);
+        }
+        
+        function copyToClipboard() {
+            const output = document.getElementById('output').textContent;
+            navigator.clipboard.writeText(output).then(() => {
+                alert('JSON이 클립보드에 복사되었습니다!');
+            });
+        }
+        
+        function resetAll() {
+            document.getElementById('univ-blocks').innerHTML = '';
+            document.getElementById('jungsi-blocks').innerHTML = '';
+            document.getElementById('susi-blocks').innerHTML = '';
+            univCounter = 0;
+            jungsiCounter = 0;
+            susiCounter = 0;
+            updateOutput();
+        }
+        
+        // Initialize with empty output
+        updateOutput();
+    </script>
+</body>
+</html>

@@ -132,7 +132,9 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
   // 【】로 감싸진 타이틀을 파싱하는 헬퍼 함수
   const parseTitles = (text: string) => {
     const parts: React.ReactNode[] = []
-    const titleRegex = /【([^】]+)】/g
+    // 타이틀 내부의 ** 볼드 마크다운도 함께 처리
+    // 【**제목**】 또는 **【제목】** 형태 모두 처리
+    const titleRegex = /(?:\*\*)?【(?:\*\*)?([^】]+?)(?:\*\*)?】(?:\*\*)?/g
     let lastIndex = 0
     let match
     let keyIndex = 0
@@ -147,10 +149,12 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
         )
       }
 
-      // 타이틀 부분 (18.5px, 볼드, 대괄호 제거)
+      // 타이틀 부분 (18.5px, 볼드, 대괄호 및 ** 제거)
+      // match[1]에서 추가로 ** 제거
+      const titleContent = match[1].replace(/\*\*/g, '')
       parts.push(
         <span key={`title-${keyIndex++}`} className="text-[18.5px] font-bold">
-          {match[1]}
+          {titleContent}
         </span>
       )
 
@@ -282,6 +286,9 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
 
     // 남은 섹션 마커 제거 (맨 처음/끝에 있는 것들)
     cleanedMessage = cleanedMessage.replace(/===SECTION_(START|END)(:\w+)?===/g, '')
+    
+    // --- 구분선을 ___DIVIDER___ 마커로 변환 (백엔드에서 보내는 형식)
+    cleanedMessage = cleanedMessage.replace(/\n\n---\n\n/g, '___DIVIDER___')
 
     // 연속 줄바꿈 정리
     cleanedMessage = cleanedMessage.replace(/\n{3,}/g, '\n\n').trim()

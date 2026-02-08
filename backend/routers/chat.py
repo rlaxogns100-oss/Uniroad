@@ -129,6 +129,7 @@ def get_or_load_history(session_id: str) -> List[Dict[str, Any]]:
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = "default"
+    thinking: Optional[bool] = False  # Thinking 모드 활성화 여부
 
 
 class ChatResponse(BaseModel):
@@ -711,8 +712,15 @@ async def chat_stream_v2(
     """
     스트리밍 채팅 v2 - Main Agent 응답을 실시간 스트리밍
     
+    thinking=True일 경우:
+    - Router -> RAG -> MainAgentThinking (재질문 가능) -> 최종 답변
+    
+    thinking=False일 경우 (기본):
+    - Router -> RAG -> MainAgent -> 최종 답변
+    
     SSE (Server-Sent Events) 형식:
     - {"type": "status", "step": "router", "message": "..."}
+    - {"type": "log", "content": "..."} (thinking 모드)
     - {"type": "chunk", "text": "응답 텍스트 조각"}
     - {"type": "done", "timing": {...}, "response": "전체 응답"}
     """
@@ -742,12 +750,16 @@ async def chat_stream_v2(
     
     print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
     
+    # Thinking 모드 체크
+    thinking_mode = request.thinking
+    
     def generate():
         session_id = request.session_id
         message = request.message
         
         pipeline_start = time.time()
-        print(f"\n🔵 [STREAM_V2_START] {session_id}:{message[:30]}")
+        mode_label = "THINKING" if thinking_mode else "NORMAL"
+        print(f"\n🔵 [STREAM_V2_START] [{mode_label}] {session_id}:{message[:30]}")
         
         # 세션별 히스토리 로드 (동기 generator이므로 메모리에서만 확인)
         if session_id not in conversation_sessions:
@@ -764,32 +776,193 @@ async def chat_stream_v2(
         used_chunks = []
         
         try:
-            # 스트리밍 파이프라인 실행 (user_id 전달)
-            for event in run_orchestration_agent_stream(message, history, user_id=user_id):
-                event_type = event.get("type")
+            if thinking_mode:
+                # ========================================
+                # Thinking 모드: MainAgentThinking 사용
+                # main_agent와 동일한 로그 형식 사용
+                # ========================================
                 
-                if event_type == "status":
-                    # 상태 업데이트 전송
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                from services.multi_agent.main_agent_thinking import generate_thinking_stream
+                from services.multi_agent.router_agent import RouterAgent
+                from services.multi_agent.functions import execute_function_calls
                 
-                elif event_type == "chunk":
-                    # Main Agent 응답 청크 전송
-                    full_response += event.get("text", "")
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                # 1. Router로 1차 검색
+                yield f"data: {json.dumps({'type': 'status', 'step': 'router', 'message': '🔄 [1/3] Router Agent 호출 중...'}, ensure_ascii=False)}\n\n"
                 
-                elif event_type == "done":
-                    timing = event.get("timing", {})
-                    function_results = event.get("function_results", {})
-                    router_output = event.get("router_output", {})
-                    full_response = event.get("response", full_response)
-                    # 출처 정보 추출
-                    sources = event.get("sources", [])
-                    source_urls = event.get("source_urls", [])
-                    used_chunks = event.get("used_chunks", [])
+                router = RouterAgent()
+                loop = asyncio.new_event_loop()
                 
-                elif event_type == "error":
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                    return
+                try:
+                    router_result = loop.run_until_complete(router.route(message, history))
+                    router_output = router_result
+                    
+                    function_calls = router_result.get("function_calls", [])
+                    
+                    # Router 완료 시 검색 쿼리 상세 정보 포함 (main_agent와 동일)
+                    queries_detail = []
+                    for call in function_calls:
+                        func_name = call.get("function", "")
+                        params = call.get("params", {})
+                        if func_name == "univ":
+                            queries_detail.append({
+                                "type": "univ",
+                                "university": params.get("university", ""),
+                                "query": params.get("query", "")
+                            })
+                        elif func_name == "consult":
+                            queries_detail.append({
+                                "type": "consult",
+                                "target_univ": params.get("target_univ", []),
+                                "query": "성적 분석"
+                            })
+                    
+                    yield f"data: {json.dumps({'type': 'status', 'step': 'router_complete', 'message': f'✅ Router 완료: {len(function_calls)}개 함수 호출', 'detail': {'function_calls': queries_detail, 'count': len(function_calls)}}, ensure_ascii=False)}\n\n"
+                    
+                    # 2. RAG 검색 실행
+                    if function_calls:
+                        yield f"data: {json.dumps({'type': 'status', 'step': 'function', 'message': '🔄 [2/3] Functions 실행 중...'}, ensure_ascii=False)}\n\n"
+                        
+                        # 검색 시작 상세 정보 전송
+                        for idx, call in enumerate(function_calls):
+                            func_name = call.get("function", "")
+                            params = call.get("params", {})
+                            if func_name == "univ":
+                                univ_name = params.get('university', '')
+                                univ_query = params.get('query', '')
+                                yield f"data: {json.dumps({'type': 'status', 'step': 'search_start', 'message': f'🔍 검색 중: {univ_name}', 'detail': {'index': idx, 'university': univ_name, 'query': univ_query}}, ensure_ascii=False)}\n\n"
+                            elif func_name == "consult":
+                                target_univ = params.get('target_univ', [])
+                                yield f"data: {json.dumps({'type': 'status', 'step': 'search_start', 'message': '📊 성적 분석 중...', 'detail': {'index': idx, 'type': 'consult', 'target_univ': target_univ}}, ensure_ascii=False)}\n\n"
+                        
+                        initial_results = loop.run_until_complete(execute_function_calls(function_calls))
+                        function_results = initial_results
+                        
+                        # 검색 완료 상세 정보 추출 (찾은 문서 목록)
+                        search_results_detail = []
+                        for key, func_result in initial_results.items():
+                            if isinstance(func_result, dict) and "chunks" in func_result:
+                                university = func_result.get("university", "")
+                                doc_titles = func_result.get("document_titles", {})
+                                doc_count = func_result.get("count", 0)
+                                unique_titles = list(set(doc_titles.values())) if doc_titles else []
+                                search_results_detail.append({
+                                    "university": university,
+                                    "query": func_result.get("query", ""),
+                                    "doc_count": doc_count,
+                                    "documents": unique_titles[:5]
+                                })
+                        
+                        total_count = sum(r.get("doc_count", 0) for r in search_results_detail)
+                        yield f"data: {json.dumps({'type': 'status', 'step': 'search_complete', 'message': f'✅ Functions 완료: {len(initial_results)}개 결과', 'detail': {'results': search_results_detail, 'total_count': total_count}}, ensure_ascii=False)}\n\n"
+                    else:
+                        initial_results = {}
+                        yield f"data: {json.dumps({'type': 'status', 'step': 'function', 'message': 'ℹ️ 함수 호출 없음'}, ensure_ascii=False)}\n\n"
+                    
+                    # 3. MainAgentThinking으로 분석 및 재질문
+                    # (답변 작성하기 로그는 실제 답변 생성 시 main_agent_thinking.py에서 전송)
+                    
+                    for chunk in generate_thinking_stream(message, history, initial_results):
+                        chunk_type = chunk.get("type")
+                        
+                        if chunk_type == "log":
+                            # Thinking 내부 로그 - step, iteration, detail 정보 포함하여 전송
+                            log_data = {
+                                'type': 'log',
+                                'content': chunk.get('content', ''),
+                                'step': chunk.get('step'),
+                                'iteration': chunk.get('iteration'),
+                                'detail': chunk.get('detail')
+                            }
+                            yield f"data: {json.dumps(log_data, ensure_ascii=False)}\n\n"
+                        
+                        elif chunk_type == "text":
+                            # 최종 답변 텍스트
+                            full_response = chunk.get("content", "")
+                            # 청크 단위로 스트리밍 (한 번에 전송)
+                            yield f"data: {json.dumps({'type': 'chunk', 'text': full_response}, ensure_ascii=False)}\n\n"
+                        
+                        elif chunk_type == "done":
+                            # 완료 정보 - 출처 정보 철저히 관리
+                            citations = chunk.get("citations", [])
+                            
+                            # citations에서 sources, source_urls 추출
+                            sources = []
+                            source_urls = []
+                            for c in citations:
+                                source = c.get("source", "")
+                                url = c.get("url", "")
+                                # 빈 값이나 유효하지 않은 URL 제외
+                                if source and url and url.startswith("http"):
+                                    sources.append(source)
+                                    source_urls.append(url)
+                            
+                            # function_results에서 used_chunks 추출 (실제 검색된 청크들)
+                            used_chunks = []
+                            for key, result in function_results.items():
+                                chunks = result.get("chunks", [])
+                                doc_titles = result.get("document_titles", {})
+                                doc_urls = result.get("document_urls", {})
+                                
+                                for c in chunks:
+                                    doc_id = c.get("document_id")
+                                    title = doc_titles.get(doc_id, f"문서 {doc_id}")
+                                    url = doc_urls.get(doc_id, "")
+                                    
+                                    # 유효한 URL만 포함
+                                    if url and url.startswith("http"):
+                                        used_chunks.append({
+                                            "id": c.get("chunk_id", ""),
+                                            "content": c.get("content", "")[:200],  # 미리보기용
+                                            "title": title,
+                                            "source": f"{title} {c.get('page_number', '')}p".strip(),
+                                            "file_url": url,
+                                            "metadata": {
+                                                "page_number": c.get("page_number"),
+                                                "document_id": doc_id
+                                            }
+                                        })
+                            
+                            timing = {
+                                "iterations": chunk.get("iterations", 1),
+                                "total_chunks": chunk.get("total_chunks", 0)
+                            }
+                        
+                        elif chunk_type == "error":
+                            yield f"data: {json.dumps({'type': 'error', 'message': chunk.get('message', '')}, ensure_ascii=False)}\n\n"
+                            return
+                
+                finally:
+                    loop.close()
+            
+            else:
+                # ========================================
+                # 기본 모드: 기존 파이프라인 사용
+                # ========================================
+                for event in run_orchestration_agent_stream(message, history, user_id=user_id):
+                    event_type = event.get("type")
+                    
+                    if event_type == "status":
+                        # 상태 업데이트 전송
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    
+                    elif event_type == "chunk":
+                        # Main Agent 응답 청크 전송
+                        full_response += event.get("text", "")
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    
+                    elif event_type == "done":
+                        timing = event.get("timing", {})
+                        function_results = event.get("function_results", {})
+                        router_output = event.get("router_output", {})
+                        full_response = event.get("response", full_response)
+                        # 출처 정보 추출
+                        sources = event.get("sources", [])
+                        source_urls = event.get("source_urls", [])
+                        used_chunks = event.get("used_chunks", [])
+                    
+                    elif event_type == "error":
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                        return
             
             # 대화 이력에 추가
             history.append({"role": "user", "content": message})
@@ -824,11 +997,12 @@ async def chat_stream_v2(
                 "function_results": function_results,
                 "sources": sources,
                 "source_urls": source_urls,
-                "used_chunks": used_chunks
+                "used_chunks": used_chunks,
+                "thinking_mode": thinking_mode
             }
             yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
             
-            print(f"🟢 [STREAM_V2_END] 총 {pipeline_time:.2f}초, {len(full_response)}자")
+            print(f"🟢 [STREAM_V2_END] [{mode_label}] 총 {pipeline_time:.2f}초, {len(full_response)}자")
             
         except Exception as e:
             print(f"❌ 스트리밍 오류: {e}")

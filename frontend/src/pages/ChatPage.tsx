@@ -154,6 +154,7 @@ export default function ChatPage() {
   const [testRunCount, setTestRunCount] = useState<number>(1) // 시행 횟수
   const [testRunMode, setTestRunMode] = useState<'sequential' | 'parallel'>('sequential') // 순차/병렬
   const [isTestSettingsOpen, setIsTestSettingsOpen] = useState(false) // 설정 패널 열림 상태
+  const [thinkingMode, setThinkingMode] = useState<boolean>(false) // Thinking 모드
   
   // 이미지 업로드 관련
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
@@ -803,7 +804,8 @@ export default function ChatPage() {
           onErrorCallback,
           abortController.signal,
           onChunkCallback,
-          accessToken || undefined  // 인증 토큰 전달
+          accessToken || undefined,  // 인증 토큰 전달
+          thinkingMode  // Thinking 모드 전달
         )
       }
     } catch (error: any) {
@@ -1679,16 +1681,44 @@ export default function ChatPage() {
                           )}
                         </div>
                         
-                        {/* 전송 버튼 */}
-                        <button
-                          onClick={() => handleSend()}
-                          disabled={isLoading || (!input.trim() && !selectedImage)}
-                          className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                          </svg>
-                        </button>
+                        {/* Thinking 스위치 + 전송 버튼 */}
+                        <div className="flex items-center gap-2">
+                          {/* Thinking 스위치 */}
+                          <button
+                            onClick={() => {
+                              if (!isAuthenticated) {
+                                setAuthModalMessage({
+                                  title: 'Thinking 모드',
+                                  description: 'Thinking 모드는 로그인 후 사용할 수 있습니다. 더 깊은 분석과 정확한 답변을 받아보세요!'
+                                })
+                                setIsAuthModalOpen(true)
+                                return
+                              }
+                              setThinkingMode(!thinkingMode)
+                            }}
+                            disabled={isLoading}
+                            className={`px-2.5 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1 ${
+                              thinkingMode
+                                ? 'bg-gray-800 text-white border border-gray-700'
+                                : 'bg-gray-100 text-gray-500 border border-gray-200 hover:bg-gray-200'
+                            } ${!isAuthenticated ? 'opacity-60' : ''} disabled:opacity-50`}
+                            title={thinkingMode ? 'Thinking 모드 ON' : 'Thinking 모드 OFF'}
+                          >
+                            <span className="text-sm">thinking</span>
+                            <span>{thinkingMode ? 'ON' : 'OFF'}</span>
+                          </button>
+                          
+                          {/* 전송 버튼 */}
+                          <button
+                            onClick={() => handleSend()}
+                            disabled={isLoading || (!input.trim() && !selectedImage)}
+                            className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1812,16 +1842,43 @@ export default function ChatPage() {
                           )}
                         </div>
                         
-                        {/* 전송 버튼 */}
-                        <button
-                          onClick={() => handleSend()}
-                          disabled={isLoading || (!input.trim() && !selectedImage)}
-                          className="w-9 h-9 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                          </svg>
-                        </button>
+                        {/* Thinking 스위치 + 전송 버튼 */}
+                        <div className="flex items-center gap-2">
+                          {/* Thinking 스위치 */}
+                          <button
+                            onClick={() => {
+                              if (!isAuthenticated) {
+                                setAuthModalMessage({
+                                  title: 'Thinking 모드',
+                                  description: 'Thinking 모드는 로그인 후 사용할 수 있습니다. 더 깊은 분석과 정확한 답변을 받아보세요!'
+                                })
+                                setIsAuthModalOpen(true)
+                                return
+                              }
+                              setThinkingMode(!thinkingMode)
+                            }}
+                            disabled={isLoading}
+                            className={`px-2 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1 ${
+                              thinkingMode
+                                ? 'bg-gray-800 text-white border border-gray-700'
+                                : 'bg-gray-100 text-gray-500 border border-gray-200 hover:bg-gray-200'
+                            } ${!isAuthenticated ? 'opacity-60' : ''} disabled:opacity-50`}
+                            title={thinkingMode ? 'Thinking 모드 ON' : 'Thinking 모드 OFF'}
+                          >
+                            <span className="text-xs">thinking</span>
+                          </button>
+                          
+                          {/* 전송 버튼 */}
+                          <button
+                            onClick={() => handleSend()}
+                            disabled={isLoading || (!input.trim() && !selectedImage)}
+                            className="w-9 h-9 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1989,16 +2046,44 @@ export default function ChatPage() {
                       )}
                     </div>
                     
-                    {/* 전송 버튼 */}
-                    <button
-                      onClick={() => handleSend()}
-                      disabled={isLoading || (!input.trim() && !selectedImage)}
-                      className="w-9 h-9 sm:w-10 sm:h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                    >
-                      <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                      </svg>
-                    </button>
+                    {/* Thinking 스위치 + 전송 버튼 */}
+                    <div className="flex items-center gap-2">
+                      {/* Thinking 스위치 */}
+                      <button
+                        onClick={() => {
+                          if (!isAuthenticated) {
+                            setAuthModalMessage({
+                              title: 'Thinking 모드',
+                              description: 'Thinking 모드는 로그인 후 사용할 수 있습니다. 더 깊은 분석과 정확한 답변을 받아보세요!'
+                            })
+                            setIsAuthModalOpen(true)
+                            return
+                          }
+                          setThinkingMode(!thinkingMode)
+                        }}
+                        disabled={isLoading}
+                        className={`px-2.5 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1 ${
+                          thinkingMode
+                            ? 'bg-gray-800 text-white border border-gray-700'
+                            : 'bg-gray-100 text-gray-500 border border-gray-200 hover:bg-gray-200'
+                        } ${!isAuthenticated ? 'opacity-60' : ''} disabled:opacity-50`}
+                        title={thinkingMode ? 'Thinking 모드 ON' : 'Thinking 모드 OFF'}
+                      >
+                        <span className="text-sm">thinking</span>
+                        <span className="hidden sm:inline">{thinkingMode ? 'ON' : 'OFF'}</span>
+                      </button>
+                      
+                      {/* 전송 버튼 */}
+                      <button
+                        onClick={() => handleSend()}
+                        disabled={isLoading || (!input.trim() && !selectedImage)}
+                        className="w-9 h-9 sm:w-10 sm:h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                      >
+                        <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

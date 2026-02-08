@@ -13,6 +13,7 @@ export const api = axios.create({
 export interface ChatRequest {
   message: string
   session_id?: string
+  thinking?: boolean  // Thinking 모드 활성화 여부
 }
 
 // 멀티에이전트 응답 타입
@@ -129,10 +130,11 @@ export const sendMessageStream = async (
   onError?: (error: string) => void,
   abortSignal?: AbortSignal,
   onChunk?: (chunk: string) => void,  // 실시간 텍스트 청크 콜백
-  token?: string  // 인증 토큰
+  token?: string,  // 인증 토큰
+  thinking?: boolean  // Thinking 모드
 ): Promise<void> => {
   try {
-    onLog('🔍 질문을 분석하는 중...')
+    onLog(thinking ? '🧠 Thinking 모드로 분석 중...' : '🔍 질문을 분석하는 중...')
     
     // 헤더 구성
     const headers: Record<string, string> = {
@@ -149,6 +151,7 @@ export const sendMessageStream = async (
       body: JSON.stringify({
         message,
         session_id: sessionId,
+        thinking: thinking || false,
       }),
       signal: abortSignal,
     })
@@ -213,6 +216,18 @@ export const sendMessageStream = async (
               ? `${event.message || ''}|||${JSON.stringify({ step: event.step, detail: event.detail })}`
               : event.message || ''
             onLog(logMessage)
+          } else if (event.type === 'log') {
+            // Thinking 모드 로그 - step, iteration, detail 정보 포함
+            if (event.step || event.iteration || event.detail) {
+              const logMessage = `${event.content || ''}|||${JSON.stringify({ 
+                step: event.step, 
+                iteration: event.iteration,
+                detail: event.detail 
+              })}`
+              onLog(logMessage)
+            } else {
+              onLog(event.content || '')
+            }
           } else if (event.type === 'chunk') {
             // 텍스트 청크 - 실시간으로 화면에 표시
             const chunkText = event.text || ''

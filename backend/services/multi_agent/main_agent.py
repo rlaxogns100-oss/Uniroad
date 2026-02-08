@@ -289,6 +289,19 @@ class MainAgent:
         # 2. 각 섹션 정리
         cleaned_sections = []
         for section in sections:
+            # 타이틀의 ** 볼드 마크다운 제거 (【제목】 형식에서)
+            # 【**제목**】 -> 【제목】
+            section = re.sub(r'【\*\*(.+?)\*\*】', r'【\1】', section)
+            # **【제목】** -> 【제목】
+            section = re.sub(r'\*\*【(.+?)】\*\*', r'【\1】', section)
+            
+            # 불완전한 마크다운 블록 정리 (```로 시작했는데 닫히지 않은 경우)
+            # 열린 코드블록 개수와 닫힌 코드블록 개수 확인
+            open_blocks = section.count('```')
+            if open_blocks % 2 != 0:
+                # 홀수면 마지막에 닫는 태그 추가
+                section = section + '\n```'
+            
             # 연속된 줄바꿈 정리 (3개 이상 -> 2개)
             section = re.sub(r'\n{3,}', '\n\n', section)
             # 앞뒤 공백 제거
@@ -296,11 +309,14 @@ class MainAgent:
             if section:
                 cleaned_sections.append(section)
         
-        # 3. 섹션들을 두 줄 간격으로 연결
-        result = '\n\n'.join(cleaned_sections)
+        # 3. 섹션들을 구분선(---)으로 연결
+        result = '\n\n---\n\n'.join(cleaned_sections)
         
         # 4. 최종 정리 - 연속 공백 제거
         result = re.sub(r' {2,}', ' ', result)
+        
+        # 5. 불완전한 cite 태그 정리 (열린 태그가 닫히지 않은 경우)
+        result = re.sub(r'<cite[^>]*>(?![^<]*</cite>)', '', result)
         
         return result.strip()
     
