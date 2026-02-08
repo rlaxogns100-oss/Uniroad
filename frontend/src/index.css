@@ -54,12 +54,12 @@ code {
   font-weight: 600;
 }
 
-/* 다크모드 대응 */
-@media (prefers-color-scheme: dark) {
+/* 다크모드 대응 - 앱이 라이트모드만 지원하므로 시스템 다크모드 무시 */
+/* @media (prefers-color-scheme: dark) {
   .ai-response {
     color: #e3e3e3;
   }
-}
+} */
 
 /* 출처 확인하기 버튼 글로우 애니메이션 */
 @keyframes pulse-glow {

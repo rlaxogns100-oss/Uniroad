@@ -257,8 +257,9 @@ class MainAgentThinking:
                     page_number = chunk.get("page_number", "")
                     
                     if section_id or document_id:
-                        title = doc_titles.get(document_id, f"문서 {document_id}")
-                        url = doc_urls.get(document_id, "")
+                        # document_id 타입 정규화 (정수/문자열 모두 시도)
+                        title = doc_titles.get(document_id) or doc_titles.get(str(document_id)) or f"문서 {document_id}"
+                        url = doc_urls.get(document_id) or doc_urls.get(str(document_id)) or ""
                         source_info = f"{title} {page_number}p" if page_number else title
                         
                         citations.append({
@@ -348,7 +349,7 @@ class MainAgentThinking:
         return result.strip()
     
     def _merge_results(self, accumulated: Dict[str, Any], new_results: Dict[str, Any]) -> Dict[str, Any]:
-        """검색 결과 병합 (누적)"""
+        """검색 결과 병합 (누적) - chunks, document_titles, document_urls, document_summaries 모두 병합"""
         for key, value in new_results.items():
             if key in accumulated:
                 # 기존 청크에 새 청크 추가 (중복 제거)
@@ -362,6 +363,24 @@ class MainAgentThinking:
                         existing_chunks.append(chunk)
                 
                 accumulated[key]["chunks"] = existing_chunks
+                
+                # document_titles 병합 (새 문서 정보 추가)
+                existing_titles = accumulated[key].get("document_titles", {})
+                new_titles = value.get("document_titles", {})
+                existing_titles.update(new_titles)
+                accumulated[key]["document_titles"] = existing_titles
+                
+                # document_urls 병합 (새 문서 URL 추가)
+                existing_urls = accumulated[key].get("document_urls", {})
+                new_urls = value.get("document_urls", {})
+                existing_urls.update(new_urls)
+                accumulated[key]["document_urls"] = existing_urls
+                
+                # document_summaries 병합
+                existing_summaries = accumulated[key].get("document_summaries", {})
+                new_summaries = value.get("document_summaries", {})
+                existing_summaries.update(new_summaries)
+                accumulated[key]["document_summaries"] = existing_summaries
             else:
                 accumulated[key] = value
         

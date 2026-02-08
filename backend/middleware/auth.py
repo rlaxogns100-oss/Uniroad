@@ -49,7 +49,9 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Security(security))
         return {
             "user_id": response.user.id,
             "email": response.user.email,
+            "name": response.user.user_metadata.get("name") if response.user.user_metadata else None,
             "role": response.user.app_metadata.get("role", "authenticated"),
+            "created_at": response.user.created_at,
         }
     
     except Exception as e:
@@ -79,7 +81,9 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Security(security))
             return {
                 "user_id": user_id,
                 "email": payload.get("email"),
+                "name": payload.get("user_metadata", {}).get("name") if payload.get("user_metadata") else None,
                 "role": payload.get("role", "authenticated"),
+                "created_at": payload.get("created_at"),
             }
         except jwt.ExpiredSignatureError:
             raise HTTPException(status_code=401, detail="Token has expired")
@@ -125,7 +129,9 @@ async def optional_auth(authorization: Optional[str] = None) -> Optional[dict]:
                 return {
                     "user_id": response.user.id,
                     "email": response.user.email,
+                    "name": response.user.user_metadata.get("name") if response.user.user_metadata else None,
                     "role": response.user.app_metadata.get("role", "authenticated"),
+                    "created_at": response.user.created_at,
                 }
         except:
             # Supabase 클라이언트 실패 시 JWT 직접 검증 시도
@@ -146,7 +152,9 @@ async def optional_auth(authorization: Optional[str] = None) -> Optional[dict]:
         return {
             "user_id": user_id,
             "email": payload.get("email"),
+            "name": payload.get("user_metadata", {}).get("name") if payload.get("user_metadata") else None,
             "role": payload.get("role"),
+            "created_at": payload.get("created_at"),
         }
     except:
         return None

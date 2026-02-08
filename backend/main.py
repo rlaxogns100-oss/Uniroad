@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from config import settings
-from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs, admin_stats, profile, functions, auto_reply, tracking, test_evaluate
+from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs, admin_stats, profile, functions, auto_reply, tracking, test_evaluate, feedback
 from routes import calculator
 import os
 # agent_admin은 orchestration_agent 모듈 없어서 비활성화
@@ -62,6 +62,7 @@ app.include_router(functions.router, prefix="/api/functions", tags=["Functions"]
 app.include_router(auto_reply.router, prefix="/api/auto-reply", tags=["자동댓글봇"])
 app.include_router(tracking.router, tags=["추적"])
 app.include_router(test_evaluate.router, prefix="/api/test", tags=["테스트평가"])
+app.include_router(feedback.router, tags=["피드백"])
 
 # 정적 파일 경로 설정
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

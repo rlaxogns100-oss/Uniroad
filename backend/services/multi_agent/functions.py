@@ -911,7 +911,7 @@ async def _execute_consult_susi(params: Dict) -> Dict[str, Any]:
     }
     document_urls = {
         "susi_search_condition": "",
-        "susi_results": "https://www.nesin.com"
+        "susi_results": "https://www.nesin.com/html/?dir1=menu01&dir2=Ipsi_result_data&gubun=1"
     }
     
     return {

@@ -27,6 +27,11 @@ export default function AdminPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
   
+  // 피드백 관련 state
+  const [showFeedback, setShowFeedback] = useState(false)
+  const [feedbacks, setFeedbacks] = useState<any[]>([])
+  const [feedbackLoading, setFeedbackLoading] = useState(false)
+  
   // 모든 문서에서 고유 해시태그 추출
   const allHashtags = Array.from(
     new Set(documents.flatMap((doc) => doc.hashtags || []))
@@ -42,6 +47,27 @@ export default function AdminPage() {
   useEffect(() => {
     loadDocuments()
   }, [])
+
+  useEffect(() => {
+    if (showFeedback && feedbacks.length === 0) {
+      loadFeedbacks()
+    }
+  }, [showFeedback])
+
+  const loadFeedbacks = async () => {
+    setFeedbackLoading(true)
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/feedback`)
+      if (response.ok) {
+        const data = await response.json()
+        setFeedbacks(data)
+      }
+    } catch (error) {
+      console.error('피드백 로드 오류:', error)
+    } finally {
+      setFeedbackLoading(false)
+    }
+  }
 
   const loadDocuments = async () => {
     try {
@@ -330,8 +356,79 @@ export default function AdminPage() {
               <span className="text-2xl">📊</span>
               <span className="text-sm text-center">관리자 분석</span>
             </button>
+            <button
+              onClick={() => setShowFeedback(!showFeedback)}
+              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors font-medium border border-teal-200"
+            >
+              <span className="text-2xl">💡</span>
+              <span className="text-sm text-center">의견 보기</span>
+            </button>
           </div>
         </div>
+
+        {/* 피드백 섹션 */}
+        {showFeedback && (
+          <div className="bg-white rounded-2xl shadow-xl p-6 mb-8 border border-gray-100">
+            <h2 className="text-lg font-bold text-gray-800 mb-4">💡 사용자 의견</h2>
+            {feedbackLoading ? (
+              <div className="text-center py-8">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <p className="mt-2 text-gray-600">로딩 중...</p>
+              </div>
+            ) : feedbacks.length === 0 ? (
+              <p className="text-center py-8 text-gray-500">아직 의견이 없습니다.</p>
+            ) : (
+              <div className="space-y-3">
+                {feedbacks.map((feedback) => (
+                  <div key={feedback.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-2">
+                          {feedback.user_name && (
+                            <span className="text-sm font-medium text-gray-900">{feedback.user_name}</span>
+                          )}
+                          {feedback.user_email && (
+                            <span className="text-xs text-gray-500">({feedback.user_email})</span>
+                          )}
+                          {!feedback.user_name && !feedback.user_email && (
+                            <span className="text-sm text-gray-500">익명</span>
+                          )}
+                          <span className="text-xs text-gray-400">
+                            {new Date(feedback.created_at).toLocaleString('ko-KR')}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-700 whitespace-pre-wrap break-words">{feedback.content}</p>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (!confirm('이 의견을 삭제하시겠습니까?')) return
+                          
+                          try {
+                            const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/feedback/${feedback.id}`, {
+                              method: 'DELETE'
+                            })
+                            
+                            if (response.ok) {
+                              setFeedbacks(feedbacks.filter(f => f.id !== feedback.id))
+                            } else {
+                              alert('삭제에 실패했습니다.')
+                            }
+                          } catch (error) {
+                            console.error('피드백 삭제 오류:', error)
+                            alert('삭제에 실패했습니다.')
+                          }
+                        }}
+                        className="px-3 py-1.5 text-xs bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition-colors flex-shrink-0"
+                      >
+                        삭제
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )

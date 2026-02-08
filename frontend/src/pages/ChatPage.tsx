@@ -129,7 +129,9 @@ export default function ChatPage() {
   const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false)
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
   const [authModalMessage, setAuthModalMessage] = useState<{ title: string; description: string } | undefined>(undefined)
-  const [isOpenChatModalOpen, setIsOpenChatModalOpen] = useState(false)
+  const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false)
+  const [feedbackText, setFeedbackText] = useState('')
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false)
   const [isProfileFormOpen, setIsProfileFormOpen] = useState(false)
   const [showProfileGuide, setShowProfileGuide] = useState(false)
@@ -725,7 +727,7 @@ export default function ChatPage() {
             : Date.now() - parseInt(userMessage.id)
           
           void addLog({
-            conversationHistory: messages.map(m => `${m.isUser ? 'User' : 'Bot'}: ${m.text.substring(0, 100)}`),
+            conversationHistory: messages.map(m => `${m.isUser ? 'User' : 'Bot'}: ${m.text}`),
             userQuestion: userInput,
             routerOutput: response.router_output || null,
             functionResult: response.function_results || null,
@@ -1095,20 +1097,7 @@ export default function ChatPage() {
             )}
           </div>
 
-          {/* 3. 오픈채팅방 */}
-          <div className="px-4 sm:px-6 pb-2">
-            <button 
-              onClick={() => setIsOpenChatModalOpen(true)}
-              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
-            >
-              <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" />
-              </svg>
-              <span className="text-sm font-medium text-left">오픈채팅방</span>
-            </button>
-          </div>
-
-          {/* 4. 내 입시 기록 관리 (드롭다운) */}
+          {/* 3. 내 입시 기록 관리 (드롭다운) */}
           <div className="px-4 sm:px-6 pb-2">
             <button 
               onClick={() => setIsRecordDropdownOpen(!isRecordDropdownOpen)}
@@ -1175,6 +1164,19 @@ export default function ChatPage() {
                 </button>
               </div>
             )}
+          </div>
+
+          {/* 4. 의견 보내기 */}
+          <div className="px-4 sm:px-6 pb-2">
+            <button 
+              onClick={() => setIsFeedbackModalOpen(true)}
+              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
+            >
+              <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
+              </svg>
+              <span className="text-sm font-medium text-left">의견 보내기</span>
+            </button>
           </div>
 
           {/* 5. 채팅 내역 (로그인한 경우에만 표시) */}
@@ -1697,15 +1699,18 @@ export default function ChatPage() {
                               setThinkingMode(!thinkingMode)
                             }}
                             disabled={isLoading}
-                            className={`px-2.5 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1 ${
+                            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-2 ${
                               thinkingMode
                                 ? 'bg-gray-800 text-white border border-gray-700'
                                 : 'bg-gray-100 text-gray-500 border border-gray-200 hover:bg-gray-200'
                             } ${!isAuthenticated ? 'opacity-60' : ''} disabled:opacity-50`}
                             title={thinkingMode ? 'Thinking 모드 ON' : 'Thinking 모드 OFF'}
                           >
-                            <span className="text-sm">thinking</span>
-                            <span>{thinkingMode ? 'ON' : 'OFF'}</span>
+                            {/* 뇌 아이콘 */}
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                            </svg>
+                            <span className="text-sm">Thinking</span>
                           </button>
                           
                           {/* 전송 버튼 */}
@@ -1865,7 +1870,11 @@ export default function ChatPage() {
                             } ${!isAuthenticated ? 'opacity-60' : ''} disabled:opacity-50`}
                             title={thinkingMode ? 'Thinking 모드 ON' : 'Thinking 모드 OFF'}
                           >
-                            <span className="text-xs">thinking</span>
+                            {/* 뇌 아이콘 */}
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                            </svg>
+                            <span className="text-xs">Thinking</span>
                           </button>
                           
                           {/* 전송 버튼 */}
@@ -2069,8 +2078,11 @@ export default function ChatPage() {
                         } ${!isAuthenticated ? 'opacity-60' : ''} disabled:opacity-50`}
                         title={thinkingMode ? 'Thinking 모드 ON' : 'Thinking 모드 OFF'}
                       >
-                        <span className="text-sm">thinking</span>
-                        <span className="hidden sm:inline">{thinkingMode ? 'ON' : 'OFF'}</span>
+                        {/* 뇌 아이콘 */}
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        </svg>
+                        <span className="text-sm">Thinking</span>
                       </button>
                       
                       {/* 전송 버튼 */}
@@ -2107,14 +2119,17 @@ export default function ChatPage() {
         }}
       />
 
-      {/* 오픈채팅방 모달 */}
-      {isOpenChatModalOpen && (
+      {/* 의견 보내기 모달 */}
+      {isFeedbackModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full animate-slideUp">
             {/* 헤더 */}
             <div className="relative px-6 pt-6 pb-4 border-b border-gray-100">
               <button
-                onClick={() => setIsOpenChatModalOpen(false)}
+                onClick={() => {
+                  setIsFeedbackModalOpen(false)
+                  setFeedbackText('')
+                }}
                 className="absolute top-4 right-4 p-2 hover:bg-gray-100 rounded-full transition-colors"
               >
                 <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2122,44 +2137,76 @@ export default function ChatPage() {
                 </svg>
               </button>
               <div className="text-center">
-                <img src="/로고.png" alt="UniZ Logo" className="h-12 mx-auto mb-3" />
-                <h2 className="text-xl font-bold text-gray-900">유니로드와 소통하기</h2>
+                <img src="/로고.png" alt="UniRoad Logo" className="h-12 mx-auto mb-3" />
+                <h2 className="text-xl font-bold text-gray-900">의견 보내기</h2>
+                <p className="text-sm text-gray-600 mt-2">
+                  유니로드에 대한 의견을 자유롭게 남겨주세요
+                </p>
               </div>
             </div>
 
             {/* 본문 */}
             <div className="px-6 py-6">
-              <div className="mb-6 text-center">
-                <p className="text-base font-semibold text-gray-900 mb-2">
-                  서울대 21학번 선배가 직접 만드는 입시 AI
-                </p>
-                <p className="text-sm text-gray-600 leading-relaxed">
-                  입시의 어려움을 누구보다 잘 알기에, 수험생 여러분께 진짜 도움이 되는 AI를 직접 만들고 있습니다.
-                  <br /><br />
-                  편하게 사용해 보시고 솔직한 후기를 들려주세요. 서비스 이용 관련 문의는 물론, 막막한 입시 고민 상담도 언제든 환영합니다.
-                </p>
-              </div>
-
+              <textarea
+                value={feedbackText}
+                onChange={(e) => setFeedbackText(e.target.value)}
+                placeholder="개선 아이디어, 버그 제보, 질문 등 어떤 의견이든 환영합니다."
+                className="w-full h-40 px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                disabled={feedbackSubmitting}
+              />
+              
               {/* 버튼 */}
-              <div className="space-y-3">
-                <a
-                  href="https://open.kakao.com/o/sTxWEbbi"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block w-full px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:from-blue-600 hover:to-blue-700 active:from-blue-700 active:to-blue-800 transition-all shadow-md hover:shadow-lg font-medium text-center"
+              <div className="mt-4 flex gap-3">
+                <button
+                  onClick={() => {
+                    setIsFeedbackModalOpen(false)
+                    setFeedbackText('')
+                  }}
+                  className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-xl hover:bg-gray-200 transition-colors font-medium"
+                  disabled={feedbackSubmitting}
                 >
-                  <span className="mr-2">👨‍💻</span>
-                  개발자와 1:1 대화하기
-                </a>
-                <a
-                  href="https://open.kakao.com/o/ggA6GPci"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="block w-full px-4 py-3 bg-gradient-to-r from-green-500 to-green-600 text-white rounded-xl hover:from-green-600 hover:to-green-700 active:from-green-700 active:to-green-800 transition-all shadow-md hover:shadow-lg font-medium text-center"
+                  취소
+                </button>
+                <button
+                  onClick={async () => {
+                    if (!feedbackText.trim()) {
+                      alert('의견을 입력해주세요.')
+                      return
+                    }
+                    
+                    setFeedbackSubmitting(true)
+                    try {
+                      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/feedback`, {
+                        method: 'POST',
+                        headers: {
+                          'Content-Type': 'application/json',
+                          ...(accessToken && { 'Authorization': `Bearer ${accessToken}` })
+                        },
+                        body: JSON.stringify({
+                          content: feedbackText,
+                          user_id: user?.id || null
+                        })
+                      })
+                      
+                      if (response.ok) {
+                        alert('소중한 의견 감사합니다!')
+                        setIsFeedbackModalOpen(false)
+                        setFeedbackText('')
+                      } else {
+                        alert('전송에 실패했습니다. 다시 시도해주세요.')
+                      }
+                    } catch (error) {
+                      console.error('피드백 전송 오류:', error)
+                      alert('전송에 실패했습니다. 다시 시도해주세요.')
+                    } finally {
+                      setFeedbackSubmitting(false)
+                    }
+                  }}
+                  className="flex-1 px-4 py-3 bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-xl hover:from-blue-600 hover:to-blue-700 transition-all font-medium disabled:opacity-50"
+                  disabled={feedbackSubmitting || !feedbackText.trim()}
                 >
-                  <span className="mr-2">💬</span>
-                  유니로드 공식 소통방 참여
-                </a>
+                  {feedbackSubmitting ? '전송 중...' : '보내기'}
+                </button>
               </div>
 
               <p className="mt-4 text-xs text-center text-gray-500">

@@ -67,8 +67,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const storedUser = localStorage.getItem('user')
 
       if (storedToken && storedUser) {
+        // 토큰만 먼저 설정하고, 사용자 정보는 검증 후 설정
+        // (검증 전에 localStorage의 user 정보를 사용하면 다른 사용자 정보가 표시될 수 있음)
         setAccessToken(storedToken)
-        setUser(JSON.parse(storedUser))
+        // setUser는 verifyToken에서 검증 후 설정
         verifyToken(storedToken)
       } else {
         setLoading(false)
@@ -83,7 +85,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const response = await axios.get('/api/auth/me', {
         headers: { Authorization: `Bearer ${token}` }
       })
-      setUser(response.data)
+      // 서버에서 검증된 사용자 정보로 업데이트
+      const verifiedUser = response.data
+      setUser(verifiedUser)
+      // localStorage도 검증된 정보로 업데이트
+      localStorage.setItem('user', JSON.stringify(verifiedUser))
       setLoading(false)
     } catch (error) {
       // 토큰이 만료되었거나 유효하지 않음
@@ -186,9 +192,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     setUser(null)
     setAccessToken(null)
+    
+    // localStorage 정리
     localStorage.removeItem('access_token')
     localStorage.removeItem('user')
     localStorage.removeItem('refresh_token')
+    
+    // sessionStorage 정리 (채팅 관련 데이터)
+    // 로그아웃 시 이전 사용자의 채팅 데이터가 남아있지 않도록 삭제
+    sessionStorage.removeItem('uniroad_chat_messages')
+    sessionStorage.removeItem('uniroad_chat_session_id')
   }
 
   return (

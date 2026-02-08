@@ -109,34 +109,31 @@ async def sign_in(request: SignInRequest):
 async def sign_out(user: dict = Depends(get_current_user)):
     """
     로그아웃
+    - JWT 토큰 기반 인증이므로 서버에서는 별도 처리 불필요
+    - 클라이언트에서 토큰을 삭제하면 로그아웃 완료
+    - 공유 Supabase 클라이언트의 sign_out() 호출 시 다른 사용자 세션에 영향을 줄 수 있으므로 제거
     """
-    try:
-        supabase_service.client.auth.sign_out()
-        return {"message": "로그아웃 성공"}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"로그아웃 실패: {str(e)}")
+    # 토큰 기반 인증이므로 서버에서는 아무것도 하지 않음
+    # 클라이언트에서 localStorage의 토큰을 삭제하면 로그아웃 완료
+    return {"message": "로그아웃 성공"}
 
 
 @router.get("/me")
 async def get_me(user: dict = Depends(get_current_user)):
     """
     현재 로그인한 사용자 정보
+    - get_current_user 미들웨어에서 JWT 토큰을 검증하고 사용자 정보를 추출
+    - 공유 Supabase 클라이언트의 auth.get_user() 사용 시 동시 요청에서 
+      다른 사용자 정보가 반환될 수 있으므로, 미들웨어에서 검증된 정보를 그대로 반환
     """
-    try:
-        # Supabase에서 사용자 정보 가져오기
-        response = supabase_service.client.auth.get_user()
-        
-        if response.user is None:
-            raise HTTPException(status_code=401, detail="사용자를 찾을 수 없습니다")
-        
-        return {
-            "id": response.user.id,
-            "email": response.user.email,
-            "name": response.user.user_metadata.get("name"),
-            "created_at": response.user.created_at,
-        }
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"사용자 정보 조회 실패: {str(e)}")
+    # get_current_user에서 이미 JWT 토큰을 검증하고 사용자 정보를 추출했으므로
+    # 공유 클라이언트를 사용하지 않고 검증된 정보를 그대로 반환
+    return {
+        "id": user.get("user_id"),
+        "email": user.get("email"),
+        "name": user.get("name"),
+        "created_at": user.get("created_at"),
+    }
 
 
 @router.post("/refresh")

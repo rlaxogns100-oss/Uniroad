@@ -93,20 +93,34 @@ def _save_messages_to_session_chat(
 log_queues: Dict[str, asyncio.Queue] = {}
 
 # 세션별 대화 히스토리 (메모리)
+# 키 형식: "{user_id}:{session_id}" 또는 "guest:{session_id}"
 conversation_sessions: Dict[str, List[Dict[str, Any]]] = {}
 
 
-async def load_history_from_db(session_id: str) -> List[Dict[str, Any]]:
+def get_cache_key(user_id: Optional[str], session_id: str) -> str:
+    """
+    대화 히스토리 캐시 키 생성
+    - 사용자별로 세션을 분리하여 다른 사용자의 대화가 섞이지 않도록 함
+    """
+    return f"{user_id or 'guest'}:{session_id}"
+
+
+async def load_history_from_db(session_id: str, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     DB에서 세션 히스토리 로드 (session_chat_messages)
+    - user_id가 있으면 해당 사용자의 메시지만 로드
     """
     try:
-        messages_response = supabase_service.client.table("session_chat_messages")\
+        query = supabase_service.client.table("session_chat_messages")\
             .select("role, content")\
-            .eq("user_session", session_id)\
-            .order("created_at")\
-            .limit(20)\
-            .execute()
+            .eq("user_session", session_id)
+        
+        # user_id가 있으면 해당 사용자의 메시지만 필터링
+        if user_id:
+            query = query.eq("user_id", user_id)
+        
+        messages_response = query.order("created_at").limit(20).execute()
+        
         if messages_response.data:
             return [
                 {"role": msg.get("role", "user"), "content": msg.get("content", "")}
@@ -117,13 +131,14 @@ async def load_history_from_db(session_id: str) -> List[Dict[str, Any]]:
     return []
 
 
-def get_or_load_history(session_id: str) -> List[Dict[str, Any]]:
+def get_or_load_history(session_id: str, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     메모리에서 히스토리 가져오기. 없으면 빈 리스트 반환 (async 버전 사용 권장)
     """
-    if session_id not in conversation_sessions:
-        conversation_sessions[session_id] = []
-    return conversation_sessions[session_id][-20:]
+    cache_key = get_cache_key(user_id, session_id)
+    if cache_key not in conversation_sessions:
+        conversation_sessions[cache_key] = []
+    return conversation_sessions[cache_key][-20:]
 
 
 class ChatRequest(BaseModel):
@@ -219,13 +234,14 @@ async def chat(
         log_and_emit(f"{'#'*80}")
 
         # 세션별 히스토리 로드 (메모리에 없으면 DB에서 로드)
-        if session_id not in conversation_sessions or len(conversation_sessions[session_id]) == 0:
-            db_history = await load_history_from_db(session_id)
+        cache_key = get_cache_key(user_id, session_id)
+        if cache_key not in conversation_sessions or len(conversation_sessions[cache_key]) == 0:
+            db_history = await load_history_from_db(session_id, user_id)
             if db_history:
-                conversation_sessions[session_id] = db_history
+                conversation_sessions[cache_key] = db_history
             else:
-                conversation_sessions[session_id] = []
-        history = conversation_sessions[session_id][-20:]
+                conversation_sessions[cache_key] = []
+        history = conversation_sessions[cache_key][-20:]
         # user_id는 optional_auth에서 이미 설정됨 (프로필 점수 활용용)
 
         # ========================================
@@ -299,7 +315,7 @@ async def chat(
             # 히스토리 저장
             history.append({"role": "user", "content": message})
             history.append({"role": "assistant", "content": direct_response})
-            conversation_sessions[session_id] = history[-20:]  # 최근 20개만 유지
+            conversation_sessions[cache_key] = history[-20:]  # 최근 20개만 유지
 
             # 채팅 로그 저장
             await supabase_service.insert_chat_log(
@@ -415,7 +431,7 @@ async def chat(
         # 히스토리 저장
         history.append({"role": "user", "content": message})
         history.append({"role": "assistant", "content": final_answer})
-        conversation_sessions[session_id] = history[-20:]  # 최근 20개만 유지
+        conversation_sessions[cache_key] = history[-20:]  # 최근 20개만 유지
 
         # 채팅 로그 저장
         await supabase_service.insert_chat_log(
@@ -562,10 +578,11 @@ async def chat_stream_v2_with_image(
         print(f"\n🔵 [STREAM_V2_IMAGE_START] {session_id}:{message[:30]}")
         print(f"🖼️ 이미지: {image.filename}, {image.content_type}, {len(image_data)} bytes")
         
-        # 세션별 히스토리 로드
-        if session_id not in conversation_sessions:
-            conversation_sessions[session_id] = []
-        history = conversation_sessions[session_id][-20:]
+        # 세션별 히스토리 로드 (user_id 기반 캐시 키 사용)
+        cache_key = get_cache_key(user_id, session_id)
+        if cache_key not in conversation_sessions:
+            conversation_sessions[cache_key] = []
+        history = conversation_sessions[cache_key][-20:]
         
         full_response = ""
         image_analysis = ""
@@ -649,7 +666,7 @@ async def chat_stream_v2_with_image(
             user_content = f"[이미지 첨부] {message}"
             history.append({"role": "user", "content": user_content})
             history.append({"role": "assistant", "content": full_response})
-            conversation_sessions[session_id] = history[-20:]
+            conversation_sessions[cache_key] = history[-20:]
             
             pipeline_time = time.time() - pipeline_start
             
@@ -762,9 +779,11 @@ async def chat_stream_v2(
         print(f"\n🔵 [STREAM_V2_START] [{mode_label}] {session_id}:{message[:30]}")
         
         # 세션별 히스토리 로드 (동기 generator이므로 메모리에서만 확인)
-        if session_id not in conversation_sessions:
-            conversation_sessions[session_id] = []
-        history = conversation_sessions[session_id][-20:]
+        # user_id 기반 캐시 키 사용
+        cache_key = get_cache_key(user_id, session_id)
+        if cache_key not in conversation_sessions:
+            conversation_sessions[cache_key] = []
+        history = conversation_sessions[cache_key][-20:]
         # user_id는 optional_auth에서 온 클로저 변수 사용 (프로필/저장용)
 
         full_response = ""
@@ -967,7 +986,7 @@ async def chat_stream_v2(
             # 대화 이력에 추가
             history.append({"role": "user", "content": message})
             history.append({"role": "assistant", "content": full_response})
-            conversation_sessions[session_id] = history[-20:]  # 최근 20개만 유지
+            conversation_sessions[cache_key] = history[-20:]  # 최근 20개만 유지
             
             pipeline_time = time.time() - pipeline_start
             
@@ -1096,13 +1115,15 @@ async def chat_stream(
             yield send_log(f"{'#'*80}")
 
             # 세션별 히스토리 로드 (메모리에 없으면 DB에서 로드)
-            if session_id not in conversation_sessions or len(conversation_sessions[session_id]) == 0:
-                db_history = await load_history_from_db(session_id)
+            # user_id 기반 캐시 키 사용
+            cache_key = get_cache_key(user_id, session_id)
+            if cache_key not in conversation_sessions or len(conversation_sessions[cache_key]) == 0:
+                db_history = await load_history_from_db(session_id, user_id)
                 if db_history:
-                    conversation_sessions[session_id] = db_history
+                    conversation_sessions[cache_key] = db_history
                 else:
-                    conversation_sessions[session_id] = []
-            history = conversation_sessions[session_id][-20:]
+                    conversation_sessions[cache_key] = []
+            history = conversation_sessions[cache_key][-20:]
             timing_logger.mark("history_loaded")
             # user_id는 stream_v2 상단 optional_auth에서 설정됨 (클로저로 사용)
 
@@ -1203,7 +1224,7 @@ async def chat_stream(
                 # 히스토리 저장
                 history.append({"role": "user", "content": message})
                 history.append({"role": "assistant", "content": direct_response})
-                conversation_sessions[session_id] = history[-20:]  # 최근 20개만 유지
+                conversation_sessions[cache_key] = history[-20:]  # 최근 20개만 유지
 
                 # 채팅 로그 저장
                 await supabase_service.insert_chat_log(
@@ -1369,7 +1390,7 @@ async def chat_stream(
             # 히스토리 저장
             history.append({"role": "user", "content": message})
             history.append({"role": "assistant", "content": final_answer})
-            conversation_sessions[session_id] = history[-20:]  # 최근 20개만 유지
+            conversation_sessions[cache_key] = history[-20:]  # 최근 20개만 유지
             
             timing_logger.mark("history_saved")
 
@@ -1491,10 +1512,19 @@ def emit_log(session_id: str, message: str):
 
 
 @router.post("/reset")
-async def reset_session(session_id: str = "default"):
+async def reset_session(
+    session_id: str = "default",
+    authorization: Optional[str] = Header(None)
+):
     """대화 히스토리 초기화"""
-    if session_id in conversation_sessions:
-        del conversation_sessions[session_id]
+    # 선택적 인증으로 user_id 확인
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    
+    # user_id 기반 캐시 키 사용
+    cache_key = get_cache_key(user_id, session_id)
+    if cache_key in conversation_sessions:
+        del conversation_sessions[cache_key]
     return {"status": "ok", "message": f"세션 {session_id} 초기화 완료"}
 
 
