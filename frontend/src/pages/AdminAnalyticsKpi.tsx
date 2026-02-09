@@ -21,6 +21,25 @@ import {
 type CumulativePoint = { day: string; new_users: number; cumulative_users: number }
 type QuestionCumulativePoint = { day: string; new_questions: number; cumulative_questions: number }
 
+export type RetentionPoint = {
+  cohort_day: string
+  cohort_users: number
+  day_1_users: number
+  day_2_users: number
+  day_3_users: number
+  day_4_users: number
+  day_5_users: number
+  day_6_users: number
+  day_7_users: number
+  day_1_rate: number
+  day_2_rate: number
+  day_3_rate: number
+  day_4_rate: number
+  day_5_rate: number
+  day_6_rate: number
+  day_7_rate: number
+}
+
 export type PathRow = {
   step: string
   sessionSource: string
@@ -87,6 +106,31 @@ export default function AdminAnalyticsKpi() {
   const [pathData, setPathData] = useState<PathRow[]>([])
   const [pathUploadError, setPathUploadError] = useState<string | null>(null)
   const [selectedPathSource, setSelectedPathSource] = useState<string>('')
+  const [activeRollingSeries, setActiveRollingSeries] = useState<{ days: number; active_users: number }[]>([])
+  const [activeRollingError, setActiveRollingError] = useState<string | null>(null)
+  const [retentionSeries, setRetentionSeries] = useState<RetentionPoint[]>([])
+  const [retentionError, setRetentionError] = useState<string | null>(null)
+  const [retentionFrom, setRetentionFrom] = useState<string>('')
+  const [retentionTo, setRetentionTo] = useState<string>('')
+  const [selectedRetentionDays, setSelectedRetentionDays] = useState<number[]>([1, 2, 3, 4, 5, 6, 7])
+  const [retentionLoading, setRetentionLoading] = useState(false)
+  const [cohortUserCohortDay, setCohortUserCohortDay] = useState<string>('')
+  const [cohortUserDayN, setCohortUserDayN] = useState<number | ''>('')
+  type CohortUserRow = {
+    user_id: string | null
+    email: string
+    latestLog?: {
+      id: string | null
+      timestamp: string | null
+      userQuestion: string
+      finalAnswer: string
+      conversationHistory: string[]
+    } | null
+  }
+  const [cohortUserList, setCohortUserList] = useState<CohortUserRow[]>([])
+  const [cohortUserLoading, setCohortUserLoading] = useState(false)
+  const [cohortUserError, setCohortUserError] = useState<string | null>(null)
+  const [cohortUserModalLog, setCohortUserModalLog] = useState<{ email: string; log: CohortUserRow['latestLog'] } | null>(null)
   // 서버에 저장 (한 번 넣어두면 다른 관리자도 동일하게 봄)
   const savePathExcel = useCallback(
     (data: PathRow[], source: string) => {
@@ -214,11 +258,61 @@ export default function AdminAnalyticsKpi() {
     if (!accessToken) return
     let cancelled = false
     axios
+      .get<{ series: { days: number; active_users: number }[] }>('/api/admin/stats/active-users/rolling', { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then((res) => { if (!cancelled) setActiveRollingSeries(res.data.series || []) })
+      .catch((err) => { if (!cancelled) setActiveRollingError(err.response?.data?.detail ?? '조회 실패') })
+    return () => { cancelled = true }
+  }, [accessToken])
+
+  useEffect(() => {
+    if (!accessToken) return
+    let cancelled = false
+    axios
       .get<{ series: QuestionCumulativePoint[] }>('/api/admin/stats/questions/cumulative-timeseries', { headers: { Authorization: `Bearer ${accessToken}` } })
       .then((res) => { if (!cancelled) setQuestionSeries(res.data.series || []) })
       .catch((err) => { if (!cancelled) setQuestionSeriesError(err.response?.data?.detail ?? '조회 실패') })
     return () => { cancelled = true }
   }, [accessToken])
+
+  const fetchRetention = useCallback(() => {
+    if (!accessToken) return
+    setRetentionLoading(true)
+    setRetentionError(null)
+    const params = new URLSearchParams()
+    if (retentionFrom) params.set('from_date', retentionFrom)
+    if (retentionTo) params.set('to_date', retentionTo)
+    const url = `/api/admin/stats/retention/day-series${params.toString() ? `?${params.toString()}` : ''}`
+    axios
+      .get<{ series: RetentionPoint[] }>(url, { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then((res) => {
+        setRetentionSeries(res.data.series || [])
+      })
+      .catch((err) => {
+        setRetentionError(err.response?.data?.detail ?? '리텐션 조회 실패')
+      })
+      .finally(() => setRetentionLoading(false))
+  }, [accessToken, retentionFrom, retentionTo])
+
+  useEffect(() => {
+    if (!accessToken) return
+    fetchRetention()
+  }, [accessToken])
+
+  const fetchCohortUsers = useCallback(() => {
+    if (!accessToken || !cohortUserCohortDay) return
+    setCohortUserLoading(true)
+    setCohortUserError(null)
+    const params = new URLSearchParams({ cohort_day: cohortUserCohortDay })
+    if (cohortUserDayN !== '') params.set('day_n', String(cohortUserDayN))
+    axios
+      .get<{ users: { user_id: string | null; email: string }[] }>(
+        `/api/admin/stats/retention/cohort-users?${params.toString()}`,
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      )
+      .then((res) => setCohortUserList(res.data.users || []))
+      .catch((err) => setCohortUserError(err.response?.data?.detail ?? '유저 목록 조회 실패'))
+      .finally(() => setCohortUserLoading(false))
+  }, [accessToken, cohortUserCohortDay, cohortUserDayN])
 
   const formatDay = (dayStr: string) => {
     if (!dayStr) return ''
@@ -256,6 +350,52 @@ export default function AdminAnalyticsKpi() {
           )}
           <p className="text-sm text-gray-500 mt-1">admin_logs 기준</p>
         </div>
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-xl p-6 border border-gray-100 mb-8">
+        <h2 className="text-lg font-bold text-gray-800 mb-4">📊 활성 사용자 (오늘 기준 롤링, admin_logs)</h2>
+        <p className="text-sm text-gray-500 mb-4">활성 사용자 = 로그인 유저 중 질문한 유저. 오늘만, 어제+오늘, …, 1주(7일), 2주(14일) 구간별 수</p>
+        {activeRollingError ? (
+          <p className="text-red-600 text-sm">{activeRollingError}</p>
+        ) : activeRollingSeries.length === 0 ? (
+          <p className="text-gray-500">로딩 중...</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-7 gap-3 mb-6">
+              {activeRollingSeries.map((p) => (
+                <div key={p.days} className="rounded-xl border border-gray-200 bg-gray-50/50 p-3 text-center">
+                  <div className="text-xs font-medium text-gray-500 mb-0.5">
+                    {p.days === 1 ? '오늘' : p.days === 7 ? '1주' : p.days === 14 ? '2주' : `${p.days}일`}
+                  </div>
+                  <div className="text-lg font-bold text-indigo-600">{p.active_users.toLocaleString()}명</div>
+                </div>
+              ))}
+            </div>
+            <div className="border-t border-gray-200 pt-4">
+              <h3 className="text-sm font-semibold text-gray-700 mb-3">추이 그래프</h3>
+              <ResponsiveContainer width="100%" height={280}>
+                <LineChart
+                  data={activeRollingSeries.map((p) => ({
+                    days: p.days,
+                    label: p.days === 1 ? '오늘' : p.days === 7 ? '1주' : p.days === 14 ? '2주' : `${p.days}일`,
+                    active_users: p.active_users,
+                  }))}
+                  margin={{ top: 8, right: 16, left: 0, bottom: 8 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#6b7280" />
+                  <YAxis tick={{ fontSize: 12 }} stroke="#6b7280" allowDecimals={false} />
+                  <Tooltip
+                    formatter={(value: number) => [value.toLocaleString() + '명', '활성 사용자']}
+                    labelFormatter={(_, payload) => payload?.[0]?.payload?.days ? `최근 ${payload[0].payload.days}일` : ''}
+                    contentStyle={{ borderRadius: 8 }}
+                  />
+                  <Line type="monotone" dataKey="active_users" name="활성 사용자" stroke="#4f46e5" strokeWidth={2} dot={{ r: 4 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl shadow-xl p-6 border border-gray-100 mb-8">
@@ -306,6 +446,210 @@ export default function AdminAnalyticsKpi() {
             </AreaChart>
           </ResponsiveContainer>
         )}
+      </div>
+
+      <div className="bg-white rounded-2xl shadow-xl p-6 border border-gray-100 mb-8">
+        <h2 className="text-lg font-bold text-gray-800 mb-4">📊 Day-1 ~ Day-7 리텐션 추이 (admin_logs 태생일 기준)</h2>
+        <p className="text-sm text-gray-500 mb-4">
+          가입일(최초 방문일)이 같은 코호트별로, 다음 날·2일 후·…·7일 후 재방문 비율(%).
+        </p>
+        <div className="flex flex-wrap items-center gap-4 mb-4">
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-gray-600">시작일</span>
+            <input
+              type="date"
+              value={retentionFrom}
+              onChange={(e) => setRetentionFrom(e.target.value)}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <span className="text-gray-600">종료일</span>
+            <input
+              type="date"
+              value={retentionTo}
+              onChange={(e) => setRetentionTo(e.target.value)}
+              className="rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={fetchRetention}
+            disabled={retentionLoading}
+            className="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+          >
+            {retentionLoading ? '조회 중…' : '조회'}
+          </button>
+          <span className="text-sm text-gray-500">표시할 Day:</span>
+          <div className="flex flex-wrap gap-2">
+            {[1, 2, 3, 4, 5, 6, 7].map((d) => (
+              <label key={d} className="inline-flex items-center gap-1 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={selectedRetentionDays.includes(d)}
+                  onChange={() => {
+                    setSelectedRetentionDays((prev) =>
+                      prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort((a, b) => a - b))
+                  }}
+                />
+                Day-{d}
+              </label>
+            ))}
+          </div>
+        </div>
+        {retentionError ? (
+          <p className="text-red-600 text-sm">{retentionError}</p>
+        ) : retentionSeries.length === 0 && !retentionLoading ? (
+          <p className="text-gray-500">데이터가 없거나 기간을 선택 후 조회해 주세요.</p>
+        ) : (
+          <ResponsiveContainer width="100%" height={320}>
+            <LineChart
+              data={retentionSeries.map((p) => ({
+                ...p,
+                cohortLabel: formatDay(p.cohort_day),
+              }))}
+              margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+              <XAxis dataKey="cohortLabel" tick={{ fontSize: 12 }} stroke="#6b7280" />
+              <YAxis tick={{ fontSize: 12 }} stroke="#6b7280" unit="%" domain={[0, 'auto']} />
+              <Tooltip
+                formatter={(value: number | undefined) => [(value != null ? value : 0).toFixed(1) + '%', '']}
+                labelFormatter={(_, payload) => (payload?.[0]?.payload?.cohort_day ?? '') + ' (가입일)'}
+                contentStyle={{ borderRadius: 8 }}
+              />
+              <Legend />
+              {[1, 2, 3, 4, 5, 6, 7].map((d) =>
+                selectedRetentionDays.includes(d) ? (
+                  <Line
+                    key={d}
+                    type="monotone"
+                    dataKey={`day_${d}_rate`}
+                    name={`Day-${d}`}
+                    stroke={['#4f46e5', '#059669', '#d97706', '#dc2626', '#7c3aed', '#0891b2', '#65a30d'][d - 1]}
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                  />
+                ) : null
+              )}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+        <div className="mt-6 pt-6 border-t border-gray-200">
+          <h3 className="text-sm font-semibold text-gray-700 mb-3">👤 해당 코호트 유저 보기</h3>
+          <p className="text-xs text-gray-500 mb-3">가입일(코호트)을 선택하고, 전체 유저 또는 Day-N 달성 유저만 조회할 수 있습니다.</p>
+          <div className="flex flex-wrap items-center gap-3 mb-3">
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-gray-600">가입일(코호트)</span>
+              <select
+                value={cohortUserCohortDay}
+                onChange={(e) => setCohortUserCohortDay(e.target.value)}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm min-w-[140px]"
+              >
+                <option value="">선택</option>
+                {retentionSeries.map((p) => (
+                  <option key={p.cohort_day} value={p.cohort_day}>
+                    {p.cohort_day} (유저 {p.cohort_users}명)
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <span className="text-gray-600">대상</span>
+              <select
+                value={cohortUserDayN === '' ? '' : cohortUserDayN}
+                onChange={(e) => setCohortUserDayN(e.target.value === '' ? '' : Number(e.target.value))}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm min-w-[120px]"
+              >
+                <option value="">전체 유저</option>
+                {[1, 2, 3, 4, 5, 6, 7].map((d) => (
+                  <option key={d} value={d}>Day-{d} 달성 유저</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={fetchCohortUsers}
+              disabled={cohortUserLoading || !cohortUserCohortDay}
+              className="px-4 py-2 bg-gray-700 text-white text-sm font-medium rounded-lg hover:bg-gray-800 disabled:opacity-50"
+            >
+              {cohortUserLoading ? '조회 중…' : '유저 목록 조회'}
+            </button>
+          </div>
+          {cohortUserError && <p className="text-red-600 text-sm mb-2">{cohortUserError}</p>}
+          {cohortUserList.length > 0 && (
+            <div className="overflow-x-auto max-h-60 overflow-y-auto border border-gray-200 rounded-lg">
+              <table className="w-full text-sm border-collapse">
+                <thead className="bg-gray-50 sticky top-0">
+                  <tr>
+                    <th className="border-b border-gray-200 px-3 py-2 text-left font-medium text-gray-700">이메일</th>
+                    <th className="border-b border-gray-200 px-3 py-2 text-left font-medium text-gray-700">user_id</th>
+                    <th className="border-b border-gray-200 px-3 py-2 text-left font-medium text-gray-700 w-24">최신 대화</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cohortUserList.map((u, i) => (
+                    <tr key={u.user_id ?? i} className="hover:bg-gray-50">
+                      <td className="border-b border-gray-100 px-3 py-2">{u.email || '-'}</td>
+                      <td className="border-b border-gray-100 px-3 py-2 font-mono text-xs text-gray-500">{u.user_id ?? '-'}</td>
+                      <td className="border-b border-gray-100 px-3 py-2">
+                        {u.latestLog ? (
+                          <button
+                            type="button"
+                            onClick={() => setCohortUserModalLog({ email: u.email || '', log: u.latestLog ?? undefined })}
+                            className="text-indigo-600 hover:text-indigo-800 text-xs font-medium"
+                          >
+                            보기
+                          </button>
+                        ) : (
+                          <span className="text-gray-400 text-xs">없음</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-xs text-gray-500 px-3 py-2 bg-gray-50 border-t border-gray-200">총 {cohortUserList.length}명</p>
+            </div>
+          )}
+        {cohortUserModalLog && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setCohortUserModalLog(null)}>
+            <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+                <h3 className="font-semibold text-gray-800">최신 대화 · {cohortUserModalLog.email}</h3>
+                <button type="button" onClick={() => setCohortUserModalLog(null)} className="text-gray-500 hover:text-gray-700 text-sm">닫기</button>
+              </div>
+              <div className="p-4 overflow-y-auto space-y-4">
+                {cohortUserModalLog.log?.timestamp && (
+                  <p className="text-xs text-gray-500">로그 ID: {cohortUserModalLog.log.id ?? '-'} · {new Date(cohortUserModalLog.log.timestamp).toLocaleString('ko-KR')}</p>
+                )}
+                <div>
+                  <span className="text-gray-600 font-medium text-sm">질문</span>
+                  <p className="mt-1 p-2 bg-gray-50 rounded border border-gray-200 whitespace-pre-wrap text-gray-800 text-sm">{cohortUserModalLog.log?.userQuestion || '(없음)'}</p>
+                </div>
+                <div>
+                  <span className="text-gray-600 font-medium text-sm">최종 답변</span>
+                  <p className="mt-1 p-2 bg-gray-50 rounded border border-gray-200 whitespace-pre-wrap text-gray-800 text-sm">{cohortUserModalLog.log?.finalAnswer || '(없음)'}</p>
+                </div>
+                <div>
+                  <span className="text-gray-600 font-medium text-sm">conversation_history ({(cohortUserModalLog.log?.conversationHistory ?? []).length}개)</span>
+                  <ul className="mt-1 space-y-1 max-h-64 overflow-y-auto p-2 bg-gray-50 rounded border border-gray-200">
+                    {(cohortUserModalLog.log?.conversationHistory ?? []).length === 0 ? (
+                      <li className="text-gray-500 text-xs">(비어 있음)</li>
+                    ) : (
+                      (cohortUserModalLog.log?.conversationHistory ?? []).map((msg, i) => (
+                        <li key={i} className="text-gray-700 whitespace-pre-wrap border-b border-gray-100 last:border-0 pb-1 text-xs">
+                          {typeof msg === 'string' ? msg : JSON.stringify(msg)}
+                        </li>
+                      ))
+                    )}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+        </div>
       </div>
 
       <div className="bg-white rounded-2xl shadow-xl p-6 border border-gray-100 mb-8">
