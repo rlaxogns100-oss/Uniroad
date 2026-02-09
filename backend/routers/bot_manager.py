@@ -521,16 +521,16 @@ class BotManager:
             
             if ai_model_provider == "azure" and azure_client:
                 # Azure OpenAI로 Query Agent 실행
-                print("  -> [Query Agent] Azure OpenAI (gpt-4o) 사용")
+                print("  -> [Query Agent] Azure OpenAI (gpt-5.2-chat-4) 사용")
                 try:
                     azure_response = azure_client.chat.completions.create(
-                        model="gpt-4o",
+                        model="gpt-5.2-chat-4",
                         messages=[
                             {"role": "system", "content": query_prompt},
                             {"role": "user", "content": query_message}
                         ],
                         temperature=0.0,
-                        max_tokens=2048,
+                        max_completion_tokens=2048,
                         response_format={"type": "json_object"}
                     )
                     result_text = azure_response.choices[0].message.content.strip()
@@ -606,16 +606,16 @@ class BotManager:
             
             if ai_model_provider == "azure" and azure_client:
                 # Azure OpenAI로 Answer Agent 실행
-                print("  -> [Answer Agent] Azure OpenAI (gpt-4o) 사용")
+                print("  -> [Answer Agent] Azure OpenAI (gpt-5.2-chat-4) 사용")
                 try:
                     azure_response = azure_client.chat.completions.create(
-                        model="gpt-4o",
+                        model="gpt-5.2-chat-4",
                         messages=[
                             {"role": "system", "content": answer_prompt},
                             {"role": "user", "content": answer_full_prompt}
                         ],
                         temperature=0.3,
-                        max_tokens=2048
+                        max_completion_tokens=2048
                     )
                     answer_text = azure_response.choices[0].message.content.strip()
                 except Exception as e:
