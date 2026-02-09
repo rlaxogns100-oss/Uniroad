@@ -42,6 +42,7 @@ app.add_middleware(
         "ionic://localhost",
         "null",                     # iOS WebView가 로컬 페이지에서 null Origin 보낼 수 있음
     ],
+    allow_origin_regex=r"^(capacitor|ionic)://.*",  # 실기기 WebView Origin 변형 허용
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
