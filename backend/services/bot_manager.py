@@ -440,7 +440,8 @@ class BotManager:
             "comments_per_hour_max": 10,
             "rest_minutes": 3,
             "keywords": [],  # 검색 키워드 목록
-            "banned_keywords": []  # 금지 키워드 목록
+            "banned_keywords": [],  # 금지 키워드 목록
+            "ai_model_provider": "gemini"  # AI 모델 제공자 (gemini 또는 azure)
         }
         
         if os.path.exists(self.config_file):

@@ -33,6 +33,7 @@ interface BotConfig {
   rest_minutes: number
   keywords?: string[]
   banned_keywords?: string[]  // 금지 키워드 목록
+  ai_model_provider?: string  // AI 모델 제공자 (gemini 또는 azure)
 }
 
 interface CommentRecord {
@@ -136,6 +137,7 @@ export default function AutoReplyPage() {
   const [bannedKeywords, setBannedKeywords] = useState<string[]>([])  // 금지 키워드
   const [bannedKeywordsText, setBannedKeywordsText] = useState('')  // 금지 키워드 텍스트 입력용
   const [bannedKeywordsExpanded, setBannedKeywordsExpanded] = useState(false)
+  const [aiModelProvider, setAiModelProvider] = useState('gemini')  // AI 모델 제공자
   const [configChanged, setConfigChanged] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())  // ID 기반으로 변경
   // 프롬프트 편집 (Query + Answer 2개)
@@ -220,6 +222,7 @@ export default function AutoReplyPage() {
       const loadedBannedKeywords = data.config.banned_keywords ?? []
       setBannedKeywords(loadedBannedKeywords)
       setBannedKeywordsText(loadedBannedKeywords.join(', '))
+      setAiModelProvider(data.config.ai_model_provider ?? 'gemini')
       setConfigChanged(false)
       // 계정 정보 설정
       if (data.current_account && !selectedAccount) {
@@ -678,7 +681,8 @@ export default function AutoReplyPage() {
           comments_per_hour_max: commentsPerHourMax,
           rest_minutes: restMinutes,
           keywords: keywords,
-          banned_keywords: bannedKeywords
+          banned_keywords: bannedKeywords,
+          ai_model_provider: aiModelProvider
         })
       })
       const data = await res.json()
@@ -1057,6 +1061,26 @@ export default function AutoReplyPage() {
                   max={30}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">
+                  AI 모델
+                </label>
+                <select
+                  value={aiModelProvider}
+                  onChange={(e) => {
+                    setAiModelProvider(e.target.value)
+                    setConfigChanged(true)
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="gemini">Gemini (Google)</option>
+                  <option value="azure">GPT-5.2 (Azure)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  {aiModelProvider === 'gemini' ? 'Gemini 2.5 Flash 사용' : 'Azure GPT-5.2-chat 사용'}
+                </p>
               </div>
 
               <button

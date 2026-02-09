@@ -22,6 +22,7 @@ class BotConfigUpdate(BaseModel):
     rest_minutes: Optional[int] = None
     keywords: Optional[List[str]] = None
     banned_keywords: Optional[List[str]] = None  # 금지 키워드 목록
+    ai_model_provider: Optional[str] = None  # AI 모델 제공자 (gemini 또는 azure)
 
 
 class BotStartRequest(BaseModel):

@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from config import settings
+from config.config import settings
 from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs, admin_stats, profile, functions, auto_reply, tracking, test_evaluate, feedback
 from routes import calculator
 import os
