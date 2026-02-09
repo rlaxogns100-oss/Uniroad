@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Optional, Dict, List, Any
 from pathlib import Path
 import google.generativeai as genai
+from openai import AzureOpenAI
 
 
 # 지원하는 카페 목록 (탭 이름, 카페 ID, 디렉토리명)
@@ -582,8 +583,10 @@ class BotManager:
             bot_config = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(bot_config)
             
-            # Gemini API 설정
-            genai.configure(api_key=bot_config.GEMINI_API_KEY)
+            # 설정에서 AI 모델 제공자 확인
+            current_config = self.get_config()
+            ai_model_provider = current_config.get("ai_model_provider", "gemini")
+            print(f"  -> AI 모델 제공자: {ai_model_provider}")
             
             # 프롬프트 로드
             prompts = self.get_prompts()
@@ -597,25 +600,47 @@ class BotManager:
             if not answer_prompt:
                 answer_prompt = self._get_default_answer_prompt()
             
-            # Query Agent 모델 초기화 (system_instruction 사용)
-            try:
-                query_agent = genai.GenerativeModel(
-                    'gemini-2.5-flash-lite',
-                    system_instruction=query_prompt
+            # AI 모델 제공자에 따라 다른 모델 사용
+            azure_client = None
+            if ai_model_provider == "azure":
+                # Azure OpenAI 설정
+                azure_api_key = getattr(bot_config, 'AZURE_OPENAI_API_KEY', None) or os.getenv('AZURE_OPENAI_API_KEY')
+                azure_endpoint = getattr(bot_config, 'AZURE_OPENAI_ENDPOINT', None) or os.getenv('AZURE_OPENAI_ENDPOINT')
+                
+                if not azure_api_key or not azure_endpoint:
+                    return {"success": False, "message": "Azure OpenAI API 키 또는 엔드포인트가 설정되지 않았습니다."}
+                
+                azure_client = AzureOpenAI(
+                    api_key=azure_api_key,
+                    api_version="2024-02-15-preview",
+                    azure_endpoint=azure_endpoint
                 )
-            except:
-                query_agent = genai.GenerativeModel(
-                    'gemini-2.0-flash',
-                    system_instruction=query_prompt
-                )
-            
-            # Answer Agent 모델 초기화 (재생성은 gemini-3-flash-preview 사용)
-            try:
-                answer_agent = genai.GenerativeModel('gemini-3-flash-preview')
-                print("  -> [재생성] Answer Agent: gemini-3-flash-preview")
-            except:
-                answer_agent = genai.GenerativeModel('gemini-2.5-flash')
-                print("  -> [재생성] Answer Agent: gemini-2.5-flash (fallback)")
+                print("  -> Azure OpenAI 클라이언트 초기화 완료")
+                query_agent = None
+                answer_agent = None
+            else:
+                # Gemini API 설정
+                genai.configure(api_key=bot_config.GEMINI_API_KEY)
+                
+                # Query Agent 모델 초기화 (system_instruction 사용)
+                try:
+                    query_agent = genai.GenerativeModel(
+                        'gemini-2.5-flash-lite',
+                        system_instruction=query_prompt
+                    )
+                except:
+                    query_agent = genai.GenerativeModel(
+                        'gemini-2.0-flash',
+                        system_instruction=query_prompt
+                    )
+                
+                # Answer Agent 모델 초기화 (재생성은 gemini-3-flash-preview 사용)
+                try:
+                    answer_agent = genai.GenerativeModel('gemini-3-flash-preview')
+                    print("  -> [재생성] Answer Agent: gemini-3-flash-preview")
+                except:
+                    answer_agent = genai.GenerativeModel('gemini-2.5-flash')
+                    print("  -> [재생성] Answer Agent: gemini-2.5-flash (fallback)")
             
             # 제목과 본문 분리
             # title/content가 직접 전달되면 사용, 아니면 post_content에서 파싱
@@ -761,14 +786,33 @@ class BotManager:
 {inappropriate_section}
 """
             
-            generation_config = {
-                "temperature": 0.0,
-                "max_output_tokens": 2048,
-                "response_mime_type": "application/json"
-            }
-            
-            response = query_agent.generate_content(query_message, generation_config=generation_config)
-            result_text = response.text.strip()
+            if ai_model_provider == "azure" and azure_client:
+                # Azure OpenAI로 Query Agent 실행
+                print("  -> [Query Agent] Azure OpenAI (gpt-4o) 사용")
+                try:
+                    azure_response = azure_client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[
+                            {"role": "system", "content": query_prompt},
+                            {"role": "user", "content": query_message}
+                        ],
+                        temperature=0.0,
+                        max_tokens=2048,
+                        response_format={"type": "json_object"}
+                    )
+                    result_text = azure_response.choices[0].message.content.strip()
+                except Exception as e:
+                    return {"success": False, "message": f"Azure OpenAI Query Agent 오류: {str(e)}"}
+            else:
+                # Gemini로 Query Agent 실행
+                generation_config = {
+                    "temperature": 0.0,
+                    "max_output_tokens": 2048,
+                    "response_mime_type": "application/json"
+                }
+                
+                response = query_agent.generate_content(query_message, generation_config=generation_config)
+                result_text = response.text.strip()
             
             # JSON 파싱
             try:
@@ -834,13 +878,32 @@ class BotManager:
             
             print(f"  -> [재생성] 학습 데이터 로드 (좋은 예시 {len(good_examples)}개, 나쁜 예시 {len(bad_examples)}개)")
             
-            generation_config = {
-                "temperature": 0.3,
-                "max_output_tokens": 2048
-            }
+            if ai_model_provider == "azure" and azure_client:
+                # Azure OpenAI로 Answer Agent 실행
+                print("  -> [Answer Agent] Azure OpenAI (gpt-4o) 사용")
+                try:
+                    azure_response = azure_client.chat.completions.create(
+                        model="gpt-4o",
+                        messages=[
+                            {"role": "system", "content": answer_prompt},
+                            {"role": "user", "content": answer_full_prompt}
+                        ],
+                        temperature=0.3,
+                        max_tokens=2048
+                    )
+                    answer_text = azure_response.choices[0].message.content.strip()
+                except Exception as e:
+                    return {"success": False, "message": f"Azure OpenAI Answer Agent 오류: {str(e)}"}
+            else:
+                # Gemini로 Answer Agent 실행
+                generation_config = {
+                    "temperature": 0.3,
+                    "max_output_tokens": 2048
+                }
+                
+                answer_response = answer_agent.generate_content(answer_full_prompt, generation_config=generation_config)
+                answer_text = (answer_response.text or "").strip()
             
-            answer_response = answer_agent.generate_content(answer_full_prompt, generation_config=generation_config)
-            answer_text = (answer_response.text or "").strip()
             answer_text = answer_text.replace('"', '').replace("'", "").strip()
             
             if not answer_text or len(answer_text) <= 20:

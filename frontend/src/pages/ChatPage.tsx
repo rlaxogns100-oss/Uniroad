@@ -5,6 +5,7 @@ import ChatMessage from '../components/ChatMessage'
 import ThinkingProcess from '../components/ThinkingProcess'
 import AgentPanel from '../components/AgentPanel'
 import AuthModal from '../components/AuthModal'
+import PreregisterModal from '../components/PreregisterModal'
 import RollingPlaceholder from '../components/RollingPlaceholder'
 import ProfileForm from '../components/ProfileForm'
 import { useAuth } from '../contexts/AuthContext'
@@ -128,6 +129,7 @@ export default function ChatPage() {
   const [isAnnouncementDropdownOpen, setIsAnnouncementDropdownOpen] = useState(false)
   const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false)
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
+  const [isPreregisterModalOpen, setIsPreregisterModalOpen] = useState(false)
   const [authModalMessage, setAuthModalMessage] = useState<{ title: string; description: string } | undefined>(undefined)
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false)
   const [feedbackText, setFeedbackText] = useState('')
@@ -1362,25 +1364,35 @@ export default function ChatPage() {
               />
             </div>
             
-            {isAuthenticated ? (
+            <div className="flex items-center gap-2">
+              {/* 사전신청 버튼 */}
               <button
-                onClick={() => {
-                  if (confirm('로그아웃 하시겠습니까?')) {
-                    signOut()
-                  }
-                }}
-                className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 active:text-gray-900 transition-colors"
+                onClick={() => setIsPreregisterModalOpen(true)}
+                className="px-2.5 py-1.5 text-xs bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-lg font-medium hover:from-purple-600 hover:to-blue-600 transition-all shadow-sm"
               >
-                로그아웃
+                🎁 PRO 2개월 무료
               </button>
-            ) : (
-            <button
-                onClick={() => setIsAuthModalOpen(true)}
-                className="px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700 active:text-blue-700 transition-colors font-medium"
-              >
-                로그인
-            </button>
-            )}
+              
+              {isAuthenticated ? (
+                <button
+                  onClick={() => {
+                    if (confirm('로그아웃 하시겠습니까?')) {
+                      signOut()
+                    }
+                  }}
+                  className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 active:text-gray-900 transition-colors"
+                >
+                  로그아웃
+                </button>
+              ) : (
+                <button
+                  onClick={() => setIsAuthModalOpen(true)}
+                  className="px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700 active:text-blue-700 transition-colors font-medium"
+                >
+                  로그인
+                </button>
+              )}
+            </div>
           </div>
           
           {/* 데스크톱 헤더 */}
@@ -1502,6 +1514,14 @@ export default function ChatPage() {
                 </>
               )}
             
+              {/* 사전신청 버튼 */}
+              <button
+                onClick={() => setIsPreregisterModalOpen(true)}
+                className="px-3 py-2 text-sm bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-lg font-medium hover:from-purple-600 hover:to-blue-600 transition-all shadow-sm"
+              >
+                🎁 PRO 2개월 무료
+              </button>
+              
               {isAuthenticated ? (
             <button
               onClick={() => {
@@ -2117,6 +2137,14 @@ export default function ChatPage() {
           setMessages([])
           setSelectedCategory(null)
         }}
+      />
+
+      {/* 사전신청 모달 */}
+      <PreregisterModal
+        isOpen={isPreregisterModalOpen}
+        onClose={() => setIsPreregisterModalOpen(false)}
+        userId={user?.id}
+        userName={user?.name}
       />
 
       {/* 의견 보내기 모달 */}
