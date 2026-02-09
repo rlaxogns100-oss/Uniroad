@@ -94,10 +94,13 @@ async def create_session(
 ):
     """
     새 채팅 세션 생성 (DB insert 없이 id만 반환, 첫 메시지 시 session_chat_messages에 기록)
+    
+    주의: 매번 새로운 UUID를 생성해야 함. browser_session_id는 트래킹용으로만 사용.
     """
     try:
         now = datetime.now().isoformat()
-        session_id = request.browser_session_id or str(uuid.uuid4())
+        # 항상 새로운 UUID 생성 (browser_session_id는 트래킹 참조용으로만 저장)
+        session_id = str(uuid.uuid4())
         return {
             "id": session_id,
             "user_id": user["user_id"],
