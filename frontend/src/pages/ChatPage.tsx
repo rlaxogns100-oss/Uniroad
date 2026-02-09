@@ -12,6 +12,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
 import { getSessionId } from '../utils/tracking'
 import { FrontendTimingLogger } from '../utils/timingLogger'
+import { API_BASE } from '../config'
 import { addLog } from '../utils/adminLogger'
 
 interface UsedChunk {
@@ -229,7 +230,7 @@ export default function ChatPage() {
 
   const fetchAnnouncements = async () => {
     try {
-      const response = await fetch('/api/announcements/')
+      const response = await fetch(`${API_BASE}/api/announcements/`)
       if (response.ok) {
         const data = await response.json()
         setAnnouncements(data)
@@ -244,7 +245,7 @@ export default function ChatPage() {
       const token = localStorage.getItem('access_token')
       if (!token) return
 
-      const response = await fetch('/api/announcements/check-admin/me', {
+      const response = await fetch(`${API_BASE}/api/announcements/check-admin/me`, {
         headers: { 'Authorization': `Bearer ${token}` }
       })
       if (response.ok) {
@@ -261,7 +262,7 @@ export default function ChatPage() {
       const token = localStorage.getItem('access_token')
       if (!token) return
 
-      const response = await fetch('/api/announcements/', {
+      const response = await fetch(`${API_BASE}/api/announcements/`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -289,7 +290,7 @@ export default function ChatPage() {
       const token = localStorage.getItem('access_token')
       if (!token) return
 
-      const response = await fetch(`/api/announcements/${editingAnnouncementId}`, {
+      const response = await fetch(`${API_BASE}/api/announcements/${editingAnnouncementId}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -318,7 +319,7 @@ export default function ChatPage() {
       const token = localStorage.getItem('access_token')
       if (!token) return
 
-      const response = await fetch(`/api/announcements/${id}`, {
+      const response = await fetch(`${API_BASE}/api/announcements/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${token}` }
       })
@@ -820,9 +821,12 @@ export default function ChatPage() {
       }
       
       console.error('채팅 오류:', error)
+      const isNetworkError = !error?.response && (error?.message?.includes('Failed') || error?.code === 'ERR_NETWORK' || error?.message?.includes('network'))
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: '죄송합니다. 일시적인 오류가 발생했습니다. 다시 시도해주세요.',
+        text: isNetworkError
+          ? '서버에 연결할 수 없습니다. 인터넷 연결을 확인하고, 앱이라면 uni2road.com 서버가 켜져 있는지 확인해 주세요.'
+          : '죄송합니다. 일시적인 오류가 발생했습니다. 다시 시도해주세요.',
         isUser: false,
       }
       setMessages((prev) => [...prev, errorMessage])

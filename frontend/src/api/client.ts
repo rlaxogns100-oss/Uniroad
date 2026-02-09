@@ -1,6 +1,7 @@
 import axios from 'axios'
+import { API_BASE } from '../config'
 
-const API_BASE_URL = '/api'
+const API_BASE_URL = API_BASE ? `${API_BASE}/api` : '/api'
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -145,7 +146,7 @@ export const sendMessageStream = async (
     }
     
     // 실시간 스트리밍 엔드포인트 사용
-    const response = await fetch('/api/chat/v2/stream', {
+    const response = await fetch(`${API_BASE_URL}/chat/v2/stream`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -305,7 +306,7 @@ export const sendMessageStreamWithImage = async (
       headers['Authorization'] = `Bearer ${token}`
     }
     
-    const response = await fetch('/api/chat/v2/stream/with-image', {
+    const response = await fetch(`${API_BASE_URL}/chat/v2/stream/with-image`, {
       method: 'POST',
       headers,
       body: formData,

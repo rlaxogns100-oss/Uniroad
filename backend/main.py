@@ -38,6 +38,9 @@ app.add_middleware(
         "http://localhost:3000",  # Next.js 호환
         "http://3.107.178.26",  # 프로덕션 서버
         "http://172.30.1.20:5173",  # 로컬 네트워크 접근
+        "capacitor://localhost",    # Capacitor iOS/Android 앱 (번들 WebView)
+        "ionic://localhost",
+        "null",                     # iOS WebView가 로컬 페이지에서 null Origin 보낼 수 있음
     ],
     allow_credentials=True,
     allow_methods=["*"],

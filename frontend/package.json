@@ -6,9 +6,14 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "build:ios": "VITE_API_BASE_URL=https://uni2road.com tsc && vite build --mode capacitor",
+    "cap:ios": "npm run build:ios && npx cap sync ios",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/cli": "^8.0.2",
+    "@capacitor/core": "^8.0.2",
+    "@capacitor/ios": "^8.0.2",
     "@heroicons/react": "^2.2.0",
     "@supabase/supabase-js": "^2.93.3",
     "@types/uuid": "^10.0.0",

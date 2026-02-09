@@ -386,7 +386,7 @@ export default function AdminAnalyticsKpi() {
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} stroke="#6b7280" />
                   <YAxis tick={{ fontSize: 12 }} stroke="#6b7280" allowDecimals={false} />
                   <Tooltip
-                    formatter={(value: number) => [value.toLocaleString() + '명', '활성 사용자']}
+                    formatter={(value: number | undefined) => [value != null ? value.toLocaleString() + '명' : '-', '활성 사용자']}
                     labelFormatter={(_, payload) => payload?.[0]?.payload?.days ? `최근 ${payload[0].payload.days}일` : ''}
                     contentStyle={{ borderRadius: 8 }}
                   />

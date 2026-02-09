@@ -6,6 +6,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid'
+import { API_BASE } from '../config'
 
 // 세션 ID 관리
 const SESSION_KEY = 'uniroad_session_id'
@@ -125,7 +126,7 @@ export async function trackPageView(
     // 토큰 가져오기 (있으면)
     const token = localStorage.getItem('access_token')
     
-    await fetch('/api/tracking/page-view', {
+    await fetch(`${API_BASE}/api/tracking/page-view`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -165,7 +166,7 @@ export async function trackUserAction(
     // 토큰 가져오기 (있으면)
     const token = localStorage.getItem('access_token')
     
-    await fetch('/api/tracking/user-action', {
+    await fetch(`${API_BASE}/api/tracking/user-action`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

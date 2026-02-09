@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import confetti from 'canvas-confetti'
+import { API_BASE } from '../config'
 
 interface PreregisterModalProps {
   isOpen: boolean
@@ -136,7 +137,7 @@ export default function PreregisterModal({ isOpen, onClose, userId, userName }: 
     setError('')
 
     try {
-      const response = await fetch('/api/preregister', {
+      const response = await fetch(`${API_BASE}/api/preregister`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
