@@ -219,6 +219,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // 로그아웃 시 이전 사용자의 채팅 데이터가 남아있지 않도록 삭제
     sessionStorage.removeItem('uniroad_chat_messages')
     sessionStorage.removeItem('uniroad_chat_session_id')
+    
+    // 로그아웃 후 /chat 페이지로 이동 (비로그인 상태로 채팅 가능)
+    window.location.href = '/chat'
   }
 
   return (

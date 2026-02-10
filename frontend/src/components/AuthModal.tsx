@@ -23,6 +23,16 @@ export default function AuthModal({ isOpen, onClose, customMessage, onLoginSucce
   const [googleLoading, setGoogleLoading] = useState(false)
   const [kakaoLoading, setKakaoLoading] = useState(false)
 
+  // 모달이 열릴 때 로딩 상태 초기화 (뒤로가기 등으로 돌아왔을 때 대비)
+  React.useEffect(() => {
+    if (isOpen) {
+      setGoogleLoading(false)
+      setKakaoLoading(false)
+      setLoading(false)
+      setError('')
+    }
+  }, [isOpen])
+
   if (!isOpen) return null
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
