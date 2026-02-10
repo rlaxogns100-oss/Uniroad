@@ -428,6 +428,12 @@ const sendMessageNonStreamWithImage = async (
       const errorText = await response.text()
       console.error('API 에러:', response.status, errorText)
       
+      // 413 에러 (파일 크기 초과)
+      if (response.status === 413) {
+        onError?.('이미지 크기가 너무 큽니다. 10MB 이하의 이미지를 선택해주세요.')
+        return
+      }
+      
       if (response.status === 429) {
         if (errorText.includes('로그인을 통해')) {
           onError?.('__RATE_LIMIT_GUEST__')
@@ -539,6 +545,12 @@ export const sendMessageStreamWithImage = async (
     if (!response.ok) {
       const errorText = await response.text()
       console.error('API 에러:', response.status, errorText)
+      
+      // 413 에러 (파일 크기 초과)
+      if (response.status === 413) {
+        onError?.('이미지 크기가 너무 큽니다. 10MB 이하의 이미지를 선택해주세요.')
+        return
+      }
       
       // 429 에러 (Rate Limit)
       if (response.status === 429) {

@@ -92,89 +92,91 @@ function App() {
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
         <PageTracker />
-        <Routes>
-          <Route path="/auth" element={<AuthPage />} />
-          <Route path="/" element={<LandingPage />} />
-          
-          {/* 로그인 후 채팅 페이지 */}
-          <Route
-            path="/chat/login/admin"
-            element={
-              <AdminRoute>
-                <AdminPage />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/chat/admin"
-            element={
-              <AdminRoute>
-                <AdminPage />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/chat/login"
-            element={
-              <ProtectedRoute>
-                <ChatPage />
-              </ProtectedRoute>
-            }
-          />
-          
-          {/* 로그인 없이 접근 가능한 채팅 */}
-          <Route path="/chat" element={<ChatPage />} />
-          
-          {/* 관리자 페이지들 */}
-          <Route
-            path="/upload"
-            element={
-              <AdminRoute>
-                <AdminUploadPage />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/agent"
-            element={
-              <AdminRoute>
-                <AgentAdminPage />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/timing-dashboard"
-            element={
-              <AdminRoute>
-                <TimingDashboard />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/adminagent"
-            element={
-              <AdminRoute>
-                <AdminAgentPage />
-              </AdminRoute>
-            }
-          />
-          <Route path="/auto-reply" element={<AutoReplyPage />} />
-          <Route
-            path="/agent-test"
-            element={
-              <AdminRoute>
-                <AgentTestPage />
-              </AdminRoute>
-            }
-          />
-          <Route path="/admin-analytics" element={<AdminRoute><AdminAnalyticsLayout /></AdminRoute>}>
-            <Route index element={<Navigate to="/admin-analytics/kpi" replace />} />
-            <Route path="kpi" element={<AdminAnalyticsKpi />} />
-            <Route path="behavior" element={<AdminAnalyticsBehavior />} />
-            <Route path="conversion" element={<AdminAnalyticsConversion />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <div>
+          <Routes>
+            <Route path="/auth" element={<AuthPage />} />
+            <Route path="/" element={<Navigate to="/chat" replace />} />
+            
+            {/* 로그인 후 채팅 페이지 */}
+            <Route
+              path="/chat/login/admin"
+              element={
+                <AdminRoute>
+                  <AdminPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/chat/admin"
+              element={
+                <AdminRoute>
+                  <AdminPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/chat/login"
+              element={
+                <ProtectedRoute>
+                  <ChatPage />
+                </ProtectedRoute>
+              }
+            />
+            
+            {/* 로그인 없이 접근 가능한 채팅 */}
+            <Route path="/chat" element={<ChatPage />} />
+            
+            {/* 관리자 페이지들 */}
+            <Route
+              path="/upload"
+              element={
+                <AdminRoute>
+                  <AdminUploadPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/agent"
+              element={
+                <AdminRoute>
+                  <AgentAdminPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/timing-dashboard"
+              element={
+                <AdminRoute>
+                  <TimingDashboard />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/adminagent"
+              element={
+                <AdminRoute>
+                  <AdminAgentPage />
+                </AdminRoute>
+              }
+            />
+            <Route path="/auto-reply" element={<AutoReplyPage />} />
+            <Route
+              path="/agent-test"
+              element={
+                <AdminRoute>
+                  <AgentTestPage />
+                </AdminRoute>
+              }
+            />
+            <Route path="/admin-analytics" element={<AdminRoute><AdminAnalyticsLayout /></AdminRoute>}>
+              <Route index element={<Navigate to="/admin-analytics/kpi" replace />} />
+              <Route path="kpi" element={<AdminAnalyticsKpi />} />
+              <Route path="behavior" element={<AdminAnalyticsBehavior />} />
+              <Route path="conversion" element={<AdminAnalyticsConversion />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/chat" replace />} />
+          </Routes>
+        </div>
       </AuthProvider>
     </BrowserRouter>
   )

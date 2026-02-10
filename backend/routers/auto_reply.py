@@ -166,8 +166,8 @@ async def get_comments(cafe_id: str, limit: int = 100, offset: int = 0):
         comments: 댓글 기록 리스트 (원글/쿼리/함수결과 포함)
         total: 전체 개수
     """
-    if limit > 500:
-        limit = 500
+    if limit > 5000:
+        limit = 5000
     if limit < 1:
         limit = 1
     if offset < 0:

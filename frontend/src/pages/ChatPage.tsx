@@ -173,6 +173,44 @@ export default function ChatPage() {
   const imageInputRef = useRef<HTMLInputElement>(null) // 이미지 파일 input ref
   const uploadMenuRef = useRef<HTMLDivElement>(null) // 업로드 메뉴 ref
 
+  // 모바일 뒤로가기 버튼 처리
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      // 채팅 중일 때 (메시지가 있을 때) 뒤로가기 → 시작 화면으로
+      if (messages.length > 0) {
+        event.preventDefault()
+        // 메시지 초기화하여 시작 화면으로 이동
+        setMessages([])
+        sessionStorage.removeItem('uniroad_chat_messages')
+        // 히스토리에 현재 상태 다시 추가 (뒤로가기 한번 더 누르면 종료되도록)
+        window.history.pushState({ chatStarted: false }, '')
+      }
+      // 시작 화면에서 뒤로가기 → 앱 종료 (기본 동작)
+    }
+
+    // 초기 히스토리 상태 설정
+    if (messages.length === 0) {
+      window.history.replaceState({ chatStarted: false }, '')
+    } else {
+      window.history.replaceState({ chatStarted: true }, '')
+      window.history.pushState({ chatStarted: true }, '')
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [messages.length])
+
+  // 메시지가 추가될 때 히스토리 상태 업데이트
+  useEffect(() => {
+    if (messages.length > 0) {
+      // 채팅이 시작되면 히스토리에 상태 추가
+      const currentState = window.history.state
+      if (!currentState?.chatStarted) {
+        window.history.pushState({ chatStarted: true }, '')
+      }
+    }
+  }, [messages.length])
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
@@ -1550,19 +1588,19 @@ export default function ChatPage() {
         </header>
 
         {/* 채팅 영역 */}
-        <div className="flex-1 overflow-y-auto px-[17px] sm:px-6 py-4 pb-16">
+        <div className={`flex-1 px-[17px] sm:px-6 py-4 ${messages.length === 0 ? 'overflow-hidden flex flex-col justify-end' : 'overflow-y-auto'}`}>
           <div className="max-w-[800px] mx-auto">
             {messages.length === 0 ? (
-              <div className="min-h-[calc(100vh-150px)] flex flex-col items-center justify-between sm:justify-center px-4 sm:px-8 pt-8 sm:pt-12 pb-6">
+              <div className="flex flex-col items-center px-4 sm:px-8 pb-4">
                 {/* 상단 영역: 인사말 + 카드 + 채팅창 */}
                 <div className="w-full flex flex-col justify-center sm:flex-none">
                   {/* 인사말 */}
-                  <div className="text-center mb-8 sm:mb-10">
-                    <h1 className="text-xl sm:text-2xl md:text-3xl font-bold text-gray-900 mb-3 sm:mb-4 whitespace-nowrap">
+                  <div className="text-center mb-6 sm:mb-10 px-2">
+                    <h1 className="text-lg sm:text-2xl md:text-3xl font-bold text-gray-900 mb-2 sm:mb-4 break-keep leading-relaxed">
                       {isAuthenticated && user?.name ? (
-                        <>안녕하세요 {user.name}님 👋 여러분과 입시 여정을 함께하는 유니로드입니다!</>
+                        <>안녕하세요 {user.name}님 👋<br className="sm:hidden" /> 여러분과 입시 여정을 함께하는<br className="sm:hidden" /> 유니로드입니다!</>
                       ) : (
-                        <>안녕하세요 👋 여러분과 입시 여정을 함께하는 유니로드입니다!</>
+                        <>안녕하세요 👋<br className="sm:hidden" /> 여러분과 입시 여정을 함께하는<br className="sm:hidden" /> 유니로드입니다!</>
                       )}
                     </h1>
                     <p className="text-base sm:text-lg text-gray-600">
@@ -1571,7 +1609,7 @@ export default function ChatPage() {
                   </div>
 
                   {/* 롤링 플레이스홀더 - 채팅창 위에 배치 */}
-                  <div className="w-full mb-8 sm:mb-10">
+                  <div className="w-full mb-6 sm:mb-10">
                     <RollingPlaceholder
                       onQuestionClick={(question) => {
                         setSelectedCategory(null) // 질문 클릭 시 카테고리 초기화

@@ -46,7 +46,7 @@ interface CommentRecord {
   post_content?: string
   query?: string
   function_result?: string
-  status?: 'pending' | 'approved' | 'cancelled' | 'posted' | 'failed'  // 반자동 시스템 상태
+  status?: 'pending' | 'approved' | 'cancelled' | 'posted' | 'failed'  // 반자동 시스템 상태 (failed: 게시 실패)
   action_history?: Array<{action: string, timestamp: string, old_comment?: string, reason?: string}>
   posted_at?: string | null
   cancel_reason?: string  // 취소 사유
@@ -238,7 +238,7 @@ export default function AutoReplyPage() {
 
   const fetchComments = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/comments?limit=500`)
+      const res = await fetch(`${API_BASE}/comments?limit=5000`)
       if (!res.ok) throw new Error('댓글 조회 실패')
       const data: CommentsResponse = await res.json()
       setComments(data.comments)
@@ -508,6 +508,33 @@ export default function AutoReplyPage() {
     setCancelingCommentId(commentId)
     setCancelReason('')
     setCancelModalOpen(true)
+  }
+
+  const handleRevert = async (commentId: string) => {
+    if (!confirm('이 댓글을 대기중 상태로 되돌리시겠습니까?')) return
+    
+    setActionLoading2(prev => new Set(prev).add(commentId))
+    try {
+      const res = await fetch(`${API_BASE}/comments/${commentId}/revert`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '되돌리기 실패')
+      
+      // 즉시 로컬 상태 업데이트
+      setComments(prev => prev.map(c => 
+        c.id === commentId ? { ...c, status: 'pending' as const } : c
+      ))
+      
+      // 백그라운드에서 새로고침
+      fetchComments()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setActionLoading2(prev => {
+        const next = new Set(prev)
+        next.delete(commentId)
+        return next
+      })
+    }
   }
 
   const handleCancelConfirm = async () => {
@@ -1467,6 +1494,7 @@ export default function AutoReplyPage() {
                   { key: 'all', label: '전체', count: comments.length },
                   { key: 'pending', label: '대기중', count: comments.filter(c => c.status === 'pending').length },
                   { key: 'approved', label: '승인됨', count: comments.filter(c => c.status === 'approved').length },
+                  { key: 'failed', label: '실패', count: comments.filter(c => c.status === 'failed').length },
                   { key: 'cancelled', label: '취소됨', count: comments.filter(c => c.status === 'cancelled').length },
                   { key: 'posted', label: '게시완료', count: comments.filter(c => c.status === 'posted').length },
                 ].map(tab => (
@@ -1549,7 +1577,7 @@ export default function AutoReplyPage() {
                               </a>
                             </td>
                             <td className="px-2 py-1.5 align-top" onClick={e => e.stopPropagation()}>
-                              {(record.status === 'pending' || record.status === 'approved') && record.id && (
+                              {(record.status === 'pending' || record.status === 'approved' || record.status === 'failed' || record.status === 'cancelled') && record.id && (
                                 <div className="flex flex-wrap gap-1">
                                   {record.status === 'pending' && (
                                     <button
@@ -1569,27 +1597,42 @@ export default function AutoReplyPage() {
                                       {isLoading ? '...' : '승인취소'}
                                     </button>
                                   )}
-                                  <button
-                                    onClick={() => handleCancelClick(record.id!)}
-                                    disabled={isLoading}
-                                    className="px-2 py-0.5 text-xs bg-gray-400 hover:bg-gray-500 text-white rounded disabled:opacity-50"
-                                  >
-                                    {isLoading ? '...' : '취소'}
-                                  </button>
-                                  <button
-                                    onClick={() => openEditModal(record)}
-                                    disabled={isLoading}
-                                    className="px-2 py-0.5 text-xs bg-yellow-500 hover:bg-yellow-600 text-white rounded disabled:opacity-50"
-                                  >
-                                    수정
-                                  </button>
-                                  <button
-                                    onClick={() => handleRegenerate(record.id!)}
-                                    disabled={isLoading}
-                                    className="px-2 py-0.5 text-xs bg-purple-500 hover:bg-purple-600 text-white rounded disabled:opacity-50"
-                                  >
-                                    {isLoading ? '...' : '재생성'}
-                                  </button>
+                                  {(record.status === 'failed' || record.status === 'cancelled') && (
+                                    <button
+                                      onClick={() => handleRevert(record.id!)}
+                                      disabled={isLoading}
+                                      className="px-2 py-0.5 text-xs bg-green-500 hover:bg-green-600 text-white rounded disabled:opacity-50"
+                                    >
+                                      {isLoading ? '...' : '재승인'}
+                                    </button>
+                                  )}
+                                  {(record.status === 'pending' || record.status === 'approved') && (
+                                    <button
+                                      onClick={() => handleCancelClick(record.id!)}
+                                      disabled={isLoading}
+                                      className="px-2 py-0.5 text-xs bg-gray-400 hover:bg-gray-500 text-white rounded disabled:opacity-50"
+                                    >
+                                      {isLoading ? '...' : '취소'}
+                                    </button>
+                                  )}
+                                  {(record.status === 'pending' || record.status === 'approved') && (
+                                    <>
+                                      <button
+                                        onClick={() => openEditModal(record)}
+                                        disabled={isLoading}
+                                        className="px-2 py-0.5 text-xs bg-yellow-500 hover:bg-yellow-600 text-white rounded disabled:opacity-50"
+                                      >
+                                        수정
+                                      </button>
+                                      <button
+                                        onClick={() => handleRegenerate(record.id!)}
+                                        disabled={isLoading}
+                                        className="px-2 py-0.5 text-xs bg-purple-500 hover:bg-purple-600 text-white rounded disabled:opacity-50"
+                                      >
+                                        {isLoading ? '...' : '재생성'}
+                                      </button>
+                                    </>
+                                  )}
                                   {/* 쓰레기통 버튼 - 빠른 삭제 */}
                                   <button
                                     onClick={() => handleQuickDelete(record.id!)}
