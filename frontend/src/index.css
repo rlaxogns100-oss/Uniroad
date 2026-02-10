@@ -9,6 +9,10 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+html {
+  background-color: #ffffff;
+}
+
 body {
   margin: 0;
   font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, 
@@ -18,6 +22,7 @@ body {
   -webkit-user-select: none;
   user-select: none;
   overscroll-behavior: none;
+  background-color: #ffffff;
 }
 
 input, textarea {
@@ -39,6 +44,44 @@ input, textarea {
 /* 하단 네비게이션 여백 */
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* Safe area 처리 */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0);
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* 모바일 상단/하단 영역 배경색 통일 */
+@supports (padding: env(safe-area-inset-top)) {
+  html {
+    background-color: #ffffff;
+  }
+  
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: env(safe-area-inset-top, 0);
+    background-color: #ffffff;
+    z-index: 9999;
+  }
+  
+  body::after {
+    content: '';
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: env(safe-area-inset-bottom, 0);
+    background-color: #ffffff;
+    z-index: 9999;
+  }
 }
 
 code {

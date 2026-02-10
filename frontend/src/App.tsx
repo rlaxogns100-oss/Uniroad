@@ -14,6 +14,7 @@ import AdminAnalyticsKpi from './pages/AdminAnalyticsKpi'
 import AdminAnalyticsBehavior from './pages/AdminAnalyticsBehavior'
 import AdminAnalyticsConversion from './pages/AdminAnalyticsConversion'
 import AgentTestPage from './pages/AgentTestPage'
+import PolicyPage from './pages/PolicyPage'
 import { useEffect } from 'react'
 import { initializeTracking, trackPageView } from './utils/tracking'
 
@@ -95,6 +96,7 @@ function App() {
         <div>
           <Routes>
             <Route path="/auth" element={<AuthPage />} />
+            <Route path="/policy" element={<PolicyPage />} />
             <Route path="/" element={<Navigate to="/chat" replace />} />
             
             {/* 로그인 후 채팅 페이지 */}

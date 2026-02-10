@@ -1340,9 +1340,12 @@ export default function ChatPage() {
           <div className="p-4 sm:p-6 pt-3 sm:pt-4">
             {isAuthenticated ? (
               <div>
-                <p className="text-[10px] sm:text-xs text-gray-500 text-center mb-3 sm:mb-4 leading-relaxed">
-                  채팅 기록 저장, 공유 및 맞춤 경험을 이용하세요
-                </p>
+                <a 
+                  href="/policy" 
+                  className="block text-[10px] sm:text-xs text-gray-500 text-center mb-3 sm:mb-4 leading-relaxed hover:text-blue-500 hover:underline transition-colors"
+                >
+                  개인정보처리방침
+                </a>
                 <button
                   onClick={() => {
                     if (confirm('로그아웃 하시겠습니까?')) {
@@ -1356,9 +1359,12 @@ export default function ChatPage() {
               </div>
             ) : (
               <div>
-                <p className="text-[10px] sm:text-xs text-gray-500 text-center mb-3 sm:mb-4 leading-relaxed">
-                  채팅 기록 저장, 공유 및 맞춤 경험을 이용하세요
-                </p>
+                <a 
+                  href="/policy" 
+                  className="block text-[10px] sm:text-xs text-gray-500 text-center mb-3 sm:mb-4 leading-relaxed hover:text-blue-500 hover:underline transition-colors"
+                >
+                  개인정보처리방침
+                </a>
                 <button
                   onClick={() => setIsAuthModalOpen(true)}
                   className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 active:bg-blue-700 transition-colors font-medium text-xs sm:text-sm"
