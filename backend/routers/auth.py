@@ -2,6 +2,7 @@
 인증 API 라우터
 회원가입, 로그인, 로그아웃, 사용자 정보
 """
+from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
@@ -184,10 +185,25 @@ class OAuthCallbackRequest(BaseModel):
     code: str
 
 
+def _parse_created_at(created_at) -> Optional[datetime]:
+    """Supabase user.created_at을 datetime으로 변환 (문자열 또는 datetime)"""
+    if created_at is None:
+        return None
+    if isinstance(created_at, datetime):
+        return created_at if created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+    if isinstance(created_at, str):
+        try:
+            return datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        except Exception:
+            return None
+    return None
+
+
 @router.post("/oauth/callback")
 async def oauth_callback(request: OAuthCallbackRequest):
     """
-    OAuth 코드를 토큰으로 교환
+    OAuth 코드를 토큰으로 교환.
+    is_new_user: 이번 로그인이 신규 가입(최초 1회)인 경우 True (GA4 sign_up용)
     """
     try:
         response = supabase_service.client.auth.exchange_code_for_session({
@@ -197,14 +213,24 @@ async def oauth_callback(request: OAuthCallbackRequest):
         if response.session is None:
             raise HTTPException(status_code=400, detail="토큰 교환 실패")
 
+        user = response.user
+        created_at = getattr(user, "created_at", None)
+        created_dt = _parse_created_at(created_at)
+        now = datetime.now(timezone.utc)
+        is_new_user = False
+        if created_dt:
+            age_seconds = (now - created_dt).total_seconds()
+            is_new_user = age_seconds < 90  # 방금 생성된 사용자 = 신규 가입
+
         return {
             "access_token": response.session.access_token,
             "refresh_token": response.session.refresh_token,
+            "is_new_user": is_new_user,
             "user": {
-                "id": response.user.id,
-                "email": response.user.email,
-                "name": response.user.user_metadata.get("name") or response.user.user_metadata.get("full_name") or response.user.email.split("@")[0],
-                "avatar_url": response.user.user_metadata.get("avatar_url"),
+                "id": user.id,
+                "email": user.email,
+                "name": user.user_metadata.get("name") or user.user_metadata.get("full_name") or (user.email.split("@")[0] if user.email else ""),
+                "avatar_url": user.user_metadata.get("avatar_url"),
             }
         }
     except HTTPException:

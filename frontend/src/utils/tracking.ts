@@ -232,6 +232,27 @@ export function initializeTracking(): void {
   })
 }
 
+function sendGA4Event(eventName: string, params?: Record<string, string>): void {
+  try {
+    if (typeof window === 'undefined') return
+    const gtag = (window as any).gtag
+    if (typeof gtag !== 'function') return
+    gtag('event', eventName, params)
+  } catch (e) {
+    console.warn(`GA4 ${eventName} 이벤트 전송 실패:`, e)
+  }
+}
+
+/** GA4 권장 이벤트: 회원가입 완료 시 호출 */
+export function trackGA4SignUp(method: 'email' | 'google' | 'kakao'): void {
+  sendGA4Event('sign_up', { method })
+}
+
+/** GA4 권장 이벤트: 로그인 완료 시 호출 */
+export function trackGA4Login(method: 'email' | 'google' | 'kakao'): void {
+  sendGA4Event('login', { method })
+}
+
 // 특정 이벤트 추적 헬퍼
 export const TrackingEvents = {
   // 채팅 관련

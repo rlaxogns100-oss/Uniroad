@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import axios from 'axios'
+import { trackGA4SignUp, trackGA4Login } from '../utils/tracking'
 
 interface User {
   id: string
@@ -39,7 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.log('OAuth code found, exchanging for token...')
         try {
           const response = await axios.post('/api/auth/oauth/callback', { code })
-          const { access_token, refresh_token, user: userData } = response.data
+          const { access_token, refresh_token, user: userData, is_new_user } = response.data
 
           localStorage.setItem('access_token', access_token)
           if (refresh_token) {
@@ -50,6 +51,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setAccessToken(access_token)
           setUser(userData)
           setLoading(false)
+
+          const provider = (sessionStorage.getItem('uniroad_oauth_provider') || 'google') as 'google' | 'kakao'
+          if (is_new_user) {
+            trackGA4SignUp(provider)
+          } else {
+            trackGA4Login(provider)
+          }
+          sessionStorage.removeItem('uniroad_oauth_provider')
 
           // OAuth 로그인 성공 시: 관리자(김도균)는 /chat/login/admin, 그 외는 /chat/login
           const isAdmin = userData?.name === '김도균' || userData?.email === 'herry0515@naver.com'
@@ -110,6 +119,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem('access_token', access_token)
       localStorage.setItem('user', JSON.stringify(userData))
       
+      trackGA4Login('email')
+      
       const isAdmin = userData?.name === '김도균' || userData?.email === 'herry0515@naver.com'
       window.location.href = isAdmin ? '/chat/login/admin' : '/chat/login'
       
@@ -136,6 +147,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       localStorage.setItem('access_token', access_token)
       localStorage.setItem('user', JSON.stringify(userData))
+      
+      trackGA4SignUp('email')
       return userData
     } catch (error: any) {
       throw new Error(error.response?.data?.detail || '회원가입 실패')
@@ -144,24 +157,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = async () => {
     try {
+      sessionStorage.setItem('uniroad_oauth_provider', 'google')
       const response = await axios.post('/api/auth/oauth/url', {
         provider: 'google',
         redirect_to: window.location.origin
       })
       window.location.href = response.data.url
     } catch (error: any) {
+      sessionStorage.removeItem('uniroad_oauth_provider')
       throw new Error(error.response?.data?.detail || 'Google 로그인 실패')
     }
   }
 
   const signInWithKakao = async () => {
     try {
+      sessionStorage.setItem('uniroad_oauth_provider', 'kakao')
       const response = await axios.post('/api/auth/oauth/url', {
         provider: 'kakao',
         redirect_to: window.location.origin
       })
       window.location.href = response.data.url
     } catch (error: any) {
+      sessionStorage.removeItem('uniroad_oauth_provider')
       throw new Error(error.response?.data?.detail || '카카오 로그인 실패')
     }
   }
