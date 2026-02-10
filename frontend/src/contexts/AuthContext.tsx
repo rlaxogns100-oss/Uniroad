@@ -160,7 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       sessionStorage.setItem('uniroad_oauth_provider', 'google')
       const response = await axios.post('/api/auth/oauth/url', {
         provider: 'google',
-        redirect_to: window.location.origin
+        redirect_to: `${window.location.origin}/chat`
       })
       window.location.href = response.data.url
     } catch (error: any) {
@@ -174,7 +174,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       sessionStorage.setItem('uniroad_oauth_provider', 'kakao')
       const response = await axios.post('/api/auth/oauth/url', {
         provider: 'kakao',
-        redirect_to: window.location.origin
+        redirect_to: `${window.location.origin}/chat`
       })
       window.location.href = response.data.url
     } catch (error: any) {
