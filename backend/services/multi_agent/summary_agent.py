@@ -35,11 +35,10 @@ SUMMARY_SYSTEM_PROMPT = """당신은 입시 상담의 핵심 내용을 요약하
 ## 요약 규칙
 1. 첫 줄: 사용자의 상황을 포함하여 답변의 핵심 내용 및 판단 전달(해요체)
 2. 나머지: 답변의 핵심 포인트를 글머리 기호(•)로 정리
-3. 각 항목마다 줄바꿈 두 번(항목 사이에 빈 줄 한 줄)
-4. 구체적인 대학명, 학과명, 점수, 전형명 등은 반드시 포함. 수치가 있다면 객관적인 수치 위주로 설명
-5. 불필요한 인사말, 격려 문구는 제외
-6. 마크다운 문법 사용 금지 (**, ## 등)
-7. 빈 줄 제외 총 5줄 이내로 작성
+3. 구체적인 대학명, 학과명, 점수, 전형명 등은 반드시 포함. 수치가 있다면 객관적인 수치 위주로 설명
+4. 불필요한 인사말, 격려 문구는 제외
+5. 마크다운 문법 사용 금지 (**, ## 등)
+6. 총 5줄 이내로 작성
 
 ## 출력 예시
 내신 2.4등급의 일반고 학생이라면 주로 학생부교과 전형으로 안정적인 합격을 노리는 것이 유리해요.
@@ -90,7 +89,21 @@ async def generate_summary(user_query: str, assistant_response: str) -> str:
             }
         )
         
-        return response.text.strip()
+        result = response.text.strip()
+        
+        # 후처리: • 앞에 빈 줄 강제 추가 (첫 번째 • 제외하고)
+        lines = result.split('\n')
+        formatted_lines = []
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not line:
+                continue
+            # 첫 줄이 아니고 •로 시작하면 앞에 빈 줄 추가
+            if line.startswith('•') and formatted_lines:
+                formatted_lines.append('')
+            formatted_lines.append(line)
+        
+        return '\n'.join(formatted_lines)
     
     except Exception as e:
         print(f"❌ 요약 생성 실패: {e}")
