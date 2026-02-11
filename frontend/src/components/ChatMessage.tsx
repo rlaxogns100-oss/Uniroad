@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import ShareModal from './ShareModal'
 
 interface ChatMessageProps {
   message: string
@@ -17,7 +18,7 @@ interface ChatMessageProps {
 export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming, onRegenerate, imageUrl, showLoginPrompt, onLoginClick, isMasked }: ChatMessageProps) {
   const [showFactCheck, setShowFactCheck] = useState(false)
   const [showGlow, setShowGlow] = useState(false)
-  const [liked, setLiked] = useState<boolean | null>(null)  // null: 선택 안함, true: 좋아요, false: 싫어요
+  const [showShareModal, setShowShareModal] = useState(false)  // 공유 모달 상태
   
   // AI 답변 스트리밍이 완료되면 글로우 효과 트리거
   useEffect(() => {
@@ -60,26 +61,13 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
     alert('답변이 복사되었습니다.')
   }
   
-  // 좋아요
-  const handleLike = () => {
-    setLiked(liked === true ? null : true)
-  }
-  
-  // 싫어요
-  const handleDislike = () => {
-    setLiked(liked === false ? null : false)
-  }
-  
-  // 공유하기
+  // 공유하기 - 모달 열기
   const handleShare = () => {
-    if (navigator.share) {
-      navigator.share({
-        title: '유니로드 답변',
-        text: getCleanedMessage(),
-      }).catch(() => {})
-    } else {
-      handleCopy()
+    if (!userQuery) {
+      alert('공유할 질문이 없습니다.')
+      return
     }
+    setShowShareModal(true)
   }
   
   // 재생성
@@ -551,33 +539,15 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
               </svg>
             </button>
             
-            {/* 좋아요 */}
+            {/* 공유 */}
             <button
-              onClick={handleLike}
-              className={`custom-tooltip p-2 rounded-lg transition-colors ${
-                liked === true 
-                  ? 'text-blue-600 bg-blue-100 hover:bg-blue-200' 
-                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
-              }`}
-              data-tooltip="좋아요"
+              onClick={handleShare}
+              disabled={!userQuery}
+              className="custom-tooltip p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              data-tooltip="공유"
             >
-              <svg className="w-5 h-5" fill={liked === true ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
-              </svg>
-            </button>
-            
-            {/* 싫어요 */}
-            <button
-              onClick={handleDislike}
-              className={`custom-tooltip p-2 rounded-lg transition-colors ${
-                liked === false 
-                  ? 'text-red-600 bg-red-100 hover:bg-red-200' 
-                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
-              }`}
-              data-tooltip="싫어요"
-            >
-              <svg className="w-5 h-5" fill={liked === false ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
               </svg>
             </button>
             
@@ -622,6 +592,16 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
           )}
         </div>
       )}
+      
+      {/* 공유 모달 */}
+      <ShareModal
+        isOpen={showShareModal}
+        onClose={() => setShowShareModal(false)}
+        userQuery={userQuery || ''}
+        assistantResponse={message}
+        sources={sources}
+        sourceUrls={source_urls}
+      />
     </div>
   )
 }

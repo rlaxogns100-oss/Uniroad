@@ -16,6 +16,7 @@ import AdminAnalyticsConversion from './pages/AdminAnalyticsConversion'
 import AdminAnalyticsFunnel from './pages/AdminAnalyticsFunnel'
 import AgentTestPage from './pages/AgentTestPage'
 import PolicyPage from './pages/PolicyPage'
+import SharedChatPage from './pages/SharedChatPage'
 import { useEffect } from 'react'
 import { initializeTracking, trackPageView } from './utils/tracking'
 
@@ -128,6 +129,9 @@ function App() {
             
             {/* 로그인 없이 접근 가능한 채팅 */}
             <Route path="/chat" element={<ChatPage />} />
+            
+            {/* 공유된 채팅 페이지 */}
+            <Route path="/s/:shareId" element={<SharedChatPage />} />
             
             {/* 관리자 페이지들 */}
             <Route

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from config.config import settings
-from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs, admin_stats, profile, functions, auto_reply, tracking, test_evaluate, feedback, preregister
+from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs, admin_stats, profile, functions, auto_reply, tracking, test_evaluate, feedback, preregister, share
 from routes import calculator
 import os
 # agent_admin은 orchestration_agent 모듈 없어서 비활성화
@@ -68,6 +68,7 @@ app.include_router(tracking.router, tags=["추적"])
 app.include_router(test_evaluate.router, prefix="/api/test", tags=["테스트평가"])
 app.include_router(feedback.router, tags=["피드백"])
 app.include_router(preregister.router, tags=["사전신청"])
+app.include_router(share.router, prefix="/api/share", tags=["공유"])
 
 # 정적 파일 경로 설정
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -154,6 +155,17 @@ async def background_image():
     return FileResponse(bg_path)
 
 
+@app.get("/logo_for_kakao.png")
+async def logo_for_kakao():
+    """카카오톡 공유용 로고 이미지 (800x400)"""
+    logo_path = os.path.join(FRONTEND_PUBLIC_DIR, "logo_for_kakao.png")
+    if os.path.exists(logo_path):
+        return FileResponse(logo_path)
+    # 없으면 기본 로고 반환
+    fallback_path = os.path.join(FRONTEND_PUBLIC_DIR, "로고.png")
+    return FileResponse(fallback_path)
+
+
 @app.get("/chat")
 @app.get("/chat/{full_path:path}")
 async def chat_app(full_path: str = ""):
@@ -173,6 +185,62 @@ async def auto_reply_app(full_path: str = ""):
     if os.path.exists(frontend_index):
         return FileResponse(frontend_index)
     return {"message": "개발 모드: http://localhost:5173/auto-reply 에서 프론트엔드를 확인하세요"}
+
+
+@app.get("/s/{share_id}")
+async def shared_chat_page(share_id: str):
+    """공유된 채팅 페이지 - OG 메타태그 동적 생성"""
+    from fastapi.responses import HTMLResponse
+    
+    # 공유 데이터 조회
+    try:
+        from services.supabase_client import supabase_service
+        response = supabase_service.client.table("shared_chats")\
+            .select("user_query")\
+            .eq("share_id", share_id)\
+            .execute()
+        
+        if response.data:
+            user_query = response.data[0].get("user_query", "")
+            # 30글자 제한 + ...
+            if len(user_query) > 30:
+                og_title = user_query[:30] + "..."
+            else:
+                og_title = user_query
+        else:
+            og_title = "유니로드 상담 결과"
+    except Exception as e:
+        print(f"OG 메타태그 조회 실패: {e}")
+        og_title = "유니로드 상담 결과"
+    
+    og_description = "유니로드 | 최신 입시요강과 3개년 입결을 학습한 수험생 맞춤 AI에게 물어보세요!"
+    og_image = "https://uni2road.com/logo_for_kakao.png"
+    og_url = f"https://uni2road.com/s/{share_id}"
+    
+    # 프론트엔드 index.html 읽어서 OG 태그 삽입
+    frontend_index = os.path.join(FRONTEND_DIST_DIR, "index.html")
+    if os.path.exists(frontend_index):
+        with open(frontend_index, "r", encoding="utf-8") as f:
+            html_content = f.read()
+        
+        # <head> 태그 바로 뒤에 OG 메타태그 삽입
+        og_tags = f'''
+    <meta property="og:title" content="{og_title}" />
+    <meta property="og:description" content="{og_description}" />
+    <meta property="og:image" content="{og_image}" />
+    <meta property="og:url" content="{og_url}" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{og_title}" />
+    <meta name="twitter:description" content="{og_description}" />
+    <meta name="twitter:image" content="{og_image}" />
+'''
+        # <head> 태그 뒤에 삽입
+        html_content = html_content.replace("<head>", f"<head>{og_tags}")
+        
+        return HTMLResponse(content=html_content)
+    
+    return {"message": "개발 모드: http://localhost:5173/s/{share_id} 에서 프론트엔드를 확인하세요"}
 
 
 @app.exception_handler(Exception)
