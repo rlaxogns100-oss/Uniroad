@@ -191,6 +191,7 @@ async def auto_reply_app(full_path: str = ""):
 async def shared_chat_page(share_id: str):
     """공유된 채팅 페이지 - OG 메타태그 동적 생성"""
     from fastapi.responses import HTMLResponse
+    import re
     
     # 공유 데이터 조회
     try:
@@ -214,7 +215,7 @@ async def shared_chat_page(share_id: str):
         og_title = "유니로드 상담 결과"
     
     og_description = "유니로드 | 최신 입시요강과 3개년 입결을 학습한 수험생 맞춤 AI에게 물어보세요!"
-    og_image = "https://uni2road.com/logo_for_kakao.png"
+    og_image = "https://uni2road.com/og_image_v2.png"
     og_url = f"https://uni2road.com/s/{share_id}"
     
     # 프론트엔드 index.html 읽어서 OG 태그 삽입
@@ -223,11 +224,17 @@ async def shared_chat_page(share_id: str):
         with open(frontend_index, "r", encoding="utf-8") as f:
             html_content = f.read()
         
-        # <head> 태그 바로 뒤에 OG 메타태그 삽입
+        # 기존 OG 태그 제거
+        html_content = re.sub(r'<meta property="og:[^"]*"[^>]*>\s*', '', html_content)
+        html_content = re.sub(r'<meta name="twitter:[^"]*"[^>]*>\s*', '', html_content)
+        
+        # 새 OG 메타태그 삽입
         og_tags = f'''
     <meta property="og:title" content="{og_title}" />
     <meta property="og:description" content="{og_description}" />
     <meta property="og:image" content="{og_image}" />
+    <meta property="og:image:width" content="800" />
+    <meta property="og:image:height" content="400" />
     <meta property="og:url" content="{og_url}" />
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
