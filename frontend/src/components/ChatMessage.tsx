@@ -288,8 +288,8 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
     cleanedMessage = cleanedMessage.replace(/===SECTION_(START|END)(:\w+)?===/g, '')
     
     // --- 구분선을 ___DIVIDER___ 마커로 변환 (백엔드에서 보내는 형식)
-    // 다양한 형식 지원: \n\n---\n\n, \n---\n, ---만 있는 경우 등
-    cleanedMessage = cleanedMessage.replace(/\n*---\n*/g, '___DIVIDER___')
+    // 줄바꿈은 유지하면서 ---만 마커로 변환 (모바일에서 빈 줄 1개만 표시되도록)
+    cleanedMessage = cleanedMessage.replace(/\n*---\n*/g, '\n___DIVIDER___\n')
 
     // 연속 줄바꿈 정리
     cleanedMessage = cleanedMessage.replace(/\n{3,}/g, '\n\n').trim()
