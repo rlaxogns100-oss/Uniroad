@@ -907,11 +907,11 @@ async def _execute_consult_susi(params: Dict) -> Dict[str, Any]:
     # 출처 정보
     document_titles = {
         "susi_search_condition": "수시 전형결과 검색 조건",
-        "susi_results": "2025학년도 수시 전형결과 (내신닷컴)"
+        "susi_results": "2025학년도 수시 전형결과 (자체 DB)"
     }
     document_urls = {
         "susi_search_condition": "",
-        "susi_results": "https://www.nesin.com/html/?dir1=menu01&dir2=Ipsi_result_data&gubun=1"
+        "susi_results": ""
     }
     
     return {
