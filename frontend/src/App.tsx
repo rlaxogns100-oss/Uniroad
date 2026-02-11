@@ -13,6 +13,7 @@ import AdminAnalyticsLayout from './pages/AdminAnalyticsLayout'
 import AdminAnalyticsKpi from './pages/AdminAnalyticsKpi'
 import AdminAnalyticsBehavior from './pages/AdminAnalyticsBehavior'
 import AdminAnalyticsConversion from './pages/AdminAnalyticsConversion'
+import AdminAnalyticsFunnel from './pages/AdminAnalyticsFunnel'
 import AgentTestPage from './pages/AgentTestPage'
 import PolicyPage from './pages/PolicyPage'
 import { useEffect } from 'react'
@@ -175,6 +176,7 @@ function App() {
               <Route path="kpi" element={<AdminAnalyticsKpi />} />
               <Route path="behavior" element={<AdminAnalyticsBehavior />} />
               <Route path="conversion" element={<AdminAnalyticsConversion />} />
+              <Route path="funnel" element={<AdminAnalyticsFunnel />} />
             </Route>
             <Route path="*" element={<Navigate to="/chat" replace />} />
           </Routes>

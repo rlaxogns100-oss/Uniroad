@@ -123,3 +123,24 @@ async def check_preregister(phone: str):
         }
     
     return {"registered": False}
+
+
+@router.get("/list")
+async def list_preregistrations():
+    """
+    사전신청자 목록 조회 (관리자용)
+    - 최신순 정렬
+    """
+    supabase = SupabaseService.get_client()
+    
+    try:
+        result = supabase.table("preregistrations").select("*").order("created_at", desc=True).execute()
+        
+        return {
+            "success": True,
+            "total": len(result.data) if result.data else 0,
+            "data": result.data or []
+        }
+    except Exception as e:
+        print(f"사전신청 목록 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail="목록 조회 중 오류가 발생했습니다.")

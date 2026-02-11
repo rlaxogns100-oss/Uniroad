@@ -1,6 +1,6 @@
 """
 Rate Limiting 미들웨어
-일일 API 사용량 제한 (로그인 유저 50회, 게스트 10회)
+일일 API 사용량 제한 (로그인 유저 100회, 게스트 2회 무료 + 3회째 마스킹)
 """
 from typing import Optional, Tuple
 from datetime import date
@@ -14,7 +14,7 @@ logger = setup_logger('rate_limit')
 async def check_and_increment_usage(
     user_id: Optional[str],
     ip_address: str
-) -> Tuple[bool, int, int]:
+) -> Tuple[bool, int, int, bool]:
     """
     사용량 체크 및 증가
     
@@ -23,10 +23,11 @@ async def check_and_increment_usage(
         ip_address: 요청 IP 주소
     
     Returns:
-        (is_allowed, current_count, limit)
+        (is_allowed, current_count, limit, require_login)
         - is_allowed: 요청 허용 여부
         - current_count: 현재 사용 횟수
         - limit: 제한 횟수
+        - require_login: 로그인 필요 여부 (비로그인 3회째 질문 시 True)
     """
     try:
         today = date.today()
@@ -71,12 +72,24 @@ async def check_and_increment_usage(
                     .execute()
                 
                 logger.info(f"✅ Rate Limit 허용 ({identifier_field}={identifier_value}): 1/{limit} (리셋됨)")
-                return (True, 1, limit)
+                return (True, 1, limit, False)
             
-            # 제한 체크
-            if current_count >= limit:
+            # 비로그인 사용자: 3회째 질문은 허용하되 require_login=True
+            if not user_id and current_count == limit:
+                # 카운트 증가 (3회째)
+                new_count = current_count + 1
+                supabase_service.client.table("usage_tracking")\
+                    .update({"chat_count": new_count})\
+                    .eq("id", record_id)\
+                    .execute()
+                
+                logger.info(f"🔒 Rate Limit 마스킹 ({identifier_field}={identifier_value}): {new_count}/{limit} (로그인 필요)")
+                return (True, new_count, limit, True)  # require_login=True
+            
+            # 제한 체크 (비로그인 4회 이상, 로그인 사용자 제한 초과)
+            if current_count > limit:
                 logger.warning(f"❌ Rate Limit 초과 ({identifier_field}={identifier_value}): {current_count}/{limit}")
-                return (False, current_count, limit)
+                return (False, current_count, limit, False)
             
             # 카운트 증가
             new_count = current_count + 1
@@ -86,7 +99,7 @@ async def check_and_increment_usage(
                 .execute()
             
             logger.info(f"✅ Rate Limit 허용 ({identifier_field}={identifier_value}): {new_count}/{limit}")
-            return (True, new_count, limit)
+            return (True, new_count, limit, False)
         
         else:
             # 신규 레코드 생성
@@ -105,12 +118,12 @@ async def check_and_increment_usage(
                 .execute()
             
             logger.info(f"✅ Rate Limit 허용 ({identifier_field}={identifier_value}): 1/{limit} (신규)")
-            return (True, 1, limit)
+            return (True, 1, limit, False)
     
     except Exception as e:
         logger.error(f"Rate Limit 체크 오류: {e}")
         # 오류 시 일단 허용 (서비스 중단 방지)
-        return (True, 0, limit if user_id else RATE_LIMIT_GUEST)
+        return (True, 0, limit if user_id else RATE_LIMIT_GUEST, False)
 
 
 def get_client_ip(request) -> str:

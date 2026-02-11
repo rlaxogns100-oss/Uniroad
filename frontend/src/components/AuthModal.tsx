@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { trackUserAction } from '../utils/tracking'
 
 interface AuthModalProps {
   isOpen: boolean
@@ -9,9 +10,10 @@ interface AuthModalProps {
     description: string
   }
   onLoginSuccess?: () => void  // 로그인 성공 시 콜백
+  onOAuthStart?: () => void  // OAuth 리다이렉트 시작 전 콜백 (메시지 저장용)
 }
 
-export default function AuthModal({ isOpen, onClose, customMessage, onLoginSuccess }: AuthModalProps) {
+export default function AuthModal({ isOpen, onClose, customMessage, onLoginSuccess, onOAuthStart }: AuthModalProps) {
   const { signIn, signUp, signInWithGoogle, signInWithKakao } = useAuth()
   
   const [view, setView] = useState<'main' | 'email' | 'signup'>('main')
@@ -41,7 +43,11 @@ export default function AuthModal({ isOpen, onClose, customMessage, onLoginSucce
     setLoading(true)
 
     try {
-      await signIn(email, password)
+      await signIn(email, password, true)  // skipRedirect: true - 모달에서 로그인 시 리다이렉트 안함
+      const signupSource = sessionStorage.getItem('uniroad_login_modal_source') || 'unknown'
+      trackUserAction('login_success', 'email', {
+        customData: { signup_source: signupSource }
+      })
       onLoginSuccess?.()
       onClose()
       resetForm()
@@ -59,6 +65,10 @@ export default function AuthModal({ isOpen, onClose, customMessage, onLoginSucce
 
     try {
       await signUp(email, password, name)
+      const signupSource = sessionStorage.getItem('uniroad_login_modal_source') || 'unknown'
+      trackUserAction('signup_success', 'email', {
+        customData: { signup_source: signupSource }
+      })
       onLoginSuccess?.()
       onClose()
       resetForm()
@@ -74,6 +84,11 @@ export default function AuthModal({ isOpen, onClose, customMessage, onLoginSucce
     setGoogleLoading(true)
     
     try {
+      // OAuth 리다이렉트 전에 콜백 호출 (메시지 저장용)
+      onOAuthStart?.()
+      // OAuth 리다이렉트 전에 signup_source 저장 (OAuth 콜백에서 사용)
+      const signupSource = sessionStorage.getItem('uniroad_login_modal_source') || 'unknown'
+      sessionStorage.setItem('uniroad_oauth_signup_source', signupSource)
       await signInWithGoogle()
     } catch (err: any) {
       setError(err.message)
@@ -86,6 +101,11 @@ export default function AuthModal({ isOpen, onClose, customMessage, onLoginSucce
     setKakaoLoading(true)
     
     try {
+      // OAuth 리다이렉트 전에 콜백 호출 (메시지 저장용)
+      onOAuthStart?.()
+      // OAuth 리다이렉트 전에 signup_source 저장 (OAuth 콜백에서 사용)
+      const signupSource = sessionStorage.getItem('uniroad_login_modal_source') || 'unknown'
+      sessionStorage.setItem('uniroad_oauth_signup_source', signupSource)
       await signInWithKakao()
     } catch (err: any) {
       setError(err.message)

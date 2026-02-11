@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { trackUserAction } from '../utils/tracking'
 
 // 카드 아이템 타입
 interface SuggestionCard {
@@ -105,10 +106,15 @@ export default function RollingPlaceholder({ onQuestionClick, onCategorySelect, 
   const handleCardClick = (index: number) => {
     const card = suggestionList[index]
     
+    // 카테고리 카드 클릭 추적
+    trackUserAction('category_card_click', card.title)
+    
     // "환산 점수" 카드 처리
     if (card.title === '환산 점수') {
       if (!isAuthenticated) {
         // 비로그인 → 로그인 유도
+        trackUserAction('login_modal_open', 'premium_card_click')
+        sessionStorage.setItem('uniroad_login_modal_source', 'premium_card_click')
         onLoginRequired?.({
           title: '로그인하여 고급 기능을 사용하세요',
           description: '학생의 성적 입력을 통해 학교별로 환산하여 대학을 추천해드립니다'

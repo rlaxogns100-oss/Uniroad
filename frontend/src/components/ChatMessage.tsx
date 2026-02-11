@@ -11,9 +11,10 @@ interface ChatMessageProps {
   imageUrl?: string  // 이미지 첨부 시 미리보기 URL
   showLoginPrompt?: boolean  // 로그인 유도 메시지 표시 여부
   onLoginClick?: () => void  // 로그인 버튼 클릭 콜백
+  isMasked?: boolean  // 마스킹 여부 (비로그인 3회째 질문)
 }
 
-export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming, onRegenerate, imageUrl, showLoginPrompt, onLoginClick }: ChatMessageProps) {
+export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming, onRegenerate, imageUrl, showLoginPrompt, onLoginClick, isMasked }: ChatMessageProps) {
   const [showFactCheck, setShowFactCheck] = useState(false)
   const [showGlow, setShowGlow] = useState(false)
   const [liked, setLiked] = useState<boolean | null>(null)  // null: 선택 안함, true: 좋아요, false: 싫어요
@@ -494,8 +495,32 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
         </div>
       ) : (
         // AI 답변: Gemini 스타일 (말풍선 없이, 폰트/간격 조정)
-        <div className="w-full">
-          <div className="text-gray-900 ai-response mb-4">
+        <div className="w-full relative">
+          {/* 마스킹 오버레이 - 비로그인 3회째 질문 시 */}
+          {isMasked && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/80 backdrop-blur-md rounded-lg">
+              <div className="text-center p-6">
+                <div className="text-4xl mb-4">🔒</div>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">
+                  로그인하고 답변을 확인하세요
+                </h3>
+                <p className="text-sm text-gray-600 mb-4">
+                  더 많은 입시 정보와 개인별로 갈 수 있는 대학을 확인해보세요!
+                </p>
+                <button
+                  onClick={onLoginClick}
+                  className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white font-medium rounded-lg transition-all shadow-lg hover:shadow-xl flex items-center gap-2 mx-auto"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+                  </svg>
+                  로그인하기
+                </button>
+              </div>
+            </div>
+          )}
+          
+          <div className={`text-gray-900 ai-response mb-4 ${isMasked ? 'blur-sm select-none' : ''}`}>
             {renderMessage()}
           </div>
           

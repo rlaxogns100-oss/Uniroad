@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { sendMessageStream, sendMessageStreamWithImage, ChatResponse, resetSession } from '../api/client'
+import { sendMessageStream, sendMessageStreamWithImage, ChatResponse, resetSession, migrateMessages } from '../api/client'
 import ChatMessage from '../components/ChatMessage'
 import ThinkingProcess from '../components/ThinkingProcess'
 import AgentPanel from '../components/AgentPanel'
@@ -10,7 +10,7 @@ import RollingPlaceholder from '../components/RollingPlaceholder'
 import ProfileForm from '../components/ProfileForm'
 import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
-import { getSessionId } from '../utils/tracking'
+import { getSessionId, trackUserAction } from '../utils/tracking'
 import { FrontendTimingLogger } from '../utils/timingLogger'
 import { API_BASE } from '../config'
 import { addLog } from '../utils/adminLogger'
@@ -34,6 +34,7 @@ interface Message {
   isStreaming?: boolean  // 스트리밍 중인지 여부
   imageUrl?: string  // 이미지 첨부 시 미리보기 URL
   showLoginPrompt?: boolean  // 로그인 유도 메시지 표시 여부
+  isMasked?: boolean  // 마스킹 여부 (비로그인 3회째 질문)
 }
 
 interface AgentData {
@@ -115,6 +116,7 @@ export default function ChatPage() {
     startNewChat,
     updateSessionTitle,
     deleteSession,
+    loadSessions,
   } = useChat()
   
   const [messages, setMessages] = useState<Message[]>([])
@@ -220,6 +222,17 @@ export default function ChatPage() {
     fetchAnnouncements()
     if (isAuthenticated) {
       checkAdminStatus()
+      
+      // OAuth 마이그레이션 후 세션 자동 선택
+      const migratedSessionId = sessionStorage.getItem('uniroad_migrated_session_id')
+      if (migratedSessionId) {
+        console.log('🔄 OAuth 마이그레이션된 세션 자동 선택:', migratedSessionId)
+        sessionStorage.removeItem('uniroad_migrated_session_id')
+        // 세션 목록 로드 후 해당 세션 선택
+        loadSessions().then(() => {
+          selectSession(migratedSessionId)
+        })
+      }
     }
   }, [isAuthenticated])
 
@@ -710,6 +723,9 @@ export default function ChatPage() {
           // 타이밍: 파싱 완료
           timingLogger.mark('parse_complete')
 
+          // 비로그인 3회째 질문 시 마스킹 처리
+          const shouldMask = response.require_login === true
+
           // 스트리밍 봇 메시지를 최종 메시지로 업데이트 (sources, used_chunks 등 추가)
           setMessages((prev) => prev.map(msg => 
             msg.id === streamingBotMessageId
@@ -720,10 +736,11 @@ export default function ChatPage() {
                   source_urls: response.source_urls,
                   used_chunks: response.used_chunks,
                   isStreaming: false,  // 스트리밍 완료
+                  isMasked: shouldMask,  // 마스킹 여부
                 }
               : msg
           ))
-          console.log('✅ 스트리밍 완료:', response.response?.substring(0, 50) || '(스트리밍 텍스트)')
+          console.log('✅ 스트리밍 완료:', response.response?.substring(0, 50) || '(스트리밍 텍스트)', shouldMask ? '(마스킹됨)' : '')
 
           // 타이밍: 렌더링 완료
           timingLogger.mark('render_complete')
@@ -1179,6 +1196,8 @@ export default function ChatPage() {
                   onClick={() => {
                     if (!isAuthenticated) {
                       alert('로그인이 필요합니다.')
+                      trackUserAction('login_modal_open', 'mock_exam_button')
+                      sessionStorage.setItem('uniroad_login_modal_source', 'mock_exam_button')
                       setIsAuthModalOpen(true)
                       return
                     }
@@ -1384,7 +1403,11 @@ export default function ChatPage() {
                   </a>
                 </div>
                 <button
-                  onClick={() => setIsAuthModalOpen(true)}
+                  onClick={() => {
+                    trackUserAction('login_modal_open', 'sidebar_login_button')
+                    sessionStorage.setItem('uniroad_login_modal_source', 'sidebar_login_button')
+                    setIsAuthModalOpen(true)
+                  }}
                   className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 active:bg-blue-700 transition-colors font-medium text-xs sm:text-sm"
                 >
                   회원가입 또는 로그인
@@ -1452,7 +1475,11 @@ export default function ChatPage() {
                 </button>
               ) : (
                 <button
-                  onClick={() => setIsAuthModalOpen(true)}
+                  onClick={() => {
+                    trackUserAction('login_modal_open', 'header_login_button')
+                    sessionStorage.setItem('uniroad_login_modal_source', 'header_login_button')
+                    setIsAuthModalOpen(true)
+                  }}
                   className="px-3 py-1.5 text-sm text-blue-600 hover:text-blue-700 active:text-blue-700 transition-colors font-medium"
                 >
                   로그인
@@ -1601,7 +1628,11 @@ export default function ChatPage() {
                 </button>
               ) : (
                 <button
-                  onClick={() => setIsAuthModalOpen(true)}
+                  onClick={() => {
+                    trackUserAction('login_modal_open', 'header_login_button')
+                    sessionStorage.setItem('uniroad_login_modal_source', 'header_login_button')
+                    setIsAuthModalOpen(true)
+                  }}
                   className="px-4 py-2 text-sm text-blue-600 hover:text-blue-700 transition-colors font-medium"
                 >
                   로그인
@@ -1735,6 +1766,8 @@ export default function ChatPage() {
                                   onClick={() => {
                                     if (!isAuthenticated) {
                                       alert('로그인이 필요합니다.')
+                                      trackUserAction('login_modal_open', 'score_input_button')
+                                      sessionStorage.setItem('uniroad_login_modal_source', 'score_input_button')
                                       setIsAuthModalOpen(true)
                                     } else {
                                       setIsProfileFormOpen(true)
@@ -1775,6 +1808,8 @@ export default function ChatPage() {
                           <button
                             onClick={() => {
                               if (!isAuthenticated) {
+                                trackUserAction('login_modal_open', 'thinking_mode_button')
+                                sessionStorage.setItem('uniroad_login_modal_source', 'thinking_mode_button')
                                 setAuthModalMessage({
                                   title: 'Thinking 모드',
                                   description: 'Thinking 모드는 로그인 후 사용할 수 있습니다. 더 깊은 분석과 정확한 답변을 받아보세요!'
@@ -1899,6 +1934,8 @@ export default function ChatPage() {
                                   onClick={() => {
                                     if (!isAuthenticated) {
                                       alert('로그인이 필요합니다.')
+                                      trackUserAction('login_modal_open', 'score_input_button')
+                                      sessionStorage.setItem('uniroad_login_modal_source', 'score_input_button')
                                       setIsAuthModalOpen(true)
                                     } else {
                                       setIsProfileFormOpen(true)
@@ -1939,6 +1976,8 @@ export default function ChatPage() {
                           <button
                             onClick={() => {
                               if (!isAuthenticated) {
+                                trackUserAction('login_modal_open', 'thinking_mode_button')
+                                sessionStorage.setItem('uniroad_login_modal_source', 'thinking_mode_button')
                                 setAuthModalMessage({
                                   title: 'Thinking 모드',
                                   description: 'Thinking 모드는 로그인 후 사용할 수 있습니다. 더 깊은 분석과 정확한 답변을 받아보세요!'
@@ -2005,7 +2044,12 @@ export default function ChatPage() {
                   imageUrl={msg.imageUrl}
                   onRegenerate={!msg.isUser && userQuery && index === messages.length - 1 ? () => handleRegenerate(msg.id, userQuery) : undefined}
                   showLoginPrompt={msg.showLoginPrompt}
-                  onLoginClick={() => setIsAuthModalOpen(true)}
+                  onLoginClick={() => {
+                    trackUserAction('login_modal_open', 'rate_limit_prompt')
+                    sessionStorage.setItem('uniroad_login_modal_source', 'rate_limit_prompt')
+                    setIsAuthModalOpen(true)
+                  }}
+                  isMasked={msg.isMasked}
                 />
               )
             })}
@@ -2107,6 +2151,8 @@ export default function ChatPage() {
                               onClick={() => {
                                 if (!isAuthenticated) {
                                   alert('로그인이 필요합니다.')
+                                  trackUserAction('login_modal_open', 'score_input_button')
+                                  sessionStorage.setItem('uniroad_login_modal_source', 'score_input_button')
                                   setIsAuthModalOpen(true)
                                 } else {
                                   setIsProfileFormOpen(true)
@@ -2147,6 +2193,8 @@ export default function ChatPage() {
                       <button
                         onClick={() => {
                           if (!isAuthenticated) {
+                            trackUserAction('login_modal_open', 'thinking_mode_button')
+                            sessionStorage.setItem('uniroad_login_modal_source', 'thinking_mode_button')
                             setAuthModalMessage({
                               title: 'Thinking 모드',
                               description: 'Thinking 모드는 로그인 후 사용할 수 있습니다. 더 깊은 분석과 정확한 답변을 받아보세요!'
@@ -2198,10 +2246,54 @@ export default function ChatPage() {
           setAuthModalMessage(undefined)
         }}
         customMessage={authModalMessage}
-        onLoginSuccess={() => {
-          // 로그인 성공 시 처음 화면으로 돌아가기
-          setMessages([])
-          setSelectedCategory(null)
+        onOAuthStart={() => {
+          // OAuth 리다이렉트 전에 현재 메시지를 sessionStorage에 저장
+          if (messages.length > 0) {
+            console.log('🔄 OAuth 시작 - 메시지 저장:', messages.length, '개')
+            sessionStorage.setItem('uniroad_pending_migration', JSON.stringify({
+              messages: messages.map(m => ({
+                role: m.isUser ? 'user' : 'assistant',
+                content: m.text,
+                sources: m.sources,
+                source_urls: m.source_urls
+              })),
+              sessionId: sessionId
+            }))
+          }
+        }}
+        onLoginSuccess={async () => {
+          // 비로그인 상태에서 채팅한 내역이 있으면 마이그레이션
+          // accessToken은 상태 업데이트가 비동기라 아직 null일 수 있으므로 localStorage에서 직접 가져옴
+          const token = localStorage.getItem('access_token')
+          if (messages.length > 0 && token) {
+            try {
+              console.log('🔄 채팅 내역 마이그레이션 시작:', messages.length, '개 메시지')
+              const result = await migrateMessages(
+                token,
+                messages.map(m => ({
+                  role: m.isUser ? 'user' as const : 'assistant' as const,
+                  content: m.text,
+                  sources: m.sources,
+                  source_urls: m.source_urls
+                })),
+                sessionId
+              )
+              console.log('✅ 채팅 내역 마이그레이션 완료:', result.session_id)
+              
+              // 세션 ID 업데이트 (현재 메시지는 유지)
+              setSessionId(result.session_id)
+              
+              // 세션 목록 새로고침 (백그라운드)
+              loadSessions()
+            } catch (error) {
+              console.error('❌ 채팅 마이그레이션 실패:', error)
+            }
+          }
+          
+          // 마스킹 해제
+          setMessages(prev => prev.map(msg => 
+            msg.isMasked ? { ...msg, isMasked: false } : msg
+          ))
         }}
       />
 

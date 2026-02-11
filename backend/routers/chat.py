@@ -190,7 +190,7 @@ async def chat(
         user_id = user["user_id"] if user else None
         
         # 3. Rate Limit 체크 및 증가
-        is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
+        is_allowed, current_count, limit, require_login = await check_and_increment_usage(user_id, client_ip)
         if not is_allowed:
             if user_id is None:
                 # 비로그인 사용자
@@ -207,7 +207,7 @@ async def chat(
         
         # 로그에 사용량 정보 추가
         logs.append(f"📊 API 사용량: {current_count}/{limit}회")
-        print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
+        print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip}, require_login={require_login})")
         
         # ========================================
         # 기존 채팅 로직
@@ -541,7 +541,7 @@ async def chat_stream_v2_with_image(
     user = await optional_auth(authorization)
     user_id = user["user_id"] if user else None
     
-    is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
+    is_allowed, current_count, limit, require_login = await check_and_increment_usage(user_id, client_ip)
     if not is_allowed:
         if user_id is None:
             # 비로그인 사용자
@@ -556,7 +556,7 @@ async def chat_stream_v2_with_image(
                 detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
             )
     
-    print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
+    print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip}, require_login={require_login})")
     
     # ========================================
     # 이미지 검증
@@ -574,6 +574,7 @@ async def chat_stream_v2_with_image(
         raise HTTPException(400, f"이미지 크기는 {MAX_IMAGE_SIZE_MB}MB를 초과할 수 없습니다.")
     
     def generate():
+        nonlocal require_login  # 클로저에서 사용
         pipeline_start = time.time()
         print(f"\n🔵 [STREAM_V2_IMAGE_START] {session_id}:{message[:30]}")
         print(f"🖼️ 이미지: {image.filename}, {image.content_type}, {len(image_data)} bytes")
@@ -697,7 +698,8 @@ async def chat_stream_v2_with_image(
                 "function_results": function_results,
                 "sources": sources,
                 "source_urls": source_urls,
-                "used_chunks": used_chunks
+                "used_chunks": used_chunks,
+                "require_login": require_login  # 비로그인 3회째 질문 시 True
             }
             yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
             
@@ -750,7 +752,7 @@ async def chat_stream_v2(
     user = await optional_auth(authorization)
     user_id = user["user_id"] if user else None
     
-    is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
+    is_allowed, current_count, limit, require_login = await check_and_increment_usage(user_id, client_ip)
     if not is_allowed:
         if user_id is None:
             # 비로그인 사용자
@@ -765,12 +767,13 @@ async def chat_stream_v2(
                 detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
             )
     
-    print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
+    print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip}, require_login={require_login})")
     
     # Thinking 모드 체크
     thinking_mode = request.thinking
     
     def generate():
+        nonlocal require_login  # 클로저에서 사용
         session_id = request.session_id
         message = request.message
         
@@ -1017,7 +1020,8 @@ async def chat_stream_v2(
                 "sources": sources,
                 "source_urls": source_urls,
                 "used_chunks": used_chunks,
-                "thinking_mode": thinking_mode
+                "thinking_mode": thinking_mode,
+                "require_login": require_login  # 비로그인 3회째 질문 시 True
             }
             yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
             
@@ -1061,7 +1065,7 @@ async def chat_stream(
     user = await optional_auth(authorization)
     user_id = user["user_id"] if user else None
     
-    is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
+    is_allowed, current_count, limit, require_login = await check_and_increment_usage(user_id, client_ip)
     if not is_allowed:
         if user_id is None:
             # 비로그인 사용자
@@ -1076,7 +1080,7 @@ async def chat_stream(
                 detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
             )
     
-    print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
+    print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip}, require_login={require_login})")
     
     async def generate():
         logs = []

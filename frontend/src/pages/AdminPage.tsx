@@ -32,6 +32,12 @@ export default function AdminPage() {
   const [feedbacks, setFeedbacks] = useState<any[]>([])
   const [feedbackLoading, setFeedbackLoading] = useState(false)
   
+  // 사전신청자 관련 state
+  const [showPreregistrations, setShowPreregistrations] = useState(false)
+  const [preregistrations, setPreregistrations] = useState<any[]>([])
+  const [preregistrationsLoading, setPreregistrationsLoading] = useState(false)
+  const [preregistrationsTotal, setPreregistrationsTotal] = useState(0)
+  
   // 모든 문서에서 고유 해시태그 추출
   const allHashtags = Array.from(
     new Set(documents.flatMap((doc) => doc.hashtags || []))
@@ -53,6 +59,28 @@ export default function AdminPage() {
       loadFeedbacks()
     }
   }, [showFeedback])
+
+  useEffect(() => {
+    if (showPreregistrations && preregistrations.length === 0) {
+      loadPreregistrations()
+    }
+  }, [showPreregistrations])
+
+  const loadPreregistrations = async () => {
+    setPreregistrationsLoading(true)
+    try {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/preregister/list`)
+      if (response.ok) {
+        const data = await response.json()
+        setPreregistrations(data.data || [])
+        setPreregistrationsTotal(data.total || 0)
+      }
+    } catch (error) {
+      console.error('사전신청자 로드 오류:', error)
+    } finally {
+      setPreregistrationsLoading(false)
+    }
+  }
 
   const loadFeedbacks = async () => {
     setFeedbackLoading(true)
@@ -363,6 +391,13 @@ export default function AdminPage() {
               <span className="text-2xl">💡</span>
               <span className="text-sm text-center">의견 보기</span>
             </button>
+            <button
+              onClick={() => setShowPreregistrations(!showPreregistrations)}
+              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors font-medium border border-blue-200"
+            >
+              <span className="text-2xl">🎁</span>
+              <span className="text-sm text-center">사전신청자</span>
+            </button>
           </div>
         </div>
 
@@ -425,6 +460,67 @@ export default function AdminPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 사전신청자 섹션 */}
+        {showPreregistrations && (
+          <div className="bg-white rounded-2xl shadow-xl p-6 mb-8 border border-gray-100">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-bold text-gray-800">🎁 사전신청자 목록</h2>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-gray-600">총 <span className="font-bold text-blue-600">{preregistrationsTotal}</span>명</span>
+                <button
+                  onClick={loadPreregistrations}
+                  className="px-3 py-1.5 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
+                >
+                  새로고침
+                </button>
+              </div>
+            </div>
+            {preregistrationsLoading ? (
+              <div className="text-center py-8">
+                <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                <p className="mt-2 text-gray-600">로딩 중...</p>
+              </div>
+            ) : preregistrations.length === 0 ? (
+              <p className="text-center py-8 text-gray-500">아직 사전신청자가 없습니다.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-200 bg-gray-50">
+                      <th className="text-left py-3 px-4 font-medium text-gray-700">#</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700">전화번호</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700">학년</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700">시크릿 코드</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700">이름</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700">신청일시</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preregistrations.map((reg, index) => (
+                      <tr key={reg.id || index} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
+                        <td className="py-3 px-4 text-gray-500">{index + 1}</td>
+                        <td className="py-3 px-4 font-mono text-gray-900">
+                          {reg.phone ? `${reg.phone.slice(0, 3)}-${reg.phone.slice(3, 7)}-${reg.phone.slice(7)}` : '-'}
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
+                            {reg.grade || '-'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-mono text-blue-600 font-medium">{reg.secret_code || '-'}</td>
+                        <td className="py-3 px-4 text-gray-700">{reg.user_name || '-'}</td>
+                        <td className="py-3 px-4 text-gray-500 text-xs">
+                          {reg.created_at ? new Date(reg.created_at).toLocaleString('ko-KR') : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

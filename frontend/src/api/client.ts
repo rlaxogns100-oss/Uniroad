@@ -93,6 +93,7 @@ export interface ChatResponse {
   orchestration_result?: OrchestrationResult
   sub_agent_results?: Record<string, SubAgentResult>
   metadata?: Record<string, any>
+  require_login?: boolean  // 비로그인 3회째 질문 시 마스킹 필요
 }
 
 export interface UploadResponse {
@@ -374,7 +375,8 @@ export const sendMessageStream = async (
       metadata: {
         timing: finalData?.timing,
         pipeline_time: finalData?.pipeline_time
-      }
+      },
+      require_login: finalData?.require_login || false  // 비로그인 3회째 질문 시 마스킹
     }
     
     onResult(chatResponse)
@@ -639,7 +641,8 @@ export const sendMessageStreamWithImage = async (
       metadata: {
         image_analysis: finalData?.image_analysis,
         pipeline_time: finalData?.pipeline_time
-      }
+      },
+      require_login: finalData?.require_login || false  // 비로그인 3회째 질문 시 마스킹
     }
     
     onResult(chatResponse)
@@ -793,4 +796,35 @@ export const deleteProfile = async (token: string): Promise<void> => {
   await api.delete('/profile/me', {
     headers: { Authorization: `Bearer ${token}` }
   })
+}
+
+// ============================================================
+// 채팅 마이그레이션 API
+// ============================================================
+
+export interface MigrateMessageItem {
+  role: 'user' | 'assistant'
+  content: string
+  sources?: string[]
+  source_urls?: string[]
+}
+
+export interface MigrateMessagesResponse {
+  session_id: string
+  message_count: number
+  message: string
+}
+
+// 비로그인 채팅 내역을 로그인한 사용자의 세션으로 마이그레이션
+export const migrateMessages = async (
+  token: string,
+  messages: MigrateMessageItem[],
+  browserSessionId: string
+): Promise<MigrateMessagesResponse> => {
+  const response = await api.post<MigrateMessagesResponse>(
+    '/sessions/migrate',
+    { messages, browser_session_id: browserSessionId },
+    { headers: { Authorization: `Bearer ${token}` } }
+  )
+  return response.data
 }

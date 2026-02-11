@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import axios from 'axios'
-import { trackGA4SignUp, trackGA4Login } from '../utils/tracking'
+import { trackGA4SignUp, trackGA4Login, trackUserAction } from '../utils/tracking'
+import { migrateMessages } from '../api/client'
 
 interface User {
   id: string
@@ -13,7 +14,7 @@ interface AuthContextType {
   user: User | null
   accessToken: string | null
   loading: boolean
-  signIn: (email: string, password: string) => Promise<User | null>
+  signIn: (email: string, password: string, skipRedirect?: boolean) => Promise<User | null>
   signUp: (email: string, password: string, name?: string) => Promise<User | null>
   signInWithGoogle: () => Promise<void>
   signInWithKakao: () => Promise<void>
@@ -53,12 +54,39 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setLoading(false)
 
           const provider = (sessionStorage.getItem('uniroad_oauth_provider') || 'google') as 'google' | 'kakao'
+          const signupSource = sessionStorage.getItem('uniroad_oauth_signup_source') || 'unknown'
           if (is_new_user) {
             trackGA4SignUp(provider)
+            trackUserAction('signup_success', provider, {
+              customData: { signup_source: signupSource }
+            })
           } else {
             trackGA4Login(provider)
+            trackUserAction('login_success', provider, {
+              customData: { signup_source: signupSource }
+            })
           }
           sessionStorage.removeItem('uniroad_oauth_provider')
+          sessionStorage.removeItem('uniroad_oauth_signup_source')
+
+          // sessionStorage에서 마이그레이션 대기 중인 메시지 확인
+          const pendingMigration = sessionStorage.getItem('uniroad_pending_migration')
+          if (pendingMigration) {
+            try {
+              const { messages, sessionId } = JSON.parse(pendingMigration)
+              if (messages && messages.length > 0) {
+                console.log('🔄 OAuth 로그인 후 채팅 마이그레이션 시작:', messages.length, '개 메시지')
+                const result = await migrateMessages(access_token, messages, sessionId)
+                console.log('✅ OAuth 채팅 마이그레이션 완료, session_id:', result.session_id)
+                // 마이그레이션된 세션 ID 저장 (ChatPage에서 자동 선택용)
+                sessionStorage.setItem('uniroad_migrated_session_id', result.session_id)
+              }
+            } catch (migrationError) {
+              console.error('❌ OAuth 채팅 마이그레이션 실패:', migrationError)
+            } finally {
+              sessionStorage.removeItem('uniroad_pending_migration')
+            }
+          }
 
           // OAuth 로그인 성공 시: 관리자(김도균)는 /chat/login/admin, 그 외는 /chat/login
           const isAdmin = userData?.name === '김도균' || userData?.email === 'herry0515@naver.com'
@@ -108,7 +136,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const signIn = async (email: string, password: string): Promise<User | null> => {
+  const signIn = async (email: string, password: string, skipRedirect?: boolean): Promise<User | null> => {
     try {
       const response = await axios.post('/api/auth/signin', { email, password }, { timeout: 15000 })
       const { access_token, user: userData } = response.data
@@ -121,8 +149,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       trackGA4Login('email')
       
-      const isAdmin = userData?.name === '김도균' || userData?.email === 'herry0515@naver.com'
-      window.location.href = isAdmin ? '/chat/login/admin' : '/chat/login'
+      // skipRedirect가 true면 리다이렉트 하지 않음 (모달에서 로그인 시)
+      if (!skipRedirect) {
+        const isAdmin = userData?.name === '김도균' || userData?.email === 'herry0515@naver.com'
+        window.location.href = isAdmin ? '/chat/login/admin' : '/chat/login'
+      }
       
       return userData
     } catch (error: any) {
