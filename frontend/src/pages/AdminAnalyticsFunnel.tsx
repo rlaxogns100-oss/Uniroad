@@ -206,7 +206,7 @@ export default function AdminAnalyticsFunnel() {
                     cx="50%"
                     cy="50%"
                     labelLine={false}
-                    label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                    label={({ name, percent }) => `${name} (${((percent ?? 0) * 100).toFixed(0)}%)`}
                     outerRadius={100}
                     dataKey="value"
                   >
@@ -214,7 +214,7 @@ export default function AdminAnalyticsFunnel() {
                       <Cell key={`cell-${index}`} fill={entry.fill} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value: number) => [value.toLocaleString() + '회', '']} />
+                  <Tooltip formatter={(value) => [(value ?? 0).toLocaleString() + '회', '']} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -271,7 +271,7 @@ export default function AdminAnalyticsFunnel() {
                     cx="50%"
                     cy="50%"
                     labelLine={false}
-                    label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                    label={({ name, percent }) => `${name} (${((percent ?? 0) * 100).toFixed(0)}%)`}
                     outerRadius={100}
                     dataKey="value"
                   >
@@ -279,7 +279,7 @@ export default function AdminAnalyticsFunnel() {
                       <Cell key={`cell-${index}`} fill={entry.fill} />
                     ))}
                   </Pie>
-                  <Tooltip formatter={(value: number) => [value.toLocaleString() + '명', '']} />
+                  <Tooltip formatter={(value) => [(value ?? 0).toLocaleString() + '명', '']} />
                 </PieChart>
               </ResponsiveContainer>
             </div>
@@ -333,7 +333,7 @@ export default function AdminAnalyticsFunnel() {
                 <XAxis dataKey="category" tick={{ fontSize: 12 }} stroke="#6b7280" />
                 <YAxis tick={{ fontSize: 12 }} stroke="#6b7280" />
                 <Tooltip
-                  formatter={(value: number) => [value.toLocaleString() + '회', '클릭 수']}
+                  formatter={(value) => [(value ?? 0).toLocaleString() + '회', '클릭 수']}
                   contentStyle={{ borderRadius: 8 }}
                 />
                 <Bar dataKey="count" name="클릭 수" radius={[4, 4, 0, 0]}>
