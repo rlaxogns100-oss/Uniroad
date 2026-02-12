@@ -35,13 +35,21 @@ interface Message {
   imageUrl?: string  // 이미지 첨부 시 미리보기 URL
   showLoginPrompt?: boolean  // 로그인 유도 메시지 표시 여부
   isMasked?: boolean  // 마스킹 여부 (비로그인 3회째 질문)
+  // Agent 디버그 데이터 (관리자용)
+  agentData?: {
+    routerOutput: any
+    functionResults: any
+    mainAgentOutput: string | null
+    rawAnswer?: string | null
+    logs: string[]
+  } | null
 }
 
 interface AgentData {
-  orchestrationResult: any
-  subAgentResults: any
-  finalAnswer: string | null
-  rawAnswer?: string | null  // ✅ 원본 답변 추가
+  routerOutput: any           // Router Agent 출력 (function_calls, raw_response)
+  functionResults: any        // Functions 실행 결과 (chunks, documents)
+  mainAgentOutput: string | null  // Main Agent 최종 답변
+  rawAnswer?: string | null   // 원본 답변 (섹션 마커 포함)
   logs: string[]
 }
 
@@ -146,12 +154,13 @@ export default function ChatPage() {
   const [announcementForm, setAnnouncementForm] = useState({ title: '', content: '', is_pinned: false })
   const [editingAnnouncementId, setEditingAnnouncementId] = useState<string | null>(null)
   const [agentData, setAgentData] = useState<AgentData>({
-    orchestrationResult: null,
-    subAgentResults: null,
-    finalAnswer: null,
+    routerOutput: null,
+    functionResults: null,
+    mainAgentOutput: null,
     rawAnswer: null,
     logs: []
   })
+  const [selectedAgentData, setSelectedAgentData] = useState<AgentData | null>(null) // 선택된 메시지의 Agent 데이터
   const [currentLog, setCurrentLog] = useState<string>('') // 현재 진행 상태 로그
   const [searchQuery, setSearchQuery] = useState<string>('') // 채팅 검색어
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false) // 검색창 열림 상태
@@ -475,9 +484,9 @@ export default function ChatPage() {
     setIsLoading(false)
     setCurrentLog('')
     setAgentData({
-      orchestrationResult: null,
-      subAgentResults: null,
-      finalAnswer: null,
+      routerOutput: null,
+      functionResults: null,
+      mainAgentOutput: null,
       rawAnswer: null,
       logs: []
     })
@@ -565,10 +574,6 @@ export default function ChatPage() {
   useEffect(() => {
     scrollToBottom()
   }, [messages, currentLog]) // currentLog 변경시에도 스크롤
-
-  const toggleAgentPanel = () => {
-    setIsAgentPanelOpen(!isAgentPanelOpen)
-  }
 
   // 재생성 함수: 이전 질문/답변 제거 후 다시 질문
   const handleRegenerate = (aiMessageId: string, userQuery: string) => {
@@ -681,9 +686,9 @@ export default function ChatPage() {
 
     // 로그 초기화
     setAgentData({
-      orchestrationResult: null,
-      subAgentResults: null,
-      finalAnswer: null,
+      routerOutput: null,
+      functionResults: null,
+      mainAgentOutput: null,
       rawAnswer: null,
       logs: []
     })
@@ -738,7 +743,16 @@ export default function ChatPage() {
           // 비로그인 3회째 질문 시 마스킹 처리
           const shouldMask = response.require_login === true
 
-          // 스트리밍 봇 메시지를 최종 메시지로 업데이트 (sources, used_chunks 등 추가)
+          // 현재 agentData 스냅샷 저장 (메시지에 포함시키기 위해)
+          const currentAgentData = {
+            routerOutput: response.router_output || null,
+            functionResults: response.function_results || null,
+            mainAgentOutput: response.response,
+            rawAnswer: response.raw_answer || null,
+            logs: [...agentData.logs]  // 현재까지의 로그 복사
+          }
+
+          // 스트리밍 봇 메시지를 최종 메시지로 업데이트 (sources, used_chunks, agentData 등 추가)
           setMessages((prev) => prev.map(msg => 
             msg.id === streamingBotMessageId
               ? {
@@ -749,6 +763,7 @@ export default function ChatPage() {
                   used_chunks: response.used_chunks,
                   isStreaming: false,  // 스트리밍 완료
                   isMasked: shouldMask,  // 마스킹 여부
+                  agentData: currentAgentData,  // Agent 디버그 데이터 저장
                 }
               : msg
           ))
@@ -772,10 +787,10 @@ export default function ChatPage() {
           // Agent 디버그 데이터 업데이트
           setAgentData((prev) => ({
             ...prev,
-            orchestrationResult: response.orchestration_result || null,
-            subAgentResults: response.sub_agent_results || null,
-            finalAnswer: response.response,
-            rawAnswer: response.raw_answer || null  // ✅ 원본 답변 추가
+            routerOutput: response.router_output || null,
+            functionResults: response.function_results || null,
+            mainAgentOutput: response.response,
+            rawAnswer: response.raw_answer || null
           }))
           
           // 백엔드 타이밍 정보 저장
@@ -990,13 +1005,16 @@ export default function ChatPage() {
       
       {/* Agent 디버그 패널 (좌측) */}
       <AgentPanel
-        orchestrationResult={agentData.orchestrationResult}
-        subAgentResults={agentData.subAgentResults}
-        finalAnswer={agentData.finalAnswer}
-        rawAnswer={agentData.rawAnswer}
-        logs={agentData.logs}
+        routerOutput={selectedAgentData?.routerOutput || agentData.routerOutput}
+        functionResults={selectedAgentData?.functionResults || agentData.functionResults}
+        mainAgentOutput={selectedAgentData?.mainAgentOutput || agentData.mainAgentOutput}
+        rawAnswer={selectedAgentData?.rawAnswer || agentData.rawAnswer}
+        logs={selectedAgentData?.logs || agentData.logs}
         isOpen={isAgentPanelOpen}
-        onClose={() => setIsAgentPanelOpen(false)}
+        onClose={() => {
+          setIsAgentPanelOpen(false)
+          setSelectedAgentData(null)
+        }}
       />
 
       <div className={`flex h-screen bg-white relative transition-all duration-300 ${
@@ -1598,19 +1616,6 @@ export default function ChatPage() {
                   </div>
                   
                   <button
-                    onClick={toggleAgentPanel}
-                    className={`px-4 py-2 rounded-lg transition-colors flex items-center gap-2 text-sm font-medium ${
-                      isAgentPanelOpen
-                        ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                        : 'bg-slate-700 text-white hover:bg-slate-600'
-                    }`}
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
-                    </svg>
-                    Agent
-                  </button>
-                  <button
                     onClick={() => navigate('/chat/admin')}
                     className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors text-sm font-medium"
                   >
@@ -2032,6 +2037,14 @@ export default function ChatPage() {
                     setIsAuthModalOpen(true)
                   }}
                   isMasked={msg.isMasked}
+                  agentData={msg.agentData}
+                  isAdmin={isAdmin}
+                  onAgentClick={() => {
+                    if (msg.agentData) {
+                      setSelectedAgentData(msg.agentData)
+                      setIsAgentPanelOpen(true)
+                    }
+                  }}
                 />
               )
             })}

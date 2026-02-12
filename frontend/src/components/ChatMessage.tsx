@@ -13,9 +13,19 @@ interface ChatMessageProps {
   showLoginPrompt?: boolean  // 로그인 유도 메시지 표시 여부
   onLoginClick?: () => void  // 로그인 버튼 클릭 콜백
   isMasked?: boolean  // 마스킹 여부 (비로그인 3회째 질문)
+  // Agent 디버그 데이터 (관리자용)
+  agentData?: {
+    routerOutput: any
+    functionResults: any
+    mainAgentOutput: string | null
+    rawAnswer?: string | null
+    logs: string[]
+  } | null
+  isAdmin?: boolean  // 관리자 여부
+  onAgentClick?: () => void  // Agent 버튼 클릭 콜백
 }
 
-export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming, onRegenerate, imageUrl, showLoginPrompt, onLoginClick, isMasked }: ChatMessageProps) {
+export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming, onRegenerate, imageUrl, showLoginPrompt, onLoginClick, isMasked, agentData, isAdmin, onAgentClick }: ChatMessageProps) {
   const [showFactCheck, setShowFactCheck] = useState(false)
   const [showGlow, setShowGlow] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)  // 공유 모달 상태
@@ -588,6 +598,22 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
               </svg>
               출처 확인하기{countCiteTags() > 0 && `(${countCiteTags()})`}
             </button>
+            
+            {/* Agent 디버그 버튼 (관리자 전용) */}
+            {isAdmin && (
+              <button
+                onClick={onAgentClick}
+                className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                  agentData ? 'text-purple-600 hover:bg-purple-50' : 'text-gray-400 cursor-not-allowed'
+                }`}
+                disabled={!agentData}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                </svg>
+                Agent
+              </button>
+            )}
           </div>
           )}
         </div>
