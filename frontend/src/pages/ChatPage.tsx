@@ -1820,9 +1820,7 @@ export default function ChatPage() {
                             onClick={(e) => openThinkingModeModal(e)}
                             disabled={isLoading}
                             className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-2 ${
-                              thinkingMode
-                                ? 'bg-gray-800 text-white border border-gray-700'
-                                : 'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
+                              'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
                             } disabled:opacity-50`}
                             title={thinkingMode ? 'Thinking 모드' : 'Auto 모드'}
                           >
@@ -1975,9 +1973,7 @@ export default function ChatPage() {
                             onClick={(e) => openThinkingModeModal(e)}
                             disabled={isLoading}
                             className={`px-2 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1 ${
-                              thinkingMode
-                                ? 'bg-gray-800 text-white border border-gray-700'
-                                : 'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
+                              'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
                             } disabled:opacity-50`}
                             title={thinkingMode ? 'Thinking 모드' : 'Auto 모드'}
                           >
@@ -2179,9 +2175,7 @@ export default function ChatPage() {
                         onClick={(e) => openThinkingModeModal(e)}
                         disabled={isLoading}
                         className={`px-2.5 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1 ${
-                          thinkingMode
-                            ? 'bg-gray-800 text-white border border-gray-700'
-                            : 'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
+                          'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
                         } disabled:opacity-50`}
                         title={thinkingMode ? 'Thinking 모드' : 'Auto 모드'}
                       >
