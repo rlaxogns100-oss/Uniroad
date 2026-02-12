@@ -161,8 +161,20 @@ export default function ChatPage() {
   const [testRunCount, setTestRunCount] = useState<number>(1) // 시행 횟수
   const [testRunMode, setTestRunMode] = useState<'sequential' | 'parallel'>('sequential') // 순차/병렬
   const [isTestSettingsOpen, setIsTestSettingsOpen] = useState(false) // 설정 패널 열림 상태
-  const [thinkingMode, setThinkingMode] = useState<boolean>(false) // Thinking 모드
-  
+  const [thinkingMode, setThinkingMode] = useState<boolean>(false) // Thinking 모드 (기본값 Auto)
+  const [isThinkingModeModalOpen, setIsThinkingModeModalOpen] = useState(false) // Auto/Thinking 선택 모달
+  const [thinkingModeModalAnchor, setThinkingModeModalAnchor] = useState<{ top: number; left: number; width: number } | null>(null) // 모달이 뜰 기준 위치 (Auto 버튼)
+
+  const openThinkingModeModal = (e: React.MouseEvent) => {
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+    setThinkingModeModalAnchor({ top: rect.top, left: rect.left, width: rect.width })
+    setIsThinkingModeModalOpen(true)
+  }
+  const closeThinkingModeModal = () => {
+    setIsThinkingModeModalOpen(false)
+    setThinkingModeModalAnchor(null)
+  }
+
   // 이미지 업로드 관련
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null)
@@ -1802,39 +1814,26 @@ export default function ChatPage() {
                           )}
                         </div>
                         
-                        {/* Thinking 스위치 + 전송 버튼 */}
+                        {/* 응답 모드 선택(Auto/Thinking) + 전송 버튼 */}
                         <div className="flex items-center gap-2">
-                          {/* Thinking 스위치 */}
                           <button
-                            onClick={() => {
-                              if (!isAuthenticated) {
-                                trackUserAction('login_modal_open', 'thinking_mode_button')
-                                sessionStorage.setItem('uniroad_login_modal_source', 'thinking_mode_button')
-                                setAuthModalMessage({
-                                  title: 'Thinking 모드',
-                                  description: 'Thinking 모드는 로그인 후 사용할 수 있습니다. 더 깊은 분석과 정확한 답변을 받아보세요!'
-                                })
-                                setIsAuthModalOpen(true)
-                                return
-                              }
-                              setThinkingMode(!thinkingMode)
-                            }}
+                            onClick={(e) => openThinkingModeModal(e)}
                             disabled={isLoading}
                             className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-2 ${
                               thinkingMode
                                 ? 'bg-gray-800 text-white border border-gray-700'
-                                : 'bg-gray-100 text-gray-500 border border-gray-200 hover:bg-gray-200'
-                            } ${!isAuthenticated ? 'opacity-60' : ''} disabled:opacity-50`}
-                            title={thinkingMode ? 'Thinking 모드 ON' : 'Thinking 모드 OFF'}
+                                : 'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
+                            } disabled:opacity-50`}
+                            title={thinkingMode ? 'Thinking 모드' : 'Auto 모드'}
                           >
-                            {/* 뇌 아이콘 */}
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                             </svg>
-                            <span className="text-sm">Thinking</span>
+                            <span className="text-sm">{thinkingMode ? 'Thinking' : 'Auto'}</span>
+                            <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
                           </button>
-                          
-                          {/* 전송 버튼 */}
                           <button
                             onClick={() => handleSend()}
                             disabled={isLoading || (!input.trim() && !selectedImage)}
@@ -1970,39 +1969,26 @@ export default function ChatPage() {
                           )}
                         </div>
                         
-                        {/* Thinking 스위치 + 전송 버튼 */}
+                        {/* 응답 모드 선택(Auto/Thinking) + 전송 버튼 */}
                         <div className="flex items-center gap-2">
-                          {/* Thinking 스위치 */}
                           <button
-                            onClick={() => {
-                              if (!isAuthenticated) {
-                                trackUserAction('login_modal_open', 'thinking_mode_button')
-                                sessionStorage.setItem('uniroad_login_modal_source', 'thinking_mode_button')
-                                setAuthModalMessage({
-                                  title: 'Thinking 모드',
-                                  description: 'Thinking 모드는 로그인 후 사용할 수 있습니다. 더 깊은 분석과 정확한 답변을 받아보세요!'
-                                })
-                                setIsAuthModalOpen(true)
-                                return
-                              }
-                              setThinkingMode(!thinkingMode)
-                            }}
+                            onClick={(e) => openThinkingModeModal(e)}
                             disabled={isLoading}
                             className={`px-2 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1 ${
                               thinkingMode
                                 ? 'bg-gray-800 text-white border border-gray-700'
-                                : 'bg-gray-100 text-gray-500 border border-gray-200 hover:bg-gray-200'
-                            } ${!isAuthenticated ? 'opacity-60' : ''} disabled:opacity-50`}
-                            title={thinkingMode ? 'Thinking 모드 ON' : 'Thinking 모드 OFF'}
+                                : 'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
+                            } disabled:opacity-50`}
+                            title={thinkingMode ? 'Thinking 모드' : 'Auto 모드'}
                           >
-                            {/* 뇌 아이콘 */}
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                             </svg>
-                            <span className="text-xs">Thinking</span>
+                            <span className="text-xs">{thinkingMode ? 'Thinking' : 'Auto'}</span>
+                            <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
                           </button>
-                          
-                          {/* 전송 버튼 */}
                           <button
                             onClick={() => handleSend()}
                             disabled={isLoading || (!input.trim() && !selectedImage)}
@@ -2187,39 +2173,26 @@ export default function ChatPage() {
                       )}
                     </div>
                     
-                    {/* Thinking 스위치 + 전송 버튼 */}
+                    {/* 응답 모드 선택(Auto/Thinking) + 전송 버튼 */}
                     <div className="flex items-center gap-2">
-                      {/* Thinking 스위치 */}
                       <button
-                        onClick={() => {
-                          if (!isAuthenticated) {
-                            trackUserAction('login_modal_open', 'thinking_mode_button')
-                            sessionStorage.setItem('uniroad_login_modal_source', 'thinking_mode_button')
-                            setAuthModalMessage({
-                              title: 'Thinking 모드',
-                              description: 'Thinking 모드는 로그인 후 사용할 수 있습니다. 더 깊은 분석과 정확한 답변을 받아보세요!'
-                            })
-                            setIsAuthModalOpen(true)
-                            return
-                          }
-                          setThinkingMode(!thinkingMode)
-                        }}
+                        onClick={(e) => openThinkingModeModal(e)}
                         disabled={isLoading}
                         className={`px-2.5 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1 ${
                           thinkingMode
                             ? 'bg-gray-800 text-white border border-gray-700'
-                            : 'bg-gray-100 text-gray-500 border border-gray-200 hover:bg-gray-200'
-                        } ${!isAuthenticated ? 'opacity-60' : ''} disabled:opacity-50`}
-                        title={thinkingMode ? 'Thinking 모드 ON' : 'Thinking 모드 OFF'}
+                            : 'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
+                        } disabled:opacity-50`}
+                        title={thinkingMode ? 'Thinking 모드' : 'Auto 모드'}
                       >
-                        {/* 뇌 아이콘 */}
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                         </svg>
-                        <span className="text-sm">Thinking</span>
+                        <span className="text-sm">{thinkingMode ? 'Thinking' : 'Auto'}</span>
+                        <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                        </svg>
                       </button>
-                      
-                      {/* 전송 버튼 */}
                       <button
                         onClick={() => handleSend()}
                         disabled={isLoading || (!input.trim() && !selectedImage)}
@@ -2237,6 +2210,75 @@ export default function ChatPage() {
           </div>
         )}
       </div>
+
+      {/* Auto / Thinking 모드 선택 모달 - Auto 버튼 바로 위에 표시 */}
+      {isThinkingModeModalOpen && thinkingModeModalAnchor && (
+        <div
+          className="fixed inset-0 z-[60]"
+          onClick={closeThinkingModeModal}
+          aria-hidden
+        >
+          <div
+            className="absolute bg-white rounded-2xl shadow-2xl border border-gray-200 w-[min(300px,calc(100vw-24px))] overflow-hidden"
+            style={{
+              bottom: `${window.innerHeight - thinkingModeModalAnchor.top + 8}px`,
+              left: `${Math.min(thinkingModeModalAnchor.left, window.innerWidth - 308)}px`,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 pt-4 pb-1">
+              <p className="text-sm font-medium text-gray-500">유니로드</p>
+            </div>
+            <div className="px-2 pb-4 pt-0.5">
+              <button
+                onClick={() => {
+                  setThinkingMode(false)
+                  closeThinkingModeModal()
+                }}
+                className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl hover:bg-gray-50 transition-colors text-left"
+              >
+                <div>
+                  <p className="font-medium text-gray-900">Auto</p>
+                  <p className="text-sm text-gray-500 mt-0.5">난이도에 따라 생각하는 시간 조정</p>
+                </div>
+                {!thinkingMode && (
+                  <svg className="w-5 h-5 text-gray-900 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+              </button>
+              <button
+                onClick={() => {
+                  if (!isAuthenticated) {
+                    closeThinkingModeModal()
+                    trackUserAction('login_modal_open', 'thinking_mode_button')
+                    sessionStorage.setItem('uniroad_login_modal_source', 'thinking_mode_button')
+                    setAuthModalMessage({
+                      title: 'Thinking 모드',
+                      description: 'Thinking 모드는 로그인 후 사용할 수 있습니다. 더 깊은 분석과 정확한 답변을 받아보세요!'
+                    })
+                    setIsAuthModalOpen(true)
+                    return
+                  }
+                  setThinkingMode(true)
+                  closeThinkingModeModal()
+                }}
+                className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl hover:bg-gray-50 transition-colors text-left"
+              >
+                <div>
+                  <p className="font-medium text-gray-900">Thinking</p>
+                  <p className="text-sm text-gray-500 mt-0.5">더 많은 자료 참고하여 더 깊이 생각</p>
+                </div>
+                {thinkingMode && (
+                  <svg className="w-5 h-5 text-gray-900 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 로그인 모달 */}
       <AuthModal 

@@ -12,9 +12,9 @@ echo "==> 서버 배포 시작 ($HOST)"
 ssh -o StrictHostKeyChecking=accept-new -i "$KEY" "$HOST" bash -s << 'REMOTE'
 set -e
 cd /home/azureuser/uniroad || { echo "오류: 프로젝트 경로 없음"; exit 1; }
-echo "==> git pull origin main"
+echo "==> git pull origin develop"
 git fetch origin
-git pull origin main
+git pull origin develop
 echo "==> 프론트엔드 빌드"
 cd frontend && npm install && npm run build && cd ..
 echo "==> 백엔드 재시작"
