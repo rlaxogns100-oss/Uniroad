@@ -82,18 +82,17 @@ def calculate_score(
     
     # 기본 점수 계산 (타입 안전성 확보)
     try:
-        korean_coef = float(formula.get("koreanCoef", 0))
-        math_coef = float(formula.get("mathCoef", 0))
+        korean_coef = float(formula.get("koreanCoef", 0) or 0)
+        math_coef = float(formula.get("mathCoef", 0) or 0)
         
-        # tamguCoef가 '자동'인 경우 처리
+        # tamguCoef가 '자동'이거나 None인 경우 처리
         tamgu_coef_raw = formula.get("tamguCoef", 0)
-        if tamgu_coef_raw == '자동':
-            # '자동'인 경우 계산 불가, 0으로 처리 또는 스킵
+        if tamgu_coef_raw is None or tamgu_coef_raw == '자동':
             tamgu_coef = 0.0
         else:
             tamgu_coef = float(tamgu_coef_raw)
         
-        tamgu_bonus = float(formula.get("tamguBonus", 0))
+        tamgu_bonus = float(formula.get("tamguBonus", 0) or 0)
     except (ValueError, TypeError) as e:
         # 변환 실패 시 None 반환
         return None
@@ -105,7 +104,7 @@ def calculate_score(
     
     # 영어/한국사 점수 (타입 안전성 확보)
     deduction = deductions.get(formula_id, {})
-    english_score = float(deduction.get("englishDeduction", 0))
+    english_score = float(deduction.get("englishDeduction", 0) or 0)
     
     history_deductions = deduction.get("historyDeductions", [])
     if history_deductions and 1 <= history <= 9:
@@ -126,7 +125,8 @@ def classify_by_cutoff(my_score: float, univ: Dict) -> str:
     컷 점수 기준 판정
     
     판정 기준:
-    - 안정: 내 점수 >= safeScore
+    - 하향: 내 점수가 safeScore보다 1% 이상 높음 (과도한 하향 지원)
+    - 안정: 내 점수 >= safeScore (1% 미만 초과)
     - 적정: 내 점수 >= appropriateScore
     - 소신: 내 점수 >= expectedScore
     - 도전: 내 점수 >= challengeScore
@@ -138,6 +138,10 @@ def classify_by_cutoff(my_score: float, univ: Dict) -> str:
     challenge = univ.get("challengeScore")
     
     if safe and my_score >= safe:
+        # 하향 판정: safeScore 대비 1% 이상 초과하면 하향
+        excess_ratio = (my_score - safe) / safe if safe > 0 else 0
+        if excess_ratio >= 0.01:  # 1% 이상 초과
+            return "하향"
         return "안정"
     if appropriate and my_score >= appropriate:
         return "적정"
@@ -232,8 +236,14 @@ def run_suneung_search(
         판정 = classify_by_cutoff(my_score, univ)
         
         # 판정 필터
-        if target_range and 판정 not in target_range:
-            continue
+        # 기본적으로 "하향"은 제외 (명시적으로 요청한 경우에만 포함)
+        if target_range:
+            if 판정 not in target_range:
+                continue
+        else:
+            # target_range가 없으면 "하향" 제외
+            if 판정 == "하향":
+                continue
         
         results.append({
             "univ": univ.get("university", ""),
@@ -249,9 +259,9 @@ def run_suneung_search(
             "formula_id": univ.get("formulaId"),
         })
     
-    # 점수 높은 순 정렬
+    # 점수 높은 순 정렬 (하향은 맨 뒤로)
     results.sort(key=lambda x: (
-        ["안정", "적정", "소신", "도전", "어려움"].index(x["판정"]),
+        ["안정", "적정", "소신", "도전", "어려움", "하향"].index(x["판정"]),
         -x["my_score"]
     ))
     

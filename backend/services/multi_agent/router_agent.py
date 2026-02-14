@@ -53,10 +53,10 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
 
 ## functions 목록: "univ", "consult_jungsi", "consult_susi"
 학생의 질문에 답하기 위해 어떤 정보가 필요할지 정확하게 판단하여 호출할 함수를 정하세요.
- - **univ(university, query):** 특정 대학의 입시 요강, 작년도 입시 결과 조회
+ - **univ(university, query):** 특정 대학의 입시 요강 조회
  - **consult_jungsi(j_score, university, department, range):** 여러 대학의 정시 결과 조회, 정시 성적 대학별 환산, 정시 성적에 따른 합격 가능성 평가 및 대학 추천
  - **consult_susi(s_scores, university, department, junhyung):** 여러 대학의 수시 전형결과 조회(학과별, 전형별 70%컷, 경쟁률, 충원률 등)
-### 구체적인 학생의 성적대와 비교할 때에는 consult_jungsi 또는 consult_susi 함수를 꼭 호출할 것
+### 구체적인 학생의 성적대와 비교할 때, 대학의 입시 결과 데이터를 조회할 때에는 consult_jungsi 또는 consult_susi 함수를 꼭 호출할 것
 ### 위의 function-params 관계를 고수할 것. 예를 들어 consult_susi 함수를 호출할 때 range를 넣지 말 것.
 
 
@@ -109,7 +109,7 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
       "function": "univ",
       "params": {
         "university": ["서울대학교"],
-        "query": ["2026학년도 서울대학교 정시 모집요강", "2025학년도 서울대학교 정시 입결"]
+        "query": ["2026학년도 서울대학교 정시 모집요강", "2025학년도 서울대학교 정시 전형결과"]
       }
     }
   ]
@@ -126,7 +126,7 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
       "function": "univ",
       "params": {
         "university": ["서울대학교"],
-        "query": ["2026학년도 서울대학교 정시 모집요강", "2025학년도 서울대학교 정시 입결"]
+        "query": ["2026학년도 서울대학교 정시 모집요강", "2025학년도 서울대학교 정시 전형결과"]
       }
     },
     {
@@ -237,7 +237,7 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
       "function": "univ",
       "params": {
         "university": ["연세대학교"],
-        "query": ["2026학년도 연세대학교 정시 모집요강", "2025학년도 연세대학교 정시 입결"]
+        "query": ["2026학년도 연세대학교 정시 모집요강", "2025학년도 연세대학교 정시 전형결과"]
       }
     }
   ]
@@ -246,7 +246,7 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
       "function": "univ",
       "params": {
         "university": ["고려대학교"],
-        "query": ["2026학년도 고려대학교 정시 모집요강", "2025학년도 고려대학교 정시 입결"]
+        "query": ["2026학년도 고려대학교 정시 모집요강", "2025학년도 고려대학교 정시 전형결과"]
       }
     }
   ]

@@ -1,0 +1,4027 @@
+{
+  "1": {
+    "name": "서울대 자연A 물화",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -0.5,
+      -2,
+      -4,
+      -6,
+      -8,
+      -10,
+      -12,
+      -14
+    ]
+  },
+  "2": {
+    "name": "서울대 자연B",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -0.5,
+      -2,
+      -4,
+      -6,
+      -8,
+      -10,
+      -12,
+      -14
+    ]
+  },
+  "3": {
+    "name": "서울대 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -0.5,
+      -2,
+      -4,
+      -6,
+      -8,
+      -10,
+      -12,
+      -14
+    ]
+  },
+  "4": {
+    "name": "서울대 자전",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -0.5,
+      -2,
+      -4,
+      -6,
+      -8,
+      -10,
+      -12,
+      -14
+    ]
+  },
+  "5": {
+    "name": "연세대 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      105.55555555555556,
+      100.27777777777779,
+      92.36111111111111,
+      79.16666666666667,
+      63.333333333333336,
+      42.22222222222222,
+      26.38888888888889,
+      13.194444444444445,
+      5.277777777777778
+    ]
+  },
+  "6": {
+    "name": "연세대 인문",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      118.75,
+      112.8125,
+      103.90625,
+      89.0625,
+      71.25,
+      47.5,
+      29.6875,
+      14.84375,
+      5.9375
+    ]
+  },
+  "7": {
+    "name": "연세대 의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      95,
+      87.5,
+      75,
+      60,
+      40,
+      25,
+      12.5,
+      5
+    ]
+  },
+  "8": {
+    "name": "연세대 국제",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      142.5,
+      131.25,
+      112.5,
+      90,
+      60,
+      37.5,
+      18.75,
+      7.5
+    ]
+  },
+  "9": {
+    "name": "고려대 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -3,
+      -6,
+      -9,
+      -12,
+      -15,
+      -18,
+      -21,
+      -24
+    ]
+  },
+  "10": {
+    "name": "고려대 사국",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -3,
+      -6,
+      -9,
+      -12,
+      -15,
+      -18,
+      -21,
+      -24
+    ]
+  },
+  "11": {
+    "name": "고려대 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -3,
+      -6,
+      -9,
+      -12,
+      -15,
+      -18,
+      -21,
+      -24
+    ]
+  },
+  "12": {
+    "name": "서강 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      99.5,
+      98.5,
+      97,
+      95,
+      92.5,
+      89.5,
+      86,
+      82
+    ]
+  },
+  "13": {
+    "name": "서강 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      99.5,
+      98.5,
+      97,
+      95,
+      92.5,
+      89.5,
+      86,
+      82
+    ]
+  },
+  "14": {
+    "name": "서강 적용",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      99.5,
+      98.5,
+      97,
+      95,
+      92.5,
+      89.5,
+      86,
+      82
+    ]
+  },
+  "15": {
+    "name": "서강 적용(최저)",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      99.5,
+      98.5,
+      97,
+      95,
+      92.5,
+      89.5,
+      86,
+      82
+    ]
+  },
+  "16": {
+    "name": "서강 자연(최저)",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      99.5,
+      98.5,
+      97,
+      95,
+      92.5,
+      89.5,
+      86,
+      82
+    ]
+  },
+  "17": {
+    "name": "서강 통합(최저)",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      99.5,
+      98.5,
+      97,
+      95,
+      92.5,
+      89.5,
+      86,
+      82
+    ]
+  },
+  "26": {
+    "name": "한양 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      94,
+      88,
+      80,
+      70,
+      58,
+      44,
+      28
+    ]
+  },
+  "28": {
+    "name": "한양 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      96,
+      90,
+      82,
+      72,
+      60,
+      46,
+      30,
+      12
+    ]
+  },
+  "29": {
+    "name": "한양 상경",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      96,
+      90,
+      82,
+      72,
+      60,
+      46,
+      30,
+      12
+    ]
+  },
+  "30": {
+    "name": "중앙 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      95,
+      92,
+      86,
+      75,
+      64,
+      58,
+      50
+    ]
+  },
+  "31": {
+    "name": "중앙 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      95,
+      92,
+      86,
+      75,
+      64,
+      58,
+      50
+    ]
+  },
+  "32": {
+    "name": "중앙 경영경제",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      95,
+      92,
+      86,
+      75,
+      64,
+      58,
+      50
+    ]
+  },
+  "33": {
+    "name": "경희 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      0,
+      -2,
+      -4,
+      -8,
+      -12,
+      -18,
+      -24,
+      -30
+    ]
+  },
+  "34": {
+    "name": "경희 인문",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      0,
+      -2,
+      -4,
+      -8,
+      -12,
+      -18,
+      -24,
+      -30
+    ]
+  },
+  "35": {
+    "name": "경희 사회",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      0,
+      -2,
+      -4,
+      -8,
+      -12,
+      -18,
+      -24,
+      -30
+    ]
+  },
+  "36": {
+    "name": "경희 자유(자연)",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "38": {
+    "name": "한국외대 통합어문",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      140,
+      138,
+      134,
+      128,
+      120,
+      110,
+      90,
+      60,
+      0
+    ]
+  },
+  "39": {
+    "name": "한국외대 통합사회",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      105,
+      103.5,
+      100.5,
+      96,
+      90,
+      82.5,
+      67.5,
+      45,
+      0
+    ]
+  },
+  "40": {
+    "name": "한국외대 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      105,
+      104.5,
+      103.5,
+      102,
+      100,
+      97.5,
+      94.5,
+      90,
+      0
+    ]
+  },
+  "41": {
+    "name": "서울시립 통합A",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      146,
+      135,
+      120,
+      95,
+      75,
+      45,
+      15,
+      0
+    ]
+  },
+  "42": {
+    "name": "서울시립 통합B",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      194,
+      184,
+      160,
+      130,
+      100,
+      60,
+      20,
+      0
+    ]
+  },
+  "43": {
+    "name": "서울시립 통합C사회지정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      250,
+      248,
+      244,
+      240,
+      236,
+      232,
+      228,
+      224,
+      0
+    ]
+  },
+  "44": {
+    "name": "서울시립 자연A",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      97,
+      90,
+      80,
+      65,
+      50,
+      30,
+      10,
+      0
+    ]
+  },
+  "45": {
+    "name": "서울시립 자연B",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      97,
+      90,
+      80,
+      65,
+      50,
+      30,
+      10,
+      0
+    ]
+  },
+  "46": {
+    "name": "서울시립 자연C수학자유",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      94,
+      90,
+      86,
+      82,
+      78,
+      74,
+      0
+    ]
+  },
+  "47": {
+    "name": "건국 수리중심자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98.5,
+      97,
+      95,
+      92.5,
+      90,
+      85,
+      80,
+      75
+    ]
+  },
+  "48": {
+    "name": "건국 언어중심인문",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98.5,
+      97,
+      95,
+      92.5,
+      90,
+      85,
+      80,
+      75
+    ]
+  },
+  "49": {
+    "name": "건국 어문사범",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98.5,
+      97,
+      95,
+      92.5,
+      90,
+      85,
+      80,
+      75
+    ]
+  },
+  "50": {
+    "name": "건국 자유",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98.5,
+      97,
+      95,
+      92.5,
+      90,
+      85,
+      80,
+      75
+    ]
+  },
+  "51": {
+    "name": "동국 수가산",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      149.25,
+      147.75,
+      142.5,
+      135,
+      105,
+      67.5,
+      15,
+      0
+    ]
+  },
+  "52": {
+    "name": "동국 과가산",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      149.25,
+      147.75,
+      142.5,
+      135,
+      105,
+      67.5,
+      15,
+      0
+    ]
+  },
+  "53": {
+    "name": "동국 수과가산",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      149.25,
+      147.75,
+      142.5,
+      135,
+      105,
+      67.5,
+      15,
+      0
+    ]
+  },
+  "54": {
+    "name": "동국 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      149.25,
+      147.75,
+      142.5,
+      135,
+      105,
+      67.5,
+      15,
+      0
+    ]
+  },
+  "55": {
+    "name": "동국 사가산(AI인문)",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      149.25,
+      147.75,
+      142.5,
+      135,
+      105,
+      67.5,
+      15,
+      0
+    ]
+  },
+  "56": {
+    "name": "홍익 자연서울",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      15,
+      14.25,
+      13.2,
+      11.85,
+      10.2,
+      8.25,
+      6,
+      3.4499999999999997,
+      0.6
+    ]
+  },
+  "57": {
+    "name": "홍익 통합서울",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      15,
+      14.25,
+      13.2,
+      11.85,
+      10.2,
+      8.25,
+      6,
+      3.4499999999999997,
+      0.6
+    ]
+  },
+  "62": {
+    "name": "숙명 인문",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      147,
+      141,
+      132,
+      120,
+      105,
+      90,
+      60,
+      30
+    ]
+  },
+  "63": {
+    "name": "숙명 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      147,
+      141,
+      132,
+      120,
+      105,
+      90,
+      60,
+      30
+    ]
+  },
+  "64": {
+    "name": "숙명 자유",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      147,
+      141,
+      132,
+      120,
+      105,
+      90,
+      60,
+      30
+    ]
+  },
+  "65": {
+    "name": "숙명 첨단공",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "66": {
+    "name": "숙명 자유x",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "67": {
+    "name": "국민 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      190,
+      180,
+      170,
+      160,
+      150,
+      140,
+      0
+    ]
+  },
+  "68": {
+    "name": "국민 인문",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      190,
+      180,
+      170,
+      160,
+      150,
+      140,
+      0
+    ]
+  },
+  "69": {
+    "name": "국민 자유자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      95,
+      90,
+      85,
+      80,
+      75,
+      70,
+      0
+    ]
+  },
+  "70": {
+    "name": "국민 자유인문",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      95,
+      90,
+      85,
+      80,
+      75,
+      70,
+      0
+    ]
+  },
+  "73": {
+    "name": "숭실 자유인문",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      194,
+      186,
+      173,
+      144,
+      116,
+      87,
+      44,
+      0
+    ]
+  },
+  "74": {
+    "name": "숭실 자연1",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      194,
+      186,
+      173,
+      144,
+      116,
+      87,
+      44,
+      0
+    ]
+  },
+  "75": {
+    "name": "숭실 자유자연2",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      194,
+      186,
+      173,
+      144,
+      116,
+      87,
+      44,
+      0
+    ]
+  },
+  "76": {
+    "name": "숭실 인문",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      194,
+      186,
+      173,
+      144,
+      116,
+      87,
+      44,
+      0
+    ]
+  },
+  "77": {
+    "name": "숭실 경상",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      194,
+      186,
+      173,
+      144,
+      116,
+      87,
+      44,
+      0
+    ]
+  },
+  "78": {
+    "name": "세종 자연가산5",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      198,
+      196,
+      194,
+      170,
+      150,
+      120,
+      100,
+      0
+    ]
+  },
+  "79": {
+    "name": "세종 자연가산3",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      198,
+      196,
+      194,
+      170,
+      150,
+      120,
+      100,
+      0
+    ]
+  },
+  "80": {
+    "name": "세종 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      195,
+      190,
+      185,
+      170,
+      150,
+      120,
+      100,
+      0
+    ]
+  },
+  "81": {
+    "name": "세종 창의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      198,
+      196,
+      194,
+      170,
+      150,
+      120,
+      100,
+      0
+    ]
+  },
+  "82": {
+    "name": "세종 국방항공",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      198,
+      196,
+      194,
+      170,
+      150,
+      120,
+      100,
+      0
+    ]
+  },
+  "83": {
+    "name": "세종 자유",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      198,
+      196,
+      194,
+      170,
+      150,
+      120,
+      100,
+      0
+    ]
+  },
+  "84": {
+    "name": "서울과기 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      195.55555555555554,
+      189.63,
+      177.78,
+      148.14814814814815,
+      118.5185185185185,
+      88.88888888888889,
+      44.44444444444444,
+      0
+    ]
+  },
+  "85": {
+    "name": "서울과기 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      195.55555555555554,
+      189.63,
+      177.78,
+      148.14814814814815,
+      118.5185185185185,
+      88.88888888888889,
+      44.44444444444444,
+      0
+    ]
+  },
+  "86": {
+    "name": "서울과기 기술경영자유전공",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      195.55555555555554,
+      189.63,
+      177.78,
+      148.14814814814815,
+      118.5185185185185,
+      88.88888888888889,
+      44.44444444444444,
+      0
+    ]
+  },
+  "88": {
+    "name": "이화 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      188,
+      176,
+      168,
+      160,
+      152,
+      144,
+      136
+    ]
+  },
+  "89": {
+    "name": "이화 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      188,
+      176,
+      168,
+      160,
+      152,
+      144,
+      136
+    ]
+  },
+  "90": {
+    "name": "이화 통합자연계",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      188,
+      176,
+      168,
+      160,
+      152,
+      144,
+      136
+    ],
+    "fixedBonus": 956.68393406519
+  },
+  "91": {
+    "name": "단국 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      147,
+      142.5,
+      127.5,
+      105,
+      60,
+      22.5,
+      7.5,
+      0
+    ]
+  },
+  "92": {
+    "name": "단국 건축",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      190,
+      170,
+      140,
+      80,
+      30,
+      10,
+      0
+    ]
+  },
+  "93": {
+    "name": "단국 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      190,
+      170,
+      140,
+      80,
+      30,
+      10,
+      0
+    ]
+  },
+  "94": {
+    "name": "단국 경영경제",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      190,
+      170,
+      140,
+      80,
+      30,
+      10,
+      0
+    ]
+  },
+  "95": {
+    "name": "단국 광역퇴계사회",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      190,
+      170,
+      140,
+      80,
+      30,
+      10,
+      0
+    ]
+  },
+  "96": {
+    "name": "광운 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      198,
+      195,
+      190,
+      182,
+      170,
+      158,
+      146,
+      0
+    ]
+  },
+  "97": {
+    "name": "광운 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      198,
+      195,
+      190,
+      182,
+      170,
+      158,
+      146,
+      0
+    ]
+  },
+  "98": {
+    "name": "광운 경영통상",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      198,
+      195,
+      190,
+      182,
+      170,
+      158,
+      146,
+      0
+    ]
+  },
+  "99": {
+    "name": "광운 정보융합학부",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      198,
+      195,
+      190,
+      182,
+      170,
+      158,
+      146,
+      0
+    ]
+  },
+  "100": {
+    "name": "명지 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      192,
+      180,
+      160,
+      120,
+      80,
+      40,
+      0
+    ]
+  },
+  "101": {
+    "name": "명지 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      192,
+      180,
+      160,
+      120,
+      80,
+      40,
+      0
+    ]
+  },
+  "102": {
+    "name": "명지 경영",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      192,
+      180,
+      160,
+      120,
+      80,
+      40,
+      0
+    ]
+  },
+  "103": {
+    "name": "상명 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      192,
+      188,
+      180,
+      160,
+      120,
+      80,
+      0
+    ]
+  },
+  "104": {
+    "name": "상명 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      192,
+      188,
+      180,
+      160,
+      120,
+      80,
+      0
+    ]
+  },
+  "105": {
+    "name": "가톨 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      195,
+      190,
+      185,
+      180,
+      175,
+      170,
+      160,
+      140
+    ]
+  },
+  "106": {
+    "name": "가톨 인문",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      195,
+      190,
+      185,
+      180,
+      175,
+      170,
+      160,
+      140
+    ]
+  },
+  "107": {
+    "name": "가톨 전형2",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -1,
+      -3,
+      -5,
+      -7,
+      -9,
+      -12,
+      -15,
+      -20
+    ]
+  },
+  "108": {
+    "name": "가톨 의예",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -1,
+      -3,
+      -5,
+      -7,
+      -9,
+      -12,
+      -15,
+      -20
+    ]
+  },
+  "109": {
+    "name": "가톨 약학",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -1,
+      -3,
+      -5,
+      -7,
+      -9,
+      -12,
+      -15,
+      -20
+    ]
+  },
+  "110": {
+    "name": "가톨 간호",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -1,
+      -3,
+      -5,
+      -7,
+      -9,
+      -12,
+      -15,
+      -20
+    ]
+  },
+  "111": {
+    "name": "아주 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      147,
+      144,
+      126,
+      90,
+      60,
+      30,
+      15,
+      0
+    ]
+  },
+  "112": {
+    "name": "아주 의학",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      95,
+      93.1,
+      91.2,
+      79.8,
+      57,
+      38,
+      19,
+      9.5,
+      0
+    ]
+  },
+  "113": {
+    "name": "아주 경영간호인문",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      147,
+      144,
+      126,
+      90,
+      60,
+      30,
+      15,
+      0
+    ]
+  },
+  "114": {
+    "name": "아주 인문사회",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      147,
+      144,
+      126,
+      90,
+      60,
+      30,
+      15,
+      0
+    ]
+  },
+  "115": {
+    "name": "인하 수과가산",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      96,
+      90,
+      80,
+      60,
+      40,
+      20,
+      0
+    ]
+  },
+  "116": {
+    "name": "인하 과가산B",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      96,
+      90,
+      80,
+      60,
+      40,
+      20,
+      0
+    ]
+  },
+  "117": {
+    "name": "인하 과가산A",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      96,
+      90,
+      80,
+      60,
+      40,
+      20,
+      0
+    ],
+    "fixedBonus": 924.2267545487748
+  },
+  "118": {
+    "name": "인하 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      148,
+      145,
+      135,
+      120,
+      100,
+      80,
+      40,
+      0
+    ]
+  },
+  "119": {
+    "name": "인하 사가산A",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      96,
+      90,
+      80,
+      60,
+      40,
+      20,
+      0
+    ],
+    "fixedBonus": 923.1129428018955
+  },
+  "120": {
+    "name": "인하 사가산B",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      96,
+      90,
+      80,
+      60,
+      40,
+      20,
+      0
+    ]
+  },
+  "121": {
+    "name": "인하 자유인문A",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      96,
+      90,
+      80,
+      60,
+      40,
+      20,
+      0
+    ],
+    "fixedBonus": 923.1129428018955
+  },
+  "122": {
+    "name": "인하 자유인문B",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      96,
+      90,
+      80,
+      60,
+      40,
+      20,
+      0
+    ]
+  },
+  "123": {
+    "name": "인하 자유자연A",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      96,
+      90,
+      80,
+      60,
+      40,
+      20,
+      0
+    ],
+    "fixedBonus": 916.2165180015345
+  },
+  "124": {
+    "name": "인하 자유자연B",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      96,
+      90,
+      80,
+      60,
+      40,
+      20,
+      0
+    ]
+  },
+  "125": {
+    "name": "한양대(ERICA) 사가산",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      149.25,
+      148.5,
+      147,
+      144.75,
+      142.5,
+      138.75,
+      135,
+      127.5
+    ]
+  },
+  "126": {
+    "name": "한양대(ERICA) 과가산",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      149.25,
+      148.5,
+      147,
+      144.75,
+      142.5,
+      138.75,
+      135,
+      127.5
+    ]
+  },
+  "127": {
+    "name": "한양대(ERICA) 자연가산없음",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      149.25,
+      148.5,
+      147,
+      144.75,
+      142.5,
+      138.75,
+      135,
+      127.5
+    ]
+  },
+  "128": {
+    "name": "한양대(ERICA) 자유",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      99.5,
+      99,
+      98,
+      96.5,
+      95,
+      92.5,
+      90,
+      85
+    ]
+  },
+  "129": {
+    "name": "인천 통합패션",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      95,
+      80,
+      70,
+      60,
+      30,
+      10,
+      0
+    ]
+  },
+  "130": {
+    "name": "인천 국제통상",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      95,
+      80,
+      70,
+      60,
+      30,
+      10,
+      0
+    ]
+  },
+  "132": {
+    "name": "인천 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      95,
+      80,
+      70,
+      60,
+      30,
+      10,
+      0
+    ]
+  },
+  "133": {
+    "name": "고려대(세종) 과탐가산",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      160,
+      140,
+      120,
+      80,
+      40,
+      20
+    ]
+  },
+  "134": {
+    "name": "고려대(세종) 과탐지정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      160,
+      140,
+      120,
+      80,
+      40,
+      20
+    ]
+  },
+  "135": {
+    "name": "고려대(세종) 약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      160,
+      140,
+      120,
+      80,
+      40,
+      20
+    ]
+  },
+  "136": {
+    "name": "고려대(세종) 자연미정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      160,
+      140,
+      120,
+      80,
+      40,
+      20
+    ]
+  },
+  "137": {
+    "name": "고려대(세종) 통합A",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      160,
+      140,
+      120,
+      80,
+      40,
+      20
+    ]
+  },
+  "138": {
+    "name": "고려대(세종) 통합B",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      160,
+      140,
+      120,
+      80,
+      40,
+      20
+    ]
+  },
+  "139": {
+    "name": "가천 의약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      19.6,
+      19,
+      18.400000000000002,
+      17.2,
+      16,
+      12,
+      10,
+      8,
+      6
+    ]
+  },
+  "140": {
+    "name": "가천 한",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      19.6,
+      19,
+      18.400000000000002,
+      17.2,
+      16,
+      12,
+      10,
+      8,
+      6
+    ]
+  },
+  "141": {
+    "name": "강릉 치",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      155,
+      140,
+      125,
+      110,
+      80
+    ]
+  },
+  "142": {
+    "name": "건국충주 의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      189.47,
+      178.95,
+      168.42,
+      157.89,
+      84.21,
+      63.16,
+      42.11,
+      0
+    ]
+  },
+  "143": {
+    "name": "건양 의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      192,
+      188,
+      184,
+      180,
+      176,
+      172,
+      168
+    ]
+  },
+  "144": {
+    "name": "경성 약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      160,
+      158.4,
+      156,
+      152,
+      148,
+      144,
+      140,
+      136,
+      132
+    ]
+  },
+  "145": {
+    "name": "계명 의약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      94,
+      90,
+      86,
+      82,
+      78,
+      74,
+      60
+    ]
+  },
+  "146": {
+    "name": "고신 의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      202.5,
+      199.5,
+      193.5,
+      184.5,
+      172.5,
+      163.5,
+      157.5,
+      154.5,
+      150
+    ]
+  },
+  "147": {
+    "name": "관동 의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      190,
+      184,
+      178,
+      172,
+      166,
+      160,
+      156
+    ]
+  },
+  "148": {
+    "name": "단국 의치약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      135,
+      105,
+      60,
+      45,
+      30,
+      22.5,
+      7.5,
+      0
+    ]
+  },
+  "149": {
+    "name": "대전 한",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      180,
+      160,
+      140,
+      120,
+      90,
+      60,
+      30,
+      0
+    ]
+  },
+  "150": {
+    "name": "대구가톨 의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      80,
+      72,
+      64,
+      56,
+      48,
+      40,
+      32,
+      24,
+      16
+    ]
+  },
+  "151": {
+    "name": "대구가톨 약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      80,
+      72,
+      64,
+      56,
+      48,
+      40,
+      32,
+      24,
+      16
+    ]
+  },
+  "152": {
+    "name": "대구 한자",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      96,
+      94,
+      92,
+      90,
+      88,
+      86,
+      84
+    ],
+    "fixedBonus": 600
+  },
+  "153": {
+    "name": "대구 한문",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      96,
+      94,
+      92,
+      90,
+      88,
+      86,
+      84
+    ],
+    "fixedBonus": 600
+  },
+  "154": {
+    "name": "덕성 약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      192,
+      160,
+      140,
+      120,
+      100,
+      80,
+      0
+    ]
+  },
+  "155": {
+    "name": "동국경주 의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      150,
+      140,
+      130,
+      120
+    ]
+  },
+  "156": {
+    "name": "동국경주 한자",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      150,
+      140,
+      130,
+      120
+    ]
+  },
+  "157": {
+    "name": "동국경주 한통",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      150,
+      140,
+      130,
+      120
+    ]
+  },
+  "158": {
+    "name": "동덕 약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      198,
+      192,
+      170,
+      140,
+      110,
+      80,
+      40,
+      0
+    ]
+  },
+  "159": {
+    "name": "동신 한",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      180,
+      160,
+      140,
+      120,
+      100,
+      80,
+      60,
+      40
+    ]
+  },
+  "160": {
+    "name": "동아 의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      198,
+      195,
+      192,
+      187,
+      182,
+      172,
+      162,
+      152
+    ]
+  },
+  "161": {
+    "name": "동의 한자",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      139,
+      131,
+      123,
+      115,
+      107,
+      99,
+      91,
+      83,
+      75
+    ]
+  },
+  "162": {
+    "name": "동의 한문",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      139,
+      131,
+      123,
+      115,
+      107,
+      99,
+      91,
+      83,
+      75
+    ]
+  },
+  "163": {
+    "name": "목포 약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      300,
+      285,
+      270,
+      255,
+      240,
+      225,
+      210,
+      195,
+      0
+    ],
+    "fixedBonus": 979.5
+  },
+  "164": {
+    "name": "삼육 약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      245,
+      237.5,
+      230,
+      217.5,
+      205,
+      175,
+      125,
+      100,
+      75
+    ]
+  },
+  "165": {
+    "name": "상지 한자",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      180,
+      150,
+      120,
+      110,
+      100,
+      70,
+      40,
+      20
+    ]
+  },
+  "166": {
+    "name": "상지 한통",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      180,
+      150,
+      120,
+      110,
+      100,
+      70,
+      40,
+      20
+    ]
+  },
+  "167": {
+    "name": "세명 한",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      90,
+      80,
+      70,
+      60,
+      50,
+      40,
+      30,
+      20
+    ]
+  },
+  "168": {
+    "name": "순천 약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      95,
+      90,
+      85,
+      80,
+      75,
+      70,
+      65,
+      60
+    ],
+    "fixedBonus": 280
+  },
+  "169": {
+    "name": "순천향 의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      57.599999999999994,
+      55.199999999999996,
+      51,
+      43.8,
+      33.6,
+      21.599999999999998,
+      11.4,
+      4.2,
+      0
+    ],
+    "fixedBonus": 800
+  },
+  "170": {
+    "name": "연세미래 의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      111.11111111111111,
+      105.55555555555556,
+      97.22222222222223,
+      83.33333333333333,
+      66.66666666666667,
+      44.44444444444444,
+      27.77777777777778,
+      17.22222222222222,
+      5.555555555555555
+    ]
+  },
+  "171": {
+    "name": "영남 의약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      80,
+      76,
+      72,
+      68,
+      64,
+      60,
+      56,
+      52,
+      48
+    ]
+  },
+  "172": {
+    "name": "우석 약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      80,
+      76,
+      72,
+      68,
+      64,
+      60,
+      56,
+      52,
+      48
+    ]
+  },
+  "173": {
+    "name": "우석 한",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      80,
+      76,
+      72,
+      68,
+      64,
+      60,
+      56,
+      52,
+      48
+    ]
+  },
+  "174": {
+    "name": "울산 의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      190,
+      186.2,
+      182.39999999999998,
+      176.7,
+      171,
+      161.5,
+      152,
+      133,
+      114
+    ]
+  },
+  "175": {
+    "name": "원광 의치약한",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      95,
+      90,
+      80,
+      70,
+      60,
+      55,
+      50,
+      45
+    ],
+    "fixedBonus": 536.8
+  },
+  "176": {
+    "name": "원광 통합치한",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      95,
+      90,
+      80,
+      70,
+      60,
+      55,
+      50,
+      45
+    ],
+    "fixedBonus": 538.6
+  },
+  "177": {
+    "name": "을지 의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      95,
+      90,
+      80,
+      70,
+      60,
+      50,
+      30,
+      10
+    ]
+  },
+  "178": {
+    "name": "인제 의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      135,
+      130,
+      123,
+      114,
+      103,
+      94,
+      87,
+      82,
+      79
+    ]
+  },
+  "179": {
+    "name": "인제 약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      135,
+      130,
+      123,
+      114,
+      103,
+      94,
+      87,
+      82,
+      79
+    ]
+  },
+  "181": {
+    "name": "조선 의치약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      195,
+      190,
+      185,
+      180,
+      175,
+      170,
+      165,
+      0
+    ]
+  },
+  "182": {
+    "name": "차의 약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      20,
+      19.200000000000003,
+      17.8,
+      15.4,
+      12,
+      8,
+      4.6000000000000005,
+      2.2,
+      0
+    ]
+  },
+  "183": {
+    "name": "한림 의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      95,
+      88,
+      76,
+      59,
+      39,
+      22,
+      10,
+      0
+    ]
+  },
+  "184": {
+    "name": "전남 의치약수",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      150,
+      140,
+      130,
+      0
+    ]
+  },
+  "185": {
+    "name": "강원 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      145.5,
+      141,
+      136.5,
+      121.5,
+      117,
+      112.5,
+      108,
+      0
+    ]
+  },
+  "186": {
+    "name": "강원 자연수과가산",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      97,
+      94,
+      91,
+      81,
+      78,
+      75,
+      72,
+      0
+    ]
+  },
+  "187": {
+    "name": "강원 자연미기가산",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      97,
+      94,
+      91,
+      81,
+      78,
+      75,
+      72,
+      0
+    ]
+  },
+  "188": {
+    "name": "강원 자연C",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      97,
+      94,
+      91,
+      81,
+      78,
+      75,
+      72,
+      0
+    ]
+  },
+  "189": {
+    "name": "경상 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      192,
+      188,
+      184,
+      180,
+      176,
+      172,
+      168
+    ]
+  },
+  "190": {
+    "name": "경상 자연미정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      192,
+      188,
+      184,
+      180,
+      176,
+      172,
+      168
+    ]
+  },
+  "191": {
+    "name": "경상 의약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      192,
+      188,
+      184,
+      180,
+      176,
+      172,
+      168
+    ]
+  },
+  "192": {
+    "name": "경상 수",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      196,
+      192,
+      188,
+      184,
+      180,
+      176,
+      172,
+      168
+    ]
+  },
+  "193": {
+    "name": "경북 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      125,
+      121.25,
+      115,
+      108.75,
+      102.5,
+      96.25,
+      90,
+      83.75,
+      77.5
+    ]
+  },
+  "194": {
+    "name": "경북 자유",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      125,
+      121.25,
+      115,
+      108.75,
+      102.5,
+      96.25,
+      90,
+      83.75,
+      77.5
+    ]
+  },
+  "195": {
+    "name": "경북 자연미정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      125,
+      121.25,
+      115,
+      108.75,
+      102.5,
+      96.25,
+      90,
+      83.75,
+      77.5
+    ]
+  },
+  "196": {
+    "name": "경북 수탐지정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      125,
+      121.25,
+      115,
+      108.75,
+      102.5,
+      96.25,
+      90,
+      83.75,
+      77.5
+    ]
+  },
+  "197": {
+    "name": "경북 자연상주",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      250,
+      242.5,
+      230,
+      217.5,
+      205,
+      192.5,
+      180,
+      167.5,
+      155
+    ]
+  },
+  "203": {
+    "name": "전남 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      150,
+      140,
+      130,
+      0
+    ]
+  },
+  "204": {
+    "name": "전남 자연미정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      150,
+      140,
+      130,
+      0
+    ]
+  },
+  "205": {
+    "name": "전남 수학지정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      150,
+      140,
+      130,
+      0
+    ]
+  },
+  "206": {
+    "name": "전남 수탐지정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      150,
+      140,
+      130,
+      0
+    ]
+  },
+  "207": {
+    "name": "전북 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      30,
+      27,
+      24,
+      18,
+      12,
+      9,
+      6,
+      3,
+      0
+    ]
+  },
+  "208": {
+    "name": "전북 자연미정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      30,
+      27,
+      24,
+      18,
+      12,
+      9,
+      6,
+      3,
+      0
+    ]
+  },
+  "209": {
+    "name": "전북 과탐지정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      30,
+      27,
+      24,
+      18,
+      12,
+      9,
+      6,
+      3,
+      0
+    ]
+  },
+  "210": {
+    "name": "전북 수탐지정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      30,
+      27,
+      24,
+      18,
+      12,
+      9,
+      6,
+      3,
+      0
+    ]
+  },
+  "211": {
+    "name": "전북 수교",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      30,
+      27,
+      24,
+      18,
+      12,
+      9,
+      6,
+      3,
+      0
+    ]
+  },
+  "212": {
+    "name": "제주 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      140,
+      120,
+      100,
+      60
+    ]
+  },
+  "213": {
+    "name": "제주 자연미정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      140,
+      120,
+      100,
+      60
+    ]
+  },
+  "214": {
+    "name": "제주 자연미정공대",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      140,
+      120,
+      100,
+      60
+    ]
+  },
+  "215": {
+    "name": "제주 과탐지정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      140,
+      120,
+      100,
+      60
+    ]
+  },
+  "216": {
+    "name": "제주 수학지정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      140,
+      120,
+      100,
+      60
+    ]
+  },
+  "217": {
+    "name": "제주 수탐지정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      140,
+      120,
+      100,
+      60
+    ]
+  },
+  "218": {
+    "name": "제주 수학가산",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      140,
+      120,
+      100,
+      60
+    ]
+  },
+  "219": {
+    "name": "제주 초등교육",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      180,
+      170,
+      160,
+      140,
+      120,
+      100,
+      60
+    ]
+  },
+  "220": {
+    "name": "제주 자유",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      250,
+      237.5,
+      225,
+      212.5,
+      200,
+      175,
+      150,
+      125,
+      75
+    ]
+  },
+  "221": {
+    "name": "충남 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -2,
+      -5,
+      -8,
+      -11,
+      -14,
+      -18,
+      -22,
+      -26
+    ]
+  },
+  "222": {
+    "name": "충남 과탐지정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -2,
+      -5,
+      -8,
+      -11,
+      -14,
+      -18,
+      -22,
+      -26
+    ]
+  },
+  "223": {
+    "name": "충남 자연미정과가산",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -2,
+      -5,
+      -8,
+      -11,
+      -14,
+      -18,
+      -22,
+      -26
+    ]
+  },
+  "224": {
+    "name": "충남 자연미정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -2,
+      -5,
+      -8,
+      -11,
+      -14,
+      -18,
+      -22,
+      -26
+    ]
+  },
+  "225": {
+    "name": "충남 수탐지정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -2,
+      -5,
+      -8,
+      -11,
+      -14,
+      -18,
+      -22,
+      -26
+    ]
+  },
+  "226": {
+    "name": "충남 자율전공",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      -2,
+      -5,
+      -8,
+      -11,
+      -14,
+      -18,
+      -22,
+      -26
+    ]
+  },
+  "227": {
+    "name": "충북 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      40,
+      38,
+      36,
+      34,
+      32,
+      30,
+      28,
+      16,
+      0
+    ],
+    "fixedBonus": 800
+  },
+  "228": {
+    "name": "충북 자연미정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      40,
+      38,
+      36,
+      34,
+      32,
+      30,
+      28,
+      16,
+      0
+    ],
+    "fixedBonus": 800
+  },
+  "229": {
+    "name": "충북 의약",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      40,
+      38,
+      36,
+      34,
+      32,
+      30,
+      28,
+      16,
+      0
+    ],
+    "fixedBonus": 800
+  },
+  "230": {
+    "name": "충북 과탐지정수의",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      40,
+      38,
+      36,
+      34,
+      32,
+      30,
+      28,
+      16,
+      0
+    ],
+    "fixedBonus": 800
+  },
+  "231": {
+    "name": "충북 수탐지정",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      40,
+      38,
+      36,
+      34,
+      32,
+      30,
+      28,
+      16,
+      0
+    ],
+    "fixedBonus": 800
+  },
+  "232": {
+    "name": "경인교대",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      250,
+      237.5,
+      225,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "233": {
+    "name": "경인교대 저소득",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      250,
+      237.5,
+      225,
+      212.5,
+      200,
+      187.5,
+      175,
+      162.5,
+      150
+    ]
+  },
+  "234": {
+    "name": "공주교대",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      125,
+      118.75,
+      112.5,
+      106.25,
+      100,
+      87.5,
+      75,
+      62.5,
+      50
+    ]
+  },
+  "235": {
+    "name": "광주교대",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      250,
+      240,
+      230,
+      220,
+      210,
+      200,
+      190,
+      180,
+      170
+    ]
+  },
+  "236": {
+    "name": "대구교대",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      195,
+      190,
+      185,
+      180,
+      175,
+      170,
+      165,
+      0
+    ]
+  },
+  "237": {
+    "name": "부산교대",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      190,
+      176,
+      152,
+      118,
+      78,
+      44,
+      20,
+      0
+    ]
+  },
+  "238": {
+    "name": "서울교대",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "239": {
+    "name": "전주교대",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      180,
+      160,
+      140,
+      100,
+      80,
+      60,
+      40,
+      0
+    ]
+  },
+  "240": {
+    "name": "진주교대",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      194,
+      188,
+      160,
+      140,
+      100,
+      60,
+      20,
+      0
+    ]
+  },
+  "241": {
+    "name": "청주교대",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      192,
+      178,
+      154,
+      120,
+      80,
+      46,
+      22,
+      0
+    ]
+  },
+  "242": {
+    "name": "춘천교대",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      95,
+      88,
+      76,
+      59,
+      39,
+      22,
+      10,
+      0
+    ]
+  },
+  "243": {
+    "name": "한국교원대",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      95,
+      88,
+      76,
+      59,
+      39,
+      22,
+      10,
+      0
+    ]
+  },
+  "244": {
+    "name": "가천 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      19.6,
+      19,
+      18.4,
+      17.2,
+      16,
+      12,
+      10,
+      8,
+      6
+    ],
+    "fixedBonus": 95.15
+  },
+  "245": {
+    "name": "가천 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      19.6,
+      19,
+      18.4,
+      17.2,
+      16,
+      12,
+      10,
+      8,
+      6
+    ],
+    "fixedBonus": 95.15
+  },
+  "246": {
+    "name": "경기 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      20,
+      19.6,
+      18.8,
+      17.2,
+      14,
+      10,
+      6,
+      2,
+      0
+    ]
+  },
+  "247": {
+    "name": "경기 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      20,
+      19.6,
+      18.8,
+      17.2,
+      14,
+      10,
+      6,
+      2,
+      0
+    ]
+  },
+  "248": {
+    "name": "경기 자유전공",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      20,
+      19.6,
+      18.8,
+      17.2,
+      14,
+      10,
+      6,
+      2,
+      0
+    ],
+    "fixedBonus": 95.15
+  },
+  "249": {
+    "name": "성신 자연가",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      97,
+      94,
+      85,
+      60,
+      40,
+      25,
+      10,
+      0
+    ]
+  },
+  "250": {
+    "name": "성신 자연나",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      97,
+      94,
+      85,
+      60,
+      40,
+      25,
+      10,
+      0
+    ]
+  },
+  "251": {
+    "name": "성신 AI",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      145.5,
+      141,
+      127.5,
+      90,
+      60,
+      37.5,
+      15,
+      0
+    ]
+  },
+  "252": {
+    "name": "성신 통합가",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      150,
+      145.5,
+      141,
+      127.5,
+      90,
+      60,
+      37.5,
+      15,
+      0
+    ]
+  },
+  "253": {
+    "name": "성신 통합나",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      97,
+      94,
+      85,
+      60,
+      40,
+      25,
+      10,
+      0
+    ]
+  },
+  "254": {
+    "name": "성신 간호자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      97,
+      94,
+      85,
+      60,
+      40,
+      25,
+      10,
+      0
+    ]
+  },
+  "255": {
+    "name": "성신 간호인문",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      97,
+      94,
+      85,
+      60,
+      40,
+      25,
+      10,
+      0
+    ]
+  },
+  "256": {
+    "name": "성신 통합사범",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      97,
+      94,
+      85,
+      60,
+      40,
+      25,
+      10,
+      0
+    ]
+  },
+  "257": {
+    "name": "성신 자유",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      97,
+      94,
+      85,
+      60,
+      40,
+      25,
+      10,
+      0
+    ]
+  },
+  "258": {
+    "name": "성신 첨단",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      97,
+      94,
+      85,
+      60,
+      40,
+      25,
+      10,
+      0
+    ]
+  },
+  "259": {
+    "name": "동덕 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      250,
+      242.5,
+      227.5,
+      205,
+      175,
+      137.5,
+      100,
+      50,
+      0
+    ]
+  },
+  "260": {
+    "name": "동덕 인문",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      300,
+      291,
+      273,
+      246,
+      210,
+      165,
+      120,
+      60,
+      0
+    ]
+  },
+  "261": {
+    "name": "연세미래 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      125,
+      118.75,
+      112.5,
+      100,
+      87.5,
+      75,
+      50,
+      25,
+      12.5
+    ]
+  },
+  "262": {
+    "name": "연세미래 보건자율",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      142.85714285714286,
+      135.71428571428572,
+      128.57142857142858,
+      114.28571428571429,
+      100,
+      85.71428571428572,
+      57.142857142857146,
+      28.571428571428573,
+      14.285714285714286
+    ]
+  },
+  "263": {
+    "name": "연세미래 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      333.3333333333333,
+      316.66666666666663,
+      300,
+      266.66666666666663,
+      233.33333333333331,
+      199.99999999999997,
+      133.33333333333331,
+      66.66666666666666,
+      33.33333333333333
+    ]
+  },
+  "265": {
+    "name": "덕성 자연",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      350,
+      343,
+      336,
+      280,
+      245,
+      210,
+      175,
+      140,
+      0
+    ]
+  },
+  "266": {
+    "name": "덕성 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      350,
+      343,
+      336,
+      280,
+      245,
+      210,
+      175,
+      140,
+      0
+    ]
+  },
+  "267": {
+    "name": "덕성 기준",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      96,
+      80,
+      70,
+      60,
+      50,
+      40,
+      0
+    ]
+  },
+  "268": {
+    "name": "연세대 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      158.33333333333331,
+      150.41666666666666,
+      138.54166666666666,
+      118.75,
+      95,
+      63.33333333333333,
+      39.58333333333333,
+      19.791666666666664,
+      7.916666666666666
+    ]
+  },
+  "269": {
+    "name": "성균 자연A국수",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "270": {
+    "name": "성균 자연B국수",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "271": {
+    "name": "성균 통합A국수",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "272": {
+    "name": "성균 통합B국수",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "273": {
+    "name": "성균 자연가",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      63.5,
+      63,
+      62,
+      50.5,
+      43,
+      38.5,
+      35.5,
+      32.5,
+      29.5
+    ]
+  },
+  "274": {
+    "name": "성균 자연나",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      63.5,
+      63,
+      62,
+      50.5,
+      43,
+      38.5,
+      35.5,
+      32.5,
+      29.5
+    ]
+  },
+  "275": {
+    "name": "성균 자연다",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      63.5,
+      63,
+      62,
+      50.5,
+      43,
+      38.5,
+      35.5,
+      32.5,
+      29.5
+    ]
+  },
+  "276": {
+    "name": "성균 통합가",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      63.5,
+      63,
+      62,
+      50.5,
+      43,
+      38.5,
+      35.5,
+      32.5,
+      29.5
+    ]
+  },
+  "277": {
+    "name": "성균 통합나",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      63.5,
+      63,
+      62,
+      50.5,
+      43,
+      38.5,
+      35.5,
+      32.5,
+      29.5
+    ]
+  },
+  "278": {
+    "name": "성균 통합다",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      63.5,
+      63,
+      62,
+      50.5,
+      43,
+      38.5,
+      35.5,
+      32.5,
+      29.5
+    ]
+  },
+  "279": {
+    "name": "성균 자연사범",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      63.5,
+      63,
+      62,
+      50.5,
+      43,
+      38.5,
+      35.5,
+      32.5,
+      29.5
+    ]
+  },
+  "280": {
+    "name": "성균 통합사범",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      63.5,
+      63,
+      62,
+      50.5,
+      43,
+      38.5,
+      35.5,
+      32.5,
+      29.5
+    ]
+  },
+  "281": {
+    "name": "성균 자연농어촌",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      63.5,
+      63,
+      62,
+      50.5,
+      43,
+      38.5,
+      35.5,
+      32.5,
+      29.5
+    ]
+  },
+  "282": {
+    "name": "성균 통합농어촌",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      63.5,
+      63,
+      62,
+      50.5,
+      43,
+      38.5,
+      35.5,
+      32.5,
+      29.5
+    ]
+  },
+  "283": {
+    "name": "중앙 예체능",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      100,
+      98,
+      95,
+      92,
+      86,
+      75,
+      64,
+      58,
+      50
+    ]
+  },
+  "284": {
+    "name": "부산 통합",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      200,
+      198,
+      195,
+      190,
+      185,
+      180,
+      175,
+      170,
+      165
+    ]
+  },
+  "286": {
+    "name": "부산 수탐지정한",
+    "englishDeduction": 200,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "287": {
+    "name": "부산 과탐지정",
+    "englishDeduction": 200,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "288": {
+    "name": "부산 과탐가산약",
+    "englishDeduction": 200,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "289": {
+    "name": "부산 자연미정",
+    "englishDeduction": 200,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "290": {
+    "name": "부산 의치",
+    "englishDeduction": 160,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "291": {
+    "name": "충남 수지정과가산수학교",
+    "englishDeduction": 0,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "292": {
+    "name": "강원제2캠 수과가산",
+    "englishDeduction": 100,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  },
+  "293": {
+    "name": "강원제2캠 통합",
+    "englishDeduction": 100,
+    "historyDeductions": [
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0,
+      0
+    ]
+  }
+}

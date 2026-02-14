@@ -23,17 +23,19 @@ THRESHOLDS = ClassificationThresholds()
 
 
 # ============================================================
-# 판정 레이블 (새 기준: 안정/적정/소신/도전/어려움)
+# 판정 레이블 (새 기준: 하향/안정/적정/소신/도전/어려움)
 # ============================================================
 class ClassificationLabel:
     """
     새로운 판정 기준 (suneung-calculator 기반):
-    - 안정: 내 점수 >= safeScore
+    - 하향: 내 점수가 safeScore보다 3% 이상 높음 (과도한 하향 지원)
+    - 안정: 내 점수 >= safeScore (3% 미만 초과)
     - 적정: 내 점수 >= appropriateScore
     - 소신: 내 점수 >= expectedScore
     - 도전: 내 점수 >= challengeScore
     - 어려움: 내 점수 < challengeScore
     """
+    DOWNGRADE = "⬇️ 하향"  # 새로 추가
     SAFE = "🟢 안정"
     APPROPRIATE = "🟡 적정"
     EXPECTED = "🟠 소신"

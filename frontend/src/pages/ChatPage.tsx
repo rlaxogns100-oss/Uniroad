@@ -1489,7 +1489,7 @@ export default function ChatPage() {
                 onClick={() => setIsPreregisterModalOpen(true)}
                 className="px-2.5 py-1.5 text-xs bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-lg font-medium hover:from-purple-600 hover:to-blue-600 transition-all shadow-sm"
               >
-                🎁 PRO 2개월 무료
+                🎁 PRO 무료 사전신청
               </button>
               
               {isAuthenticated ? (
@@ -1629,7 +1629,7 @@ export default function ChatPage() {
                 onClick={() => setIsPreregisterModalOpen(true)}
                 className="px-3 py-2 text-sm bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-lg font-medium hover:from-purple-600 hover:to-blue-600 transition-all shadow-sm"
               >
-                🎁 PRO 2개월 무료
+                🎁 PRO 무료 사전신청
               </button>
               
               {isAuthenticated ? (
