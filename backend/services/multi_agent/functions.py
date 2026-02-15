@@ -6,6 +6,7 @@ RAG Functions
 
 import os
 import json
+import re
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
 from dotenv import load_dotenv
@@ -25,6 +26,44 @@ try:
     _DEFAULT_EMBEDDING_MODEL = getattr(embedding_config, "DEFAULT_EMBEDDING_MODEL", "models/gemini-embedding-001")
 except Exception:
     _DEFAULT_EMBEDDING_MODEL = "models/gemini-embedding-001"
+
+
+def convert_5grade_to_9grade(grade_5: float) -> float:
+    """
+    5등급제 내신을 9등급제로 환산
+    - 5등급제 1.0 → 9등급제 1.4
+    - 5등급제 5.0 → 9등급제 9.0
+    - 선형 보간: y = 1.4 + (x - 1.0) * 1.9
+    """
+    return round(1.4 + (grade_5 - 1.0) * 1.9, 2)
+
+
+def parse_score_with_grade_system(score_str: str) -> Tuple[float, str]:
+    """
+    내신 점수 문자열을 파싱하여 (점수, 등급제) 튜플 반환
+    - "2.3(5)" → (2.3, "5등급제")
+    - "2.3(9)" → (2.3, "9등급제")
+    - "2.3" → (2.3, "9등급제")  # 기본값
+    
+    5등급제인 경우 자동으로 9등급제로 환산하여 반환
+    """
+    score_str = str(score_str).strip()
+    match = re.match(r"([\d.]+)\s*\((\d)\)", score_str)
+    
+    if match:
+        score = float(match.group(1))
+        system_indicator = match.group(2)
+        
+        if system_indicator == "5":
+            # 5등급제 → 9등급제 환산
+            converted_score = convert_5grade_to_9grade(score)
+            return converted_score, "5등급제"
+        else:
+            # 9등급제 (또는 다른 숫자)
+            return score, "9등급제"
+    
+    # 괄호 없으면 기본값 9등급제
+    return float(score_str), "9등급제"
 
 
 def _school_name_search_variants(university: str) -> List[str]:
@@ -750,17 +789,28 @@ async def _execute_consult_susi(params: Dict) -> Dict[str, Any]:
     if not isinstance(departments, list):
         departments = [departments] if departments else []
     
-    # 내신 점수 파싱
+    # 내신 점수 파싱 (5등급제 → 9등급제 자동 환산 포함)
     current_score = None
     target_score = None
+    current_grade_system = "9등급제"
+    target_grade_system = "9등급제"
+    
     if s_scores:
         if isinstance(s_scores, list):
-            if len(s_scores) >= 1:
-                current_score = float(s_scores[0]) if s_scores[0] else None
-            if len(s_scores) >= 2:
-                target_score = float(s_scores[1]) if s_scores[1] else None
+            if len(s_scores) >= 1 and s_scores[0]:
+                current_score, current_grade_system = parse_score_with_grade_system(s_scores[0])
+            if len(s_scores) >= 2 and s_scores[1]:
+                target_score, target_grade_system = parse_score_with_grade_system(s_scores[1])
         else:
-            current_score = float(s_scores)
+            current_score, current_grade_system = parse_score_with_grade_system(s_scores)
+    
+    # 디버그 로그: 5등급제 환산 여부 출력
+    if current_grade_system == "5등급제" or target_grade_system == "5등급제":
+        print(f"📊 5등급제 → 9등급제 환산 적용됨")
+        if current_score and current_grade_system == "5등급제":
+            print(f"   현재 내신: {s_scores[0] if isinstance(s_scores, list) else s_scores} → {current_score} (9등급제)")
+        if target_score and target_grade_system == "5등급제":
+            print(f"   목표 내신: {s_scores[1]} → {target_score} (9등급제)")
     
     # 비교할 내신 점수 결정 (목표 내신 우선, 없으면 현재 내신)
     compare_score = target_score if target_score else current_score

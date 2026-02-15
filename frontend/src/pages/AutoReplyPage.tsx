@@ -1606,7 +1606,7 @@ export default function AutoReplyPage() {
                                       {isLoading ? '...' : '재승인'}
                                     </button>
                                   )}
-                                  {(record.status === 'pending' || record.status === 'approved') && (
+                                  {(record.status === 'pending' || record.status === 'approved' || record.status === 'failed') && (
                                     <button
                                       onClick={() => handleCancelClick(record.id!)}
                                       disabled={isLoading}
