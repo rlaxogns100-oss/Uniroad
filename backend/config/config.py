@@ -1,8 +1,13 @@
 """
 환경 변수 설정
 """
+from pathlib import Path
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+
+# backend/config/config.py 기준으로 backend/.env 경로 고정 (RAG Lab 등 루트에서 실행해도 동일하게 로드)
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+_ENV_FILE = _BACKEND_DIR / ".env"
 
 
 class Settings(BaseSettings):
@@ -25,9 +30,13 @@ class Settings(BaseSettings):
     
     # Documents
     SCORE_CONVERSION_GUIDE_URL: str = ""  # 점수 변환 가이드 PDF URL (선택사항)
+
+    # Polar.sh 결제
+    POLAR_WEBHOOK_SECRET: str = ""  # Polar 대시보드 웹훅 엔드포인트에서 발급한 시크릿
+    POLAR_ACCESS_TOKEN: str = ""  # Polar API 토큰 (구독 상태 조회 등)
     
     class Config:
-        env_file = ".env"
+        env_file = str(_ENV_FILE) if _ENV_FILE.exists() else ".env"
         case_sensitive = True
         extra = "ignore"  # .env의 VITE_* 등 미정의 변수 무시
 

@@ -7,7 +7,7 @@ export default defineConfig(({ mode }) => ({
   plugins: [react()],
   server: {
     host: '0.0.0.0', // 모바일 접속 허용
-    port: 8147,
+    port: 8150,
     allowedHosts: true, // 같은 와이파이에서 로컬 IP(192.168.x.x 등)로 접속 허용
     proxy: {
       '/api': {

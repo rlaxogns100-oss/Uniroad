@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react'
 import axios from 'axios'
 import { trackGA4SignUp, trackGA4Login, trackUserAction } from '../utils/tracking'
 import { migrateMessages } from '../api/client'
+import { isCapacitorApp } from '../config'
 
 interface User {
   id: string
@@ -150,7 +151,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       trackGA4Login('email')
       
       // skipRedirect가 true면 리다이렉트 하지 않음 (모달에서 로그인 시)
-      if (!skipRedirect) {
+      // Capacitor 앱에서는 window.location.href 사용 시 전체 리로드로 하얀 화면이 나올 수 있으므로 리다이렉트 생략 → 호출부에서 navigate 사용
+      if (!skipRedirect && !isCapacitorApp()) {
         const isAdmin = userData?.name === '김도균' || userData?.email === 'herry0515@naver.com'
         window.location.href = isAdmin ? '/chat/login/admin' : '/chat/login'
       }
@@ -189,11 +191,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signInWithGoogle = async () => {
     try {
       sessionStorage.setItem('uniroad_oauth_provider', 'google')
+      // 앱(Capacitor)에서는 Google/Kakao가 capacitor:// 리다이렉트를 허용하지 않으므로 웹 URL로 콜백 받은 뒤 앱 딥링크로 복귀
+      const redirectTo = isCapacitorApp()
+        ? 'https://uni2road.com/oauth-callback'
+        : `${window.location.origin}/chat`
       const response = await axios.post('/api/auth/oauth/url', {
         provider: 'google',
-        redirect_to: `${window.location.origin}/chat`
+        redirect_to: redirectTo
       })
-      window.location.href = response.data.url
+      if (isCapacitorApp()) {
+        try {
+          const { Browser } = await import('@capacitor/browser')
+          await Browser.open({ url: response.data.url })
+        } catch {
+          window.location.href = response.data.url
+        }
+      } else {
+        window.location.href = response.data.url
+      }
     } catch (error: any) {
       sessionStorage.removeItem('uniroad_oauth_provider')
       throw new Error(error.response?.data?.detail || 'Google 로그인 실패')
@@ -203,11 +218,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const signInWithKakao = async () => {
     try {
       sessionStorage.setItem('uniroad_oauth_provider', 'kakao')
+      const redirectTo = isCapacitorApp()
+        ? 'https://uni2road.com/oauth-callback'
+        : `${window.location.origin}/chat`
       const response = await axios.post('/api/auth/oauth/url', {
         provider: 'kakao',
-        redirect_to: `${window.location.origin}/chat`
+        redirect_to: redirectTo
       })
-      window.location.href = response.data.url
+      if (isCapacitorApp()) {
+        try {
+          const { Browser } = await import('@capacitor/browser')
+          await Browser.open({ url: response.data.url })
+        } catch {
+          window.location.href = response.data.url
+        }
+      } else {
+        window.location.href = response.data.url
+      }
     } catch (error: any) {
       sessionStorage.removeItem('uniroad_oauth_provider')
       throw new Error(error.response?.data?.detail || '카카오 로그인 실패')

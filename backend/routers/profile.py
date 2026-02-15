@@ -61,6 +61,7 @@ class ProfileResponse(BaseModel):
     scores: Dict[str, Any]
     created_at: str
     updated_at: str
+    is_premium: Optional[bool] = None  # Polar 구독 시 metadata.is_premium
 
 
 @router.get("/me", response_model=ProfileResponse)
@@ -74,11 +75,14 @@ async def get_my_profile(user: dict = Depends(get_current_user)):
         if not profile:
             raise HTTPException(status_code=404, detail="프로필을 찾을 수 없습니다")
         
+        meta = profile.get("metadata") or {}
+        is_premium = meta.get("is_premium") if isinstance(meta, dict) else None
         return {
             "user_id": profile["user_id"],
             "scores": profile["scores"],
             "created_at": profile["created_at"],
             "updated_at": profile["updated_at"],
+            "is_premium": is_premium,
         }
     
     except HTTPException:
@@ -114,11 +118,14 @@ async def upsert_my_profile(
         # 저장된 프로필 다시 조회
         profile = await supabase_service.get_user_profile(user["user_id"])
         
+        meta = profile.get("metadata") or {}
+        is_premium = meta.get("is_premium") if isinstance(meta, dict) else None
         return {
             "user_id": profile["user_id"],
             "scores": profile["scores"],
             "created_at": profile["created_at"],
             "updated_at": profile["updated_at"],
+            "is_premium": is_premium,
         }
     
     except HTTPException:

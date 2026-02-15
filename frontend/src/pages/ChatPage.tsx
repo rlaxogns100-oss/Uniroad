@@ -8,6 +8,7 @@ import AuthModal from '../components/AuthModal'
 import PreregisterModal from '../components/PreregisterModal'
 import RollingPlaceholder from '../components/RollingPlaceholder'
 import ProfileForm from '../components/ProfileForm'
+import { SubscribeButton } from '../components/SubscribeButton'
 import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
 import { getSessionId, trackUserAction } from '../utils/tracking'
@@ -1272,6 +1273,22 @@ export default function ChatPage() {
             </button>
           </div>
 
+          {/* 생기부 세특 평가 */}
+          <div className="px-4 sm:px-6 pb-2">
+            <button
+              onClick={() => {
+                navigate('/school-record')
+                if (window.innerWidth < 640) setIsSideNavOpen(false)
+              }}
+              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
+            >
+              <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span className="text-sm font-medium text-left">생기부 세특 평가</span>
+            </button>
+          </div>
+
           {/* 5. 채팅 내역 (로그인한 경우에만 표시) */}
           {isAuthenticated && (
             <div className="flex-1 px-4 sm:px-6 pb-4 overflow-y-auto custom-scrollbar">
@@ -1389,6 +1406,14 @@ export default function ChatPage() {
           <div className="p-4 sm:p-6 pt-3 sm:pt-4">
             {isAuthenticated ? (
               <div>
+                <SubscribeButton
+                  className="w-full flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 mb-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 transition-colors font-medium text-xs sm:text-sm"
+                >
+                  <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
+                  </svg>
+                  구독하기
+                </SubscribeButton>
                 <div className="flex justify-center gap-3 mb-3 sm:mb-4">
                   <a 
                     href="/policy" 

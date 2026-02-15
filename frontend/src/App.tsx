@@ -17,6 +17,8 @@ import AdminAnalyticsFunnel from './pages/AdminAnalyticsFunnel'
 import AgentTestPage from './pages/AgentTestPage'
 import PolicyPage from './pages/PolicyPage'
 import SharedChatPage from './pages/SharedChatPage'
+import OAuthCallbackPage from './pages/OAuthCallbackPage'
+import SchoolRecordEvalPage from './pages/SchoolRecordEvalPage'
 import { useEffect } from 'react'
 import { initializeTracking, trackPageView } from './utils/tracking'
 
@@ -98,6 +100,7 @@ function App() {
         <div>
           <Routes>
             <Route path="/auth" element={<AuthPage />} />
+            <Route path="/oauth-callback" element={<OAuthCallbackPage />} />
             <Route path="/policy" element={<PolicyPage />} />
             <Route path="/" element={<Navigate to="/chat" replace />} />
             
@@ -129,6 +132,9 @@ function App() {
             
             {/* 로그인 없이 접근 가능한 채팅 */}
             <Route path="/chat" element={<ChatPage />} />
+            
+            {/* 생기부 세특 평가 */}
+            <Route path="/school-record" element={<SchoolRecordEvalPage />} />
             
             {/* 공유된 채팅 페이지 */}
             <Route path="/s/:shareId" element={<SharedChatPage />} />
