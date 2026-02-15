@@ -1243,7 +1243,7 @@ target_range 옵션 (새로운 판정 기준):
         
         for comment in history:
             if comment.get("id") == comment_id:
-                if comment.get("status") != "pending":
+                if comment.get("status") not in ["pending", "failed"]:
                     return {"success": False, "message": f"현재 상태({comment.get('status')})에서는 승인할 수 없습니다."}
                 
                 comment["status"] = "approved"

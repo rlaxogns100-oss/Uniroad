@@ -1597,7 +1597,16 @@ export default function AutoReplyPage() {
                                       {isLoading ? '...' : '승인취소'}
                                     </button>
                                   )}
-                                  {(record.status === 'failed' || record.status === 'cancelled') && (
+                                  {record.status === 'failed' && (
+                                    <button
+                                      onClick={() => handleApprove(record.id!)}
+                                      disabled={isLoading}
+                                      className="px-2 py-0.5 text-xs bg-green-500 hover:bg-green-600 text-white rounded disabled:opacity-50"
+                                    >
+                                      {isLoading ? '...' : '재승인'}
+                                    </button>
+                                  )}
+                                  {record.status === 'cancelled' && (
                                     <button
                                       onClick={() => handleRevert(record.id!)}
                                       disabled={isLoading}
