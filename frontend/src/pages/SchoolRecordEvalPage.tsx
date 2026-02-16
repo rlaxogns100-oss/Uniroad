@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
+import { getApiBaseUrl } from '../config'
 
 interface EvalResult {
   success: boolean
@@ -93,9 +94,9 @@ function CopyButton({ text }: { text: string }) {
     <button
       type="button"
       onClick={copy}
-      className="mt-3 px-4 py-2 text-xs font-medium rounded-lg bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm transition-colors"
+      className="px-4 py-2.5 text-sm font-medium rounded-xl bg-slate-800 hover:bg-slate-700 text-white shadow-[0_4px_14px_rgb(0,0,0,0.08)] transition-all duration-200"
     >
-      {copied ? '✓ 복사 완료!' : '📋 리라이팅 복사하기'}
+      {copied ? '✓ 복사 완료' : '📋 수정본 복사하기'}
     </button>
   )
 }
@@ -103,13 +104,23 @@ function CopyButton({ text }: { text: string }) {
 type ViewMode = 'list' | 'detail'
 type ListTab = 'all' | 'creative' | 'academicSubject' | 'academicIndividual' | 'behavior'
 
-/** 창의적체험활동상황 테이블 폼 (첨부 이미지 스타일) */
-function CreativeActivityForm() {
-  const [grade, setGrade] = useState(1)
-  const [autonomousNotes, setAutonomousNotes] = useState('')
-  const [clubNotes, setClubNotes] = useState('')
-  const [careerNotes, setCareerNotes] = useState('')
+/** 창의적체험활동상황 — 학년별 데이터 */
+export type CreativeActivityGrade = { autonomousNotes: string; clubNotes: string; careerNotes: string }
+export type CreativeActivityData = { byGrade: Record<1 | 2 | 3, CreativeActivityGrade> }
 
+const EMPTY_CREATIVE_GRADE: CreativeActivityGrade = { autonomousNotes: '', clubNotes: '', careerNotes: '' }
+
+function CreativeActivityForm({
+  selectedGrade,
+  onGradeChange,
+  data,
+  onChange,
+}: {
+  selectedGrade: 1 | 2 | 3
+  onGradeChange: (g: 1 | 2 | 3) => void
+  data: CreativeActivityGrade
+  onChange: (d: CreativeActivityGrade) => void
+}) {
   return (
     <div className="rounded-b-lg border border-t-0 border-gray-200 overflow-hidden">
       <div className="bg-gray-700 text-white px-4 py-3 font-bold text-base">
@@ -118,15 +129,16 @@ function CreativeActivityForm() {
       <div className="border border-gray-200 overflow-x-auto">
         <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 bg-gray-50">
           <span className="text-sm font-semibold text-gray-700">학년</span>
-          <select
-            value={grade}
-            onChange={(e) => setGrade(Number(e.target.value) || 1)}
-            className="px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm"
-          >
-            <option value={1}>1학년</option>
-            <option value={2}>2학년</option>
-            <option value={3}>3학년</option>
-          </select>
+          {([1, 2, 3] as const).map((g) => (
+            <button
+              key={g}
+              type="button"
+              onClick={() => onGradeChange(g)}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${selectedGrade === g ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+            >
+              {g}학년
+            </button>
+          ))}
         </div>
         <table className="w-full text-sm text-left border-collapse">
           <thead>
@@ -136,43 +148,22 @@ function CreativeActivityForm() {
             </tr>
           </thead>
           <tbody className="bg-white">
-            {/* 자율활동 */}
             <tr className="border-b border-gray-200 align-top">
               <td className="py-2 px-3 border-r border-gray-200 align-middle">자율활동</td>
               <td className="py-2 px-3">
-                <textarea
-                  placeholder="입력"
-                  value={autonomousNotes}
-                  onChange={(e) => setAutonomousNotes(e.target.value)}
-                  className="w-full min-h-[80px] px-3 py-2 border border-gray-300 rounded resize-y"
-                  rows={3}
-                />
+                <textarea placeholder="입력" value={data.autonomousNotes} onChange={(e) => onChange({ ...data, autonomousNotes: e.target.value })} className="w-full min-h-[80px] px-3 py-2 border border-gray-300 rounded resize-y" rows={3} />
               </td>
             </tr>
-            {/* 동아리활동 */}
             <tr className="border-b border-gray-200 align-top">
               <td className="py-2 px-3 border-r border-gray-200 align-middle">동아리활동</td>
               <td className="py-2 px-3">
-                <textarea
-                  placeholder="입력"
-                  value={clubNotes}
-                  onChange={(e) => setClubNotes(e.target.value)}
-                  className="w-full min-h-[80px] px-3 py-2 border border-gray-300 rounded resize-y"
-                  rows={3}
-                />
+                <textarea placeholder="입력" value={data.clubNotes} onChange={(e) => onChange({ ...data, clubNotes: e.target.value })} className="w-full min-h-[80px] px-3 py-2 border border-gray-300 rounded resize-y" rows={3} />
               </td>
             </tr>
-            {/* 진로활동 */}
             <tr className="border-b border-gray-200 align-top">
               <td className="py-2 px-3 border-r border-gray-200 align-middle">진로활동</td>
               <td className="py-2 px-3">
-                <textarea
-                  placeholder="입력"
-                  value={careerNotes}
-                  onChange={(e) => setCareerNotes(e.target.value)}
-                  className="w-full min-h-[80px] px-3 py-2 border border-gray-300 rounded resize-y"
-                  rows={3}
-                />
+                <textarea placeholder="입력" value={data.careerNotes} onChange={(e) => onChange({ ...data, careerNotes: e.target.value })} className="w-full min-h-[80px] px-3 py-2 border border-gray-300 rounded resize-y" rows={3} />
               </td>
             </tr>
           </tbody>
@@ -182,23 +173,359 @@ function CreativeActivityForm() {
   )
 }
 
-/** 교과 학습 발달 상황 테이블 폼 (과목 + 세부능력 및 특기사항) */
-function AcademicDevForm() {
-  const [grade, setGrade] = useState(1)
-  const [subjects, setSubjects] = useState(['', '', ''])
-  const [notes, setNotes] = useState(['', '', ''])
+export type AcademicDevGrade = { subjects: string[]; notes: string[] }
+export type AcademicDevData = { byGrade: Record<1 | 2 | 3, AcademicDevGrade> }
 
+/** 4단계 필승 구조 라벨 */
+const STEP_LABELS: Record<string, string> = { 계기: '계기(동기)', 심화: '심화(탐구)', 역량: '역량(결과)', 변화: '변화(성장)' }
+
+/** 하이라이트 타입 (백엔드 API 응답 스키마) */
+interface Highlight {
+  type: 'good' | 'bad'
+  step: string
+  label: string
+  feedback: string
+  indices: [number, number]
+  quote: string
+}
+
+/** 4단계 구조 분석 (계기/심화/역량/변화) */
+interface StructureStep {
+  status: 'ok' | 'warn' | 'missing'
+  summary: string
+  detail: string
+}
+
+/** 합격 체크리스트 */
+interface ChecklistResult {
+  actionVerbs: boolean
+  concreteData: boolean
+  curriculumLink: boolean
+  uniqueQuestion: boolean
+}
+
+/** 새로운 진단 결과 타입 */
+interface DiagnosisResultV2 {
+  success: boolean
+  original_text: string
+  highlights: Highlight[]
+  goodPoints: Array<{ step: string; label: string; feedback: string; quote: string }>
+  reconsiderPoints: Array<{ step: string; label: string; feedback: string; quote: string }>
+  rewritten_version?: string
+  structure_analysis?: Record<string, StructureStep>
+  checklist?: ChecklistResult
+  admission_comment?: string
+  error: string | null
+}
+
+/** indices 기반 하이라이팅 렌더링 */
+function renderHighlightedText(
+  text: string,
+  highlights: Highlight[],
+  activeHighlightIndex: number | null,
+  onHighlightClick: (index: number) => void
+): React.ReactNode {
+  if (!highlights || highlights.length === 0) return text
+
+  // 유효한 인덱스를 가진 하이라이트만 필터링
+  const validHighlights = highlights
+    .map((h, originalIndex) => ({ ...h, originalIndex }))
+    .filter(h => h.indices[0] >= 0 && h.indices[1] > h.indices[0] && h.indices[1] <= text.length)
+    .sort((a, b) => a.indices[0] - b.indices[0])
+
+  if (validHighlights.length === 0) return text
+
+  // 겹치는 구간 제거 (먼저 나온 것 우선)
+  const nonOverlapping: typeof validHighlights = []
+  for (const h of validHighlights) {
+    const overlaps = nonOverlapping.some(
+      existing => h.indices[0] < existing.indices[1] && h.indices[1] > existing.indices[0]
+    )
+    if (!overlaps) {
+      nonOverlapping.push(h)
+    }
+  }
+
+  // JSX 생성
+  const parts: React.ReactNode[] = []
+  let lastIdx = 0
+
+  nonOverlapping.forEach((h, i) => {
+    // 하이라이트 전 텍스트
+    if (h.indices[0] > lastIdx) {
+      parts.push(<span key={`text-${i}`}>{text.slice(lastIdx, h.indices[0])}</span>)
+    }
+
+    // 하이라이트 영역
+    const isActive = activeHighlightIndex === h.originalIndex
+    const baseClass = h.type === 'good'
+      ? 'bg-emerald-100 text-emerald-900'
+      : 'bg-red-100 text-red-900'
+    const activeClass = isActive ? 'ring-2 ring-offset-1 ring-blue-500 animate-pulse' : ''
+
+    parts.push(
+      <span
+        key={`highlight-${i}`}
+        id={`highlight-${h.originalIndex}`}
+        className={`${baseClass} ${activeClass} cursor-pointer rounded px-0.5 transition-all duration-300`}
+        onClick={() => onHighlightClick(h.originalIndex)}
+        title={`[${h.step}] ${h.label}`}
+      >
+        {text.slice(h.indices[0], h.indices[1])}
+      </span>
+    )
+    lastIdx = h.indices[1]
+  })
+
+  // 마지막 텍스트
+  if (lastIdx < text.length) {
+    parts.push(<span key="text-end">{text.slice(lastIdx)}</span>)
+  }
+
+  return <>{parts}</>
+}
+
+/** 과목별 진단 결과 표시 (2-Column Layout) — indices 기반 하이라이팅 */
+function SubjectDiagnosisPanel({
+  subject,
+  content,
+  diagnosis,
+  loading,
+}: {
+  subject: string
+  content: string
+  diagnosis: DiagnosisResultV2 | null
+  loading: boolean
+}) {
+  const [activeHighlight, setActiveHighlight] = useState<number | null>(null)
+  const textContainerRef = useRef<HTMLDivElement>(null)
+
+  // 피드백 카드 클릭 시 해당 하이라이트로 스크롤
+  const scrollToHighlight = (index: number) => {
+    setActiveHighlight(index)
+    const element = document.getElementById(`highlight-${index}`)
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+    // 3초 후 활성 상태 해제
+    setTimeout(() => setActiveHighlight(null), 3000)
+  }
+
+  // 하이라이트 클릭 시 해당 피드백 카드로 스크롤
+  const scrollToFeedback = (index: number) => {
+    setActiveHighlight(index)
+    const element = document.getElementById(`feedback-${index}`)
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+    setTimeout(() => setActiveHighlight(null), 3000)
+  }
+
+  const highlights = diagnosis?.highlights || []
+  const [textView, setTextView] = useState<'original' | 'rewritten'>('original')
+  const hasRewritten = Boolean(diagnosis?.rewritten_version)
+  const charCount = content.length
+  const charLimit = 4000
+
+  return (
+    <div className="rounded-2xl bg-white shadow-[0_8px_30px_rgb(0,0,0,0.06)] overflow-hidden mb-6">
+      <div className="px-6 py-4 bg-slate-800">
+        <h4 className="text-base font-semibold text-white font-sans">{subject || '과목명 없음'}</h4>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1.4fr)_minmax(360px,1fr)] gap-12 lg:gap-16 p-6 lg:p-8">
+        {/* 왼쪽: 원문 / S등급 수정본 탭 + 본문 (에디토리얼) */}
+        <div className="min-w-0">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex rounded-lg bg-slate-100/80 p-1 font-sans">
+              <button
+                type="button"
+                onClick={() => setTextView('original')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors duration-200 ${
+                  textView === 'original' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600 hover:text-slate-800'
+                }`}
+              >
+                📄 원본 보기
+              </button>
+              <button
+                type="button"
+                onClick={() => setTextView('rewritten')}
+                disabled={!hasRewritten}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
+                  textView === 'rewritten' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-600 hover:text-slate-800'
+                }`}
+              >
+                ✨ S등급 수정본
+              </button>
+            </div>
+            {textView === 'original' && (
+              <div className="flex items-center gap-4 text-xs text-slate-500 font-sans">
+                <span className="tabular-nums">{charCount} / {charLimit}</span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block w-3 h-3 rounded bg-emerald-100 border border-emerald-300" />
+                  <span>잘된 점</span>
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="inline-block w-3 h-3 rounded bg-red-100 border border-red-300" />
+                  <span>보완점</span>
+                </span>
+              </div>
+            )}
+          </div>
+          <div
+            ref={textContainerRef}
+            className={`whitespace-pre-wrap rounded-xl p-6 min-h-[320px] max-h-[520px] overflow-y-auto leading-relaxed text-sm text-gray-700 ${
+              textView === 'original' ? 'bg-slate-50/80' : 'bg-indigo-50/30'
+            }`}
+          >
+            {textView === 'original' ? (
+              content ? (
+                loading ? content : renderHighlightedText(content, highlights, activeHighlight, scrollToFeedback)
+              ) : (
+                <span className="text-gray-400">(내용 없음)</span>
+              )
+            ) : hasRewritten ? (
+              <p className="leading-relaxed text-gray-700">{diagnosis!.rewritten_version}</p>
+            ) : (
+              <span className="text-gray-400">진단 후 S등급 수정본을 확인할 수 있습니다.</span>
+            )}
+          </div>
+          {textView === 'rewritten' && hasRewritten && diagnosis?.rewritten_version && (
+            <div className="mt-4">
+              <CopyButton text={diagnosis.rewritten_version} />
+            </div>
+          )}
+        </div>
+
+        {/* 오른쪽: 입학사정관 분석 노트 — 스티키 + 페이퍼 섀도우 */}
+        <div className="lg:sticky lg:top-8 lg:self-start min-w-0 flex flex-col">
+          <div className="rounded-2xl bg-white shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-5 lg:p-6 flex-1 min-h-0 overflow-hidden flex flex-col">
+            <h5 className="text-sm font-semibold text-slate-800 mb-4 font-sans">📌 입학사정관 분석 노트</h5>
+          {loading ? (
+            <div className="rounded-xl bg-slate-50/80 p-8 text-center">
+              <div className="animate-spin w-6 h-6 border-2 border-slate-300 border-t-slate-600 rounded-full mx-auto mb-2" />
+              <p className="text-sm text-slate-500 font-sans">4단계 필승구조 기준으로 분석 중...</p>
+            </div>
+          ) : diagnosis?.error ? (
+            <div className="rounded-xl bg-rose-50/60 p-5">
+              <p className="text-sm text-rose-700 font-sans">{diagnosis.error}</p>
+            </div>
+          ) : diagnosis ? (
+            <div className="space-y-5 flex-1 min-h-0 overflow-y-auto pr-1 font-sans">
+              {diagnosis.admission_comment && (
+                <div className="rounded-xl bg-amber-50/40 p-4">
+                  <p className="text-xs font-semibold text-amber-800/90 mb-1">💡 입학사정관의 코멘트</p>
+                  <p className="text-sm text-slate-700 leading-relaxed">{diagnosis.admission_comment}</p>
+                </div>
+              )}
+
+              {highlights.filter(h => h.type === 'good').map((h, i) => {
+                const originalIndex = highlights.findIndex(x => x === h)
+                const isActive = activeHighlight === originalIndex
+                return (
+                  <div
+                    key={`good-${i}`}
+                    id={`feedback-${originalIndex}`}
+                    onClick={() => h.indices[0] >= 0 && scrollToHighlight(originalIndex)}
+                    className={`p-4 rounded-xl cursor-pointer transition-all duration-200 ${
+                      isActive ? 'bg-emerald-100/80 ring-2 ring-emerald-300/50' : 'bg-emerald-50/50 hover:bg-emerald-100/60'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-emerald-600 text-lg flex-shrink-0">👍</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          {h.step && (
+                            <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-200/80 text-emerald-800">
+                              {STEP_LABELS[h.step] || h.step}
+                            </span>
+                          )}
+                          {h.label && <span className="text-xs font-medium text-emerald-700">{h.label}</span>}
+                        </div>
+                        <p className="text-sm text-slate-700 leading-relaxed">{h.feedback}</p>
+                        {h.quote && h.indices[0] >= 0 && (
+                          <p className="mt-2 text-xs text-emerald-600/90 italic truncate">
+                            "{h.quote.slice(0, 50)}{h.quote.length > 50 ? '...' : ''}"
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+
+              {highlights.filter(h => h.type === 'bad').map((h, i) => {
+                const originalIndex = highlights.findIndex(x => x === h)
+                const isActive = activeHighlight === originalIndex
+                const hasQuote = h.indices[0] >= 0
+                return (
+                  <div
+                    key={`bad-${i}`}
+                    id={`feedback-${originalIndex}`}
+                    onClick={() => hasQuote && scrollToHighlight(originalIndex)}
+                    className={`p-4 rounded-xl transition-all duration-200 ${
+                      hasQuote ? 'cursor-pointer' : 'cursor-default'
+                    } ${isActive ? 'bg-rose-100/80 ring-2 ring-rose-300/50' : 'bg-rose-50/50 hover:bg-rose-100/60'}`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="text-rose-500 text-lg flex-shrink-0">💡</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          {h.step && (
+                            <span className="inline-block px-2 py-0.5 rounded-md text-[10px] font-semibold bg-rose-200/80 text-rose-800">
+                              {STEP_LABELS[h.step] || h.step}
+                            </span>
+                          )}
+                          {h.label && <span className="text-xs font-medium text-rose-700">{h.label}</span>}
+                        </div>
+                        <p className="text-sm text-slate-700 leading-relaxed">{h.feedback}</p>
+                        {!hasQuote && (
+                          <p className="mt-2 text-xs text-rose-500 italic">(원문에 해당 내용이 없습니다 - 추가 작성 필요)</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+
+              {highlights.length === 0 && (
+                <div className="rounded-xl bg-slate-50/60 p-5">
+                  <p className="text-sm text-slate-500">진단 결과가 없습니다.</p>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-xl bg-slate-50/80 p-5">
+              <p className="text-sm text-slate-400">진단 받기를 눌러주세요.</p>
+            </div>
+          )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function AcademicDevForm({
+  selectedGrade,
+  onGradeChange,
+  data,
+  onChange,
+}: {
+  selectedGrade: 1 | 2 | 3
+  onGradeChange: (g: 1 | 2 | 3) => void
+  data: AcademicDevGrade
+  onChange: (d: AcademicDevGrade) => void
+}) {
   const setSubject = (i: number, v: string) => {
-    const next = [...subjects]
+    const next = [...data.subjects]
     next[i] = v
-    setSubjects(next)
+    onChange({ ...data, subjects: next })
   }
   const setNote = (i: number, v: string) => {
-    const next = [...notes]
+    const next = [...data.notes]
     next[i] = v
-    setNotes(next)
+    onChange({ ...data, notes: next })
   }
-
   return (
     <div className="rounded-b-lg border border-t-0 border-gray-200 overflow-hidden">
       <div className="bg-gray-700 text-white px-4 py-3 font-bold text-base">
@@ -207,43 +534,27 @@ function AcademicDevForm() {
       <div className="border border-gray-200 overflow-x-auto">
         <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 bg-gray-50">
           <span className="text-sm font-semibold text-gray-700">학년</span>
-          <select
-            value={grade}
-            onChange={(e) => setGrade(Number(e.target.value) || 1)}
-            className="px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm"
-          >
-            <option value={1}>1학년</option>
-            <option value={2}>2학년</option>
-            <option value={3}>3학년</option>
-          </select>
+          {([1, 2, 3] as const).map((g) => (
+            <button key={g} type="button" onClick={() => onGradeChange(g)} className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${selectedGrade === g ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'}`}>
+              {g}학년
+            </button>
+          ))}
         </div>
         <table className="w-full text-sm text-left border-collapse">
           <thead>
-            <tr className="border-b border-gray-300 bg-white">
-              <th className="w-32 py-3 px-3 border-r border-gray-200 font-bold text-gray-900">과목</th>
-              <th className="py-3 px-3 font-bold text-gray-900">세부능력 및 특기사항</th>
+            <tr className="border-b border-gray-200 bg-gray-50">
+              <th className="w-32 py-3 px-3 border-r border-gray-200 font-semibold text-gray-900">과목</th>
+              <th className="py-3 px-3 font-semibold text-gray-900">세부능력 및 특기사항</th>
             </tr>
           </thead>
           <tbody className="bg-white">
             {[0, 1, 2].map((i) => (
               <tr key={i} className="border-b border-gray-200 align-top">
                 <td className="py-2 px-3 border-r border-gray-200 align-top">
-                  <input
-                    type="text"
-                    placeholder="입력"
-                    value={subjects[i]}
-                    onChange={(e) => setSubject(i, e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 placeholder:text-gray-400"
-                  />
+                  <input type="text" placeholder="입력" value={data.subjects[i] ?? ''} onChange={(e) => setSubject(i, e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 placeholder:text-gray-400" />
                 </td>
                 <td className="py-2 px-3">
-                  <textarea
-                    placeholder="입력"
-                    value={notes[i]}
-                    onChange={(e) => setNote(i, e.target.value)}
-                    className="w-full min-h-[100px] px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 placeholder:text-gray-400 resize-y"
-                    rows={4}
-                  />
+                  <textarea placeholder="입력" value={data.notes[i] ?? ''} onChange={(e) => setNote(i, e.target.value)} className="w-full min-h-[100px] px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 placeholder:text-gray-400 resize-y" rows={4} />
                 </td>
               </tr>
             ))}
@@ -254,23 +565,26 @@ function AcademicDevForm() {
   )
 }
 
-/** 개인별세부능력및특기사항 폼 */
-function IndividualDevForm() {
-  const [grade, setGrade] = useState(1)
-  const [items, setItems] = useState(['', '', ''])
-  const [notes, setNotes] = useState(['', '', ''])
+/** 개인별 — 학년별 하나의 입력란 (행동특성과 동일 레이아웃) */
+export type IndividualDevGrade = { content: string }
+export type IndividualDevData = { showInputs: boolean; byGrade: Record<1 | 2 | 3, IndividualDevGrade> }
 
-  const setItem = (i: number, v: string) => {
-    const next = [...items]
-    next[i] = v
-    setItems(next)
+function IndividualDevForm({
+  selectedGrade,
+  onGradeChange,
+  data,
+  onChange,
+}: {
+  selectedGrade: 1 | 2 | 3
+  onGradeChange: (g: 1 | 2 | 3) => void
+  data: IndividualDevData
+  onChange: (d: IndividualDevData) => void
+}) {
+  const byGrade = data?.byGrade ?? { 1: { content: '' }, 2: { content: '' }, 3: { content: '' } }
+  const gradeData = byGrade[selectedGrade] ?? { content: '' }
+  const setContent = (v: string) => {
+    onChange({ ...data, byGrade: { ...byGrade, [selectedGrade]: { content: v } } })
   }
-  const setNote = (i: number, v: string) => {
-    const next = [...notes]
-    next[i] = v
-    setNotes(next)
-  }
-
   return (
     <div className="rounded-b-lg border border-t-0 border-gray-200 overflow-hidden">
       <div className="bg-gray-700 text-white px-4 py-3 font-bold text-base">
@@ -279,46 +593,31 @@ function IndividualDevForm() {
       <div className="border border-gray-200 overflow-x-auto">
         <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 bg-gray-50">
           <span className="text-sm font-semibold text-gray-700">학년</span>
-          <select
-            value={grade}
-            onChange={(e) => setGrade(Number(e.target.value) || 1)}
-            className="px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm"
-          >
-            <option value={1}>1학년</option>
-            <option value={2}>2학년</option>
-            <option value={3}>3학년</option>
-          </select>
+          {([1, 2, 3] as const).map((g) => (
+            <button
+              key={g}
+              type="button"
+              onClick={() => onGradeChange(g)}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${selectedGrade === g ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+            >
+              {g}학년
+            </button>
+          ))}
         </div>
         <table className="w-full text-sm text-left border-collapse">
           <thead>
-            <tr className="border-b border-gray-300 bg-white">
-              <th className="w-32 py-3 px-3 border-r border-gray-200 font-bold text-gray-900">구분</th>
-              <th className="py-3 px-3 font-bold text-gray-900">세부능력 및 특기사항</th>
+            <tr className="border-b border-gray-200 bg-gray-50">
+              <th className="w-28 py-3 px-3 border-r border-gray-200 font-semibold text-gray-900">영역</th>
+              <th className="py-3 px-3 font-semibold text-gray-900">특기사항</th>
             </tr>
           </thead>
           <tbody className="bg-white">
-            {[0, 1, 2].map((i) => (
-              <tr key={i} className="border-b border-gray-200 align-top">
-                <td className="py-2 px-3 border-r border-gray-200 align-top">
-                  <input
-                    type="text"
-                    placeholder="입력"
-                    value={items[i]}
-                    onChange={(e) => setItem(i, e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 placeholder:text-gray-400"
-                  />
-                </td>
-                <td className="py-2 px-3">
-                  <textarea
-                    placeholder="입력"
-                    value={notes[i]}
-                    onChange={(e) => setNote(i, e.target.value)}
-                    className="w-full min-h-[100px] px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 placeholder:text-gray-400 resize-y"
-                    rows={4}
-                  />
-                </td>
-              </tr>
-            ))}
+            <tr className="border-b border-gray-200 align-top">
+              <td className="py-2 px-3 border-r border-gray-200 align-middle">개인별세부능력및특기사항</td>
+              <td className="py-2 px-3">
+                <textarea placeholder="입력" value={gradeData.content} onChange={(e) => setContent(e.target.value)} className="w-full min-h-[80px] px-3 py-2 border border-gray-300 rounded resize-y" rows={3} />
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>
@@ -326,85 +625,183 @@ function IndividualDevForm() {
   )
 }
 
-/** 행동특성 및 종합의견 폼 (학년 + 행동특성 및 종합의견 테이블) */
-function BehaviorOpinionForm() {
-  const [showInputs, setShowInputs] = useState(false)
-  const [grade, setGrade] = useState(1)
-  const [opinions, setOpinions] = useState(['', '', ''])
+/** 행동특성 — opinions[0]=1학년, [1]=2학년, [2]=3학년 */
+export type BehaviorOpinionData = { showInputs: boolean; opinions: string[] }
 
-  const setOpinion = (i: number, v: string) => {
-    const next = [...opinions]
-    next[i] = v
-    setOpinions(next)
+const DEFAULT_CREATIVE: CreativeActivityData = {
+  byGrade: { 1: { ...EMPTY_CREATIVE_GRADE }, 2: { ...EMPTY_CREATIVE_GRADE }, 3: { ...EMPTY_CREATIVE_GRADE } },
+}
+const DEFAULT_ACADEMIC: AcademicDevData = {
+  byGrade: { 1: { subjects: ['', '', ''], notes: ['', '', ''] }, 2: { subjects: ['', '', ''], notes: ['', '', ''] }, 3: { subjects: ['', '', ''], notes: ['', '', ''] } },
+}
+const DEFAULT_INDIVIDUAL: IndividualDevData = {
+  showInputs: false,
+  byGrade: { 1: { content: '' }, 2: { content: '' }, 3: { content: '' } },
+}
+const DEFAULT_BEHAVIOR: BehaviorOpinionData = { showInputs: false, opinions: ['', '', ''] }
+
+function BehaviorOpinionForm({
+  selectedGrade,
+  onGradeChange,
+  data,
+  onChange,
+}: {
+  selectedGrade: 1 | 2 | 3
+  onGradeChange: (g: 1 | 2 | 3) => void
+  data: BehaviorOpinionData
+  onChange: (d: BehaviorOpinionData) => void
+}) {
+  const setOpinion = (gradeIndex: number, v: string) => {
+    const next = [...data.opinions]
+    next[gradeIndex] = v
+    onChange({ ...data, opinions: next })
   }
-
   return (
     <div className="rounded-b-lg border border-t-0 border-gray-200 overflow-hidden">
       <div className="bg-gray-700 text-white px-4 py-3 font-bold text-base">
         행동특성 및 종합의견
       </div>
       <div className="border border-gray-200 overflow-x-auto">
-        {showInputs && (
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 bg-gray-50">
-            <span className="text-sm font-semibold text-gray-700">학년</span>
-            <select
-              value={grade}
-              onChange={(e) => setGrade(Number(e.target.value) || 1)}
-              className="px-3 py-2 border border-gray-300 rounded-lg bg-white text-sm"
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-gray-200 bg-gray-50">
+          <span className="text-sm font-semibold text-gray-700">학년</span>
+          {([1, 2, 3] as const).map((g) => (
+            <button
+              key={g}
+              type="button"
+              onClick={() => onGradeChange(g)}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${selectedGrade === g ? 'bg-blue-600 text-white' : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'}`}
             >
-              <option value={1}>1학년</option>
-              <option value={2}>2학년</option>
-              <option value={3}>3학년</option>
-            </select>
-          </div>
-        )}
+              {g}학년
+            </button>
+          ))}
+        </div>
         <table className="w-full text-sm text-left border-collapse">
           <thead>
-            <tr className="border-b border-gray-300 bg-gray-100">
-              <th className="py-3 px-3 font-bold text-gray-900">행동특성 및 종합의견</th>
+            <tr className="border-b border-gray-200 bg-gray-50">
+              <th className="w-28 py-3 px-3 border-r border-gray-200 font-semibold text-gray-900">영역</th>
+              <th className="py-3 px-3 font-semibold text-gray-900">특기사항</th>
             </tr>
           </thead>
           <tbody className="bg-white">
-            {!showInputs ? (
-              <tr className="border-b border-gray-200">
-                <td className="py-12 px-3 text-center text-gray-400">
-                  해당 사항 없음
-                </td>
-              </tr>
-            ) : (
-              <tr className="border-b border-gray-200 align-top">
-                <td className="py-2 px-3">
-                  <textarea
-                    placeholder="입력"
-                    value={opinions[grade - 1]}
-                    onChange={(e) => setOpinion(grade - 1, e.target.value)}
-                    className="w-full min-h-[100px] px-3 py-2 border border-gray-300 rounded-lg resize-y"
-                    rows={4}
-                  />
-                </td>
-              </tr>
-            )}
+            <tr className="border-b border-gray-200 align-top">
+              <td className="py-2 px-3 border-r border-gray-200 align-middle">행동특성 및 종합의견</td>
+              <td className="py-2 px-3">
+                <textarea placeholder="입력" value={data.opinions[selectedGrade - 1] ?? ''} onChange={(e) => setOpinion(selectedGrade - 1, e.target.value)} className="w-full min-h-[80px] px-3 py-2 border border-gray-300 rounded resize-y" rows={3} />
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>
-      {!showInputs && (
-        <div className="border-t border-gray-200 bg-white py-4 px-3">
-          <button
-            type="button"
-            className="text-sm text-blue-600 hover:text-blue-800 font-medium"
-            onClick={() => setShowInputs(true)}
-          >
-            + 내용 입력하기
-          </button>
-        </div>
-      )}
+    </div>
+  )
+}
+
+interface SavedSchoolRecordItem {
+  content?: string
+  hope_major?: string
+  result?: { feedback?: string; grade?: string; benchmark?: string; rewrite?: string }
+  created_at?: string
+}
+
+/** 4단계 필승구조 기반 진단 결과 (간단한 카드 스타일 - 창의적체험활동 등에서 사용) */
+function DiagnosisPanel({
+  diagnosis,
+  loading,
+}: {
+  diagnosis: DiagnosisResultV2 | null
+  loading: boolean
+}) {
+  if (loading) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-gray-50 p-6">
+        <h3 className="text-base font-bold text-gray-900 mb-3">진단 결과</h3>
+        <p className="text-sm text-gray-500">4단계 필승구조 기준으로 분석 중...</p>
+      </div>
+    )
+  }
+  if (diagnosis?.error) {
+    return (
+      <div className="rounded-xl border border-gray-200 bg-red-50 p-6">
+        <h3 className="text-base font-bold text-gray-900 mb-3">진단 결과</h3>
+        <p className="text-sm text-red-600">{diagnosis.error}</p>
+      </div>
+    )
+  }
+  
+  const highlights = diagnosis?.highlights || []
+  const goodHighlights = highlights.filter(h => h.type === 'good')
+  const badHighlights = highlights.filter(h => h.type === 'bad')
+  
+  const hasAny = goodHighlights.length > 0 || badHighlights.length > 0
+  if (!hasAny) return null
+  
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+      <div className="px-4 py-3 bg-gray-100 border-b border-gray-200">
+        <h3 className="text-base font-bold text-gray-900">진단 결과</h3>
+        <p className="text-xs text-gray-500 mt-0.5">4단계 필승구조(계기→심화→역량→변화) 기준</p>
+      </div>
+      <div className="p-4 space-y-4">
+        {goodHighlights.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-emerald-600" aria-hidden>👍</span>
+              <h4 className="text-sm font-semibold text-gray-900">이런 점이 좋아요</h4>
+            </div>
+            <ul className="space-y-2 text-sm text-gray-700">
+              {goodHighlights.map((h, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className="text-emerald-400 mt-0.5">•</span>
+                  <div>
+                    {h.step && STEP_LABELS[h.step] && (
+                      <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-100 text-emerald-700 mr-1.5 mb-0.5">
+                        {STEP_LABELS[h.step]}
+                      </span>
+                    )}
+                    {h.label && (
+                      <span className="text-xs font-medium text-emerald-600 mr-1.5">{h.label}</span>
+                    )}
+                    <span className="text-gray-800">{h.feedback}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {badHighlights.length > 0 && (
+          <div>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-red-500" aria-hidden>💡</span>
+              <h4 className="text-sm font-semibold text-gray-900">이렇게 보완해 보세요</h4>
+            </div>
+            <ul className="space-y-2 text-sm text-gray-700">
+              {badHighlights.map((h, i) => (
+                <li key={i} className="flex items-start gap-2">
+                  <span className="text-red-400 mt-0.5">•</span>
+                  <div>
+                    {h.step && STEP_LABELS[h.step] && (
+                      <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-medium bg-red-100 text-red-700 mr-1.5 mb-0.5">
+                        {STEP_LABELS[h.step]}
+                      </span>
+                    )}
+                    {h.label && (
+                      <span className="text-xs font-medium text-red-600 mr-1.5">{h.label}</span>
+                    )}
+                    <span className="text-gray-800">{h.feedback}</span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
 
 export default function SchoolRecordEvalPage() {
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, accessToken, isAuthenticated } = useAuth()
   const resultRef = useRef<HTMLDivElement>(null)
 
   const [viewMode, setViewMode] = useState<ViewMode>('list')
@@ -415,9 +812,384 @@ export default function SchoolRecordEvalPage() {
   const [result, setResult] = useState<EvalResult | null>(null)
   const [error, setError] = useState('')
   const [tipsOpen, setTipsOpen] = useState(false)
+  const [savedItems, setSavedItems] = useState<SavedSchoolRecordItem[]>([])
+  const [savedItemsLoading, setSavedItemsLoading] = useState(false)
+
+  const [creativeActivity, setCreativeActivity] = useState<CreativeActivityData>(DEFAULT_CREATIVE)
+  const [academicDev, setAcademicDev] = useState<AcademicDevData>(DEFAULT_ACADEMIC)
+  const [individualDev, setIndividualDev] = useState<IndividualDevData>(DEFAULT_INDIVIDUAL)
+  const [behaviorOpinion, setBehaviorOpinion] = useState<BehaviorOpinionData>(DEFAULT_BEHAVIOR)
+  const [creativeGrade, setCreativeGrade] = useState<1 | 2 | 3>(1)
+  const [academicGrade, setAcademicGrade] = useState<1 | 2 | 3>(1)
+  const [individualGrade, setIndividualGrade] = useState<1 | 2 | 3>(1)
+  const [behaviorGrade, setBehaviorGrade] = useState<1 | 2 | 3>(1)
+  const [formsLoading, setFormsLoading] = useState(false)
+  const [formsSaveStatus, setFormsSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'err'>('idle')
+  
+  // 탭별·학년별 진단 결과 저장 (예: "creative-1", "academicSubject-2" 등)
+  // 새로운 API 응답 스키마 (highlights + indices 포함)
+  const [diagnosisResults, setDiagnosisResults] = useState<Record<string, DiagnosisResultV2>>({})
+  const [diagnosisLoading, setDiagnosisLoading] = useState(false)
+
+  const baseUrl = getApiBaseUrl()
+
+  /** 현재 탭·학년의 진단 결과 키 */
+  const getCurrentDiagnosisKey = (): string => {
+    if (listTab === 'creative') return `creative-${creativeGrade}`
+    if (listTab === 'academicSubject') return `academicSubject-${academicGrade}`
+    if (listTab === 'academicIndividual') return `academicIndividual-${individualGrade}`
+    if (listTab === 'behavior') return `behavior-${behaviorGrade}`
+    return ''
+  }
+
+  /** 현재 탭·학년의 진단 결과 조회 */
+  const currentDiagnosis = diagnosisResults[getCurrentDiagnosisKey()] ?? null
+
+  /** 현재 탭·학년에 해당하는 세특 텍스트 추출 (진단 API용) */
+  const getContentForDiagnosis = (): string => {
+    if (listTab === 'creative') {
+      const g = creativeActivity.byGrade[creativeGrade]
+      return [g.autonomousNotes, g.clubNotes, g.careerNotes].filter(Boolean).join('\n\n')
+    }
+    if (listTab === 'academicSubject') {
+      // 과목별은 개별 진단하므로 이 함수 사용 안 함
+      return ''
+    }
+    if (listTab === 'academicIndividual') {
+      return individualDev.byGrade[individualGrade]?.content ?? ''
+    }
+    if (listTab === 'behavior') {
+      return behaviorOpinion.opinions[behaviorGrade - 1] ?? ''
+    }
+    return ''
+  }
+
+  /** API 응답을 DiagnosisResultV2로 변환 */
+  const defaultStructure = (): Record<string, StructureStep> => ({
+    계기: { status: 'warn', summary: '', detail: '' },
+    심화: { status: 'warn', summary: '', detail: '' },
+    역량: { status: 'warn', summary: '', detail: '' },
+    변화: { status: 'warn', summary: '', detail: '' },
+  })
+  const defaultChecklist = (): ChecklistResult => ({
+    actionVerbs: false,
+    concreteData: false,
+    curriculumLink: false,
+    uniqueQuestion: false,
+  })
+
+  const parseApiResponse = (data: Record<string, unknown>, originalContent: string): DiagnosisResultV2 => {
+    const highlights: Highlight[] = (data.highlights as Highlight[]) || []
+    return {
+      success: (data.success as boolean) ?? false,
+      original_text: (data.original_text as string) || originalContent,
+      highlights,
+      goodPoints: (data.goodPoints as DiagnosisResultV2['goodPoints']) || [],
+      reconsiderPoints: (data.reconsiderPoints as DiagnosisResultV2['reconsiderPoints']) || [],
+      rewritten_version: (data.rewritten_version as string) || '',
+      structure_analysis: (data.structure_analysis as Record<string, StructureStep>) || defaultStructure(),
+      checklist: (data.checklist as ChecklistResult) || defaultChecklist(),
+      admission_comment: (data.admission_comment as string) || '',
+      error: data.error as string | null
+    }
+  }
+
+  /** 과목별세부능력및특기사항 과목별 진단 */
+  const runAcademicSubjectDiagnosis = async () => {
+    const g = academicDev.byGrade[academicGrade]
+    const subjectsWithContent: Array<{ idx: number; subject: string; content: string }> = []
+    for (let i = 0; i < 3; i++) {
+      const subj = (g.subjects[i] ?? '').trim()
+      const note = (g.notes[i] ?? '').trim()
+      if (subj || note) {
+        // 과목명만 있고 내용이 없는 경우 경고 메시지
+        if (subj && !note) {
+          const diagnosisKey = `academicSubject-${academicGrade}-${i}`
+          setDiagnosisResults((prev) => ({ 
+            ...prev, 
+            [diagnosisKey]: { 
+              success: true,
+              original_text: '',
+              highlights: [{
+                type: 'bad',
+                step: '전체',
+                label: '내용 부족',
+                feedback: '과목의 세부능력 및 특기사항 내용을 입력해 주세요.',
+                indices: [-1, -1],
+                quote: ''
+              }],
+              goodPoints: [], 
+              reconsiderPoints: [{ step: '전체', label: '내용 부족', feedback: '과목의 세부능력 및 특기사항 내용을 입력해 주세요.', quote: '' }], 
+              rewritten_version: '',
+              error: null 
+            } 
+          }))
+          continue
+        }
+        // 과목명과 내용을 합쳐서 전송
+        subjectsWithContent.push({ idx: i, subject: subj || `과목 ${i + 1}`, content: note || `${subj}\n${note}`.trim() })
+      }
+    }
+    if (subjectsWithContent.length === 0) {
+      return
+    }
+    setDiagnosisLoading(true)
+    try {
+      await Promise.all(
+        subjectsWithContent.map(async ({ idx, content }) => {
+          const diagnosisKey = `academicSubject-${academicGrade}-${idx}`
+          try {
+            const res = await fetch(`${baseUrl}/api/school-record/diagnose`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ content, hope_major: hopeMajor.trim() || undefined }),
+            })
+            let data: Record<string, unknown> = {}
+            try {
+              data = await res.json()
+            } catch {
+              data = { error: res.statusText || '서버 응답을 읽을 수 없습니다.' }
+            }
+            if (!res.ok) {
+              setDiagnosisResults((prev) => ({ 
+                ...prev, 
+                [diagnosisKey]: { 
+                  success: false,
+                  original_text: content,
+                  highlights: [],
+                  goodPoints: [], 
+                  reconsiderPoints: [], 
+                  rewritten_version: '',
+                  error: (data.detail || data.error || `진단 요청 실패 (${res.status})`) as string
+                } 
+              }))
+              return
+            }
+            if (data.success) {
+              setDiagnosisResults((prev) => ({ 
+                ...prev, 
+                [diagnosisKey]: parseApiResponse(data, content)
+              }))
+            } else {
+              setDiagnosisResults((prev) => ({ 
+                ...prev, 
+                [diagnosisKey]: { 
+                  success: false,
+                  original_text: content,
+                  highlights: [],
+                  goodPoints: [], 
+                  reconsiderPoints: [], 
+                  rewritten_version: '',
+                  error: (data.error || '진단 결과를 가져오지 못했습니다.') as string
+                } 
+              }))
+            }
+          } catch (e: unknown) {
+            setDiagnosisResults((prev) => ({ 
+              ...prev, 
+              [diagnosisKey]: { 
+                success: false,
+                original_text: content,
+                highlights: [],
+                goodPoints: [], 
+                reconsiderPoints: [], 
+                rewritten_version: '',
+                error: e instanceof Error ? e.message : '진단 중 오류가 발생했습니다.'
+              } 
+            }))
+          }
+        })
+      )
+    } finally {
+      setDiagnosisLoading(false)
+    }
+  }
+
+  const runDiagnosis = async () => {
+    if (listTab === 'academicSubject') {
+      await runAcademicSubjectDiagnosis()
+      return
+    }
+    const content = getContentForDiagnosis().trim()
+    const diagnosisKey = getCurrentDiagnosisKey()
+    if (!diagnosisKey) return
+
+    if (!content) {
+      setDiagnosisResults((prev) => ({ 
+        ...prev, 
+        [diagnosisKey]: { 
+          success: false,
+          original_text: '',
+          highlights: [],
+          goodPoints: [], 
+          reconsiderPoints: [], 
+          rewritten_version: '',
+          error: '진단할 내용을 먼저 입력해 주세요.'
+        } 
+      }))
+      return
+    }
+    setDiagnosisLoading(true)
+    try {
+      const res = await fetch(`${baseUrl}/api/school-record/diagnose`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content, hope_major: hopeMajor.trim() || undefined }),
+      })
+      let data: Record<string, unknown> = {}
+      try {
+        data = await res.json()
+      } catch {
+        data = { error: res.statusText || '서버 응답을 읽을 수 없습니다.' }
+      }
+      if (!res.ok) {
+        setDiagnosisResults((prev) => ({ 
+          ...prev, 
+          [diagnosisKey]: { 
+            success: false,
+            original_text: content,
+            highlights: [],
+            goodPoints: [], 
+            reconsiderPoints: [], 
+            rewritten_version: '',
+            error: (data.detail || data.error || `진단 요청 실패 (${res.status})`) as string
+          } 
+        }))
+        return
+      }
+      if (data.success) {
+        setDiagnosisResults((prev) => ({ 
+          ...prev, 
+          [diagnosisKey]: parseApiResponse(data, content)
+        }))
+      } else {
+        setDiagnosisResults((prev) => ({ 
+          ...prev, 
+          [diagnosisKey]: { 
+            success: false,
+            original_text: content,
+            highlights: [],
+            goodPoints: [], 
+            reconsiderPoints: [], 
+            rewritten_version: '',
+            error: (data.error || '진단 결과를 가져오지 못했습니다.') as string
+          } 
+        }))
+      }
+    } catch (e: unknown) {
+      setDiagnosisResults((prev) => ({ 
+        ...prev, 
+        [diagnosisKey]: { 
+          success: false,
+          original_text: content,
+          highlights: [],
+          goodPoints: [], 
+          reconsiderPoints: [], 
+          rewritten_version: '',
+          error: e instanceof Error ? e.message : '진단 중 오류가 발생했습니다.'
+        } 
+      }))
+    } finally {
+      setDiagnosisLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!isAuthenticated || !accessToken) {
+      setSavedItems([])
+      return
+    }
+    setSavedItemsLoading(true)
+    fetch(`${baseUrl}/api/school-record/list`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+      .then((res) => (res.ok ? res.json() : { items: [] }))
+      .then((data) => setSavedItems(Array.isArray(data?.items) ? data.items : []))
+      .catch(() => setSavedItems([]))
+      .finally(() => setSavedItemsLoading(false))
+  }, [isAuthenticated, accessToken, baseUrl])
+
+  useEffect(() => {
+    if (!isAuthenticated || !accessToken) return
+    setFormsLoading(true)
+    fetch(`${baseUrl}/api/school-record/forms`, { headers: { Authorization: `Bearer ${accessToken}` } })
+      .then((res) => (res.ok ? res.json() : { forms: {} }))
+      .then((data) => {
+        const f = data?.forms || {}
+        if (f.creativeActivity) {
+          if (f.creativeActivity.byGrade && typeof f.creativeActivity.byGrade === 'object') {
+            const byGrade = f.creativeActivity.byGrade
+            setCreativeActivity({
+              byGrade: {
+                1: { ...EMPTY_CREATIVE_GRADE, ...byGrade[1] },
+                2: { ...EMPTY_CREATIVE_GRADE, ...byGrade[2] },
+                3: { ...EMPTY_CREATIVE_GRADE, ...byGrade[3] },
+              },
+            })
+          } else {
+            const g = (f.creativeActivity.grade ?? 1) as 1 | 2 | 3
+            const one = { autonomousNotes: f.creativeActivity.autonomousNotes ?? '', clubNotes: f.creativeActivity.clubNotes ?? '', careerNotes: f.creativeActivity.careerNotes ?? '' }
+            setCreativeActivity({ ...DEFAULT_CREATIVE, byGrade: { ...DEFAULT_CREATIVE.byGrade, [g]: one } })
+          }
+        }
+        if (f.academicDev) {
+          if (f.academicDev.byGrade && typeof f.academicDev.byGrade === 'object') {
+            const byGrade = f.academicDev.byGrade as Record<string, { subjects?: string[]; notes?: string[] }>
+            const pad = (arr: string[] | undefined): string[] =>
+              (arr || []).slice(0, 3).concat(Array(3).fill('')).slice(0, 3)
+            setAcademicDev({ byGrade: { 1: { subjects: pad(byGrade['1']?.subjects), notes: pad(byGrade['1']?.notes) }, 2: { subjects: pad(byGrade['2']?.subjects), notes: pad(byGrade['2']?.notes) }, 3: { subjects: pad(byGrade['3']?.subjects), notes: pad(byGrade['3']?.notes) } } })
+          } else {
+            const g = (f.academicDev.grade ?? 1) as 1 | 2 | 3
+            const subj = Array.isArray(f.academicDev.subjects) ? f.academicDev.subjects.slice(0, 3).concat(Array(3).fill('')).slice(0, 3) : Array(3).fill('')
+            const notes = Array.isArray(f.academicDev.notes) ? f.academicDev.notes.slice(0, 3).concat(Array(3).fill('')).slice(0, 3) : Array(3).fill('')
+            setAcademicDev({ ...DEFAULT_ACADEMIC, byGrade: { ...DEFAULT_ACADEMIC.byGrade, [g]: { subjects: subj, notes } } })
+          }
+        }
+        if (f.individualDev) {
+          const toContent = (g: Record<string, unknown> | undefined): string => {
+            if (!g) return ''
+            if (typeof (g as { content?: string }).content === 'string') return (g as { content: string }).content
+            const notes = (g as { notes?: string[] }).notes
+            if (Array.isArray(notes) && notes.some((n) => n && String(n).trim())) return notes.filter(Boolean).join('\n')
+            return ''
+          }
+          const showInputs = f.individualDev.showInputs === true
+          if (f.individualDev.byGrade && typeof f.individualDev.byGrade === 'object') {
+            const byGrade = f.individualDev.byGrade as Record<string, Record<string, unknown>>
+            setIndividualDev({ showInputs, byGrade: { 1: { content: toContent(byGrade['1']) }, 2: { content: toContent(byGrade['2']) }, 3: { content: toContent(byGrade['3']) } } })
+          } else {
+            const g = (f.individualDev.grade ?? 1) as 1 | 2 | 3
+            const notes = (f.individualDev as { notes?: string[] }).notes
+            const content = Array.isArray(notes) && notes.length ? notes.filter(Boolean).join('\n') : ''
+            setIndividualDev({ showInputs: true, byGrade: { ...DEFAULT_INDIVIDUAL.byGrade, [g]: { content } } })
+          }
+        }
+        if (f.behaviorOpinion) setBehaviorOpinion({ ...DEFAULT_BEHAVIOR, ...f.behaviorOpinion, opinions: Array.isArray(f.behaviorOpinion.opinions) ? f.behaviorOpinion.opinions.slice(0, 3).concat(Array(3).fill('')).slice(0, 3) : DEFAULT_BEHAVIOR.opinions })
+      })
+      .catch(() => {})
+      .finally(() => setFormsLoading(false))
+  }, [isAuthenticated, accessToken, baseUrl])
+
+  const saveForms = async (payload: { creativeActivity?: CreativeActivityData; academicDev?: AcademicDevData; individualDev?: IndividualDevData; behaviorOpinion?: BehaviorOpinionData }) => {
+    if (!accessToken) return
+    setFormsSaveStatus('saving')
+    try {
+      const res = await fetch(`${baseUrl}/api/school-record/forms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error('저장 실패')
+      setFormsSaveStatus('ok')
+      setTimeout(() => setFormsSaveStatus('idle'), 2000)
+    } catch {
+      setFormsSaveStatus('err')
+      setTimeout(() => setFormsSaveStatus('idle'), 2000)
+    }
+  }
 
   const userName = user?.name || '회원'
-  const completedCount = result?.result && (result.result.grade || result.result.rewrite) ? 1 : 0
+  const completedCount = (result?.result && (result.result.grade || result.result.rewrite) ? 1 : 0) + savedItems.length
   const inProgressCount = loading ? 1 : 0
   const progressPercent = !content.trim() ? 0 : result ? 100 : loading ? 50 : 33
 
@@ -430,9 +1202,11 @@ export default function SchoolRecordEvalPage() {
     setResult(null)
     setLoading(true)
     try {
-      const res = await fetch('/api/school-record/evaluate', {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`
+      const res = await fetch(`${baseUrl}/api/school-record/evaluate`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           content: content.trim(),
           hope_major: hopeMajor.trim(),
@@ -442,6 +1216,20 @@ export default function SchoolRecordEvalPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.detail || '평가 요청 실패')
       setResult(data)
+      if (isAuthenticated && accessToken && data?.success && data?.result) {
+        setSavedItems((prev) => {
+          const next = [
+            ...prev,
+            {
+              content: content.trim().slice(0, 30000),
+              hope_major: hopeMajor.trim(),
+              result: data.result,
+              created_at: new Date().toISOString(),
+            },
+          ]
+          return next.slice(-50)
+        })
+      }
       setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : '평가 중 오류가 발생했습니다.')
@@ -450,13 +1238,20 @@ export default function SchoolRecordEvalPage() {
     }
   }
 
+  const openSavedItem = (item: SavedSchoolRecordItem) => {
+    setContent(item.content ?? '')
+    setHopeMajor(item.hope_major ?? '')
+    setResult(item.result ? { success: true, result: item.result } : null)
+    setViewMode('detail')
+  }
+
   const r = result?.result
 
   // ——— 목록 뷰 (이미지 1 스타일) ———
   if (viewMode === 'list') {
     return (
       <div className="min-h-screen bg-white">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-6">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
           {/* 헤더: 인사 + 요약 */}
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-6 mb-6">
             <div>
@@ -531,22 +1326,164 @@ export default function SchoolRecordEvalPage() {
           {/* 탭별 콘텐츠 */}
           {listTab === 'creative' && (
             <div className="mb-6">
-              <CreativeActivityForm />
+              {formsLoading ? (
+                <div className="py-8 text-center text-gray-500 text-sm">폼 불러오는 중...</div>
+              ) : (
+                <>
+                  <CreativeActivityForm
+                    selectedGrade={creativeGrade}
+                    onGradeChange={setCreativeGrade}
+                    data={creativeActivity.byGrade[creativeGrade]}
+                    onChange={(next) => setCreativeActivity((prev) => ({ ...prev, byGrade: { ...prev.byGrade, [creativeGrade]: next } }))}
+                  />
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {isAuthenticated && (
+                      <>
+                        <button type="button" onClick={() => saveForms({ creativeActivity })} disabled={formsSaveStatus === 'saving'} className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                          {formsSaveStatus === 'saving' ? '저장 중...' : formsSaveStatus === 'ok' ? '저장됨' : '저장'}
+                        </button>
+                        {formsSaveStatus === 'err' && <span className="text-sm text-red-600">저장 실패</span>}
+                      </>
+                    )}
+                    <button type="button" onClick={runDiagnosis} disabled={diagnosisLoading} className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                      {diagnosisLoading ? '진단 중...' : '4단계 필승구조 진단 받기'}
+                    </button>
+                  </div>
+                  <div className="mt-4">
+                    <SubjectDiagnosisPanel
+                      subject="창의적체험활동상황"
+                      content={currentDiagnosis?.original_text || getContentForDiagnosis()}
+                      diagnosis={currentDiagnosis ?? null}
+                      loading={diagnosisLoading && !currentDiagnosis}
+                    />
+                  </div>
+                </>
+              )}
             </div>
           )}
           {listTab === 'academicSubject' && (
             <div className="mb-6">
-              <AcademicDevForm />
+              {formsLoading ? (
+                <div className="py-8 text-center text-gray-500 text-sm">폼 불러오는 중...</div>
+              ) : (
+                <>
+                  <AcademicDevForm
+                    selectedGrade={academicGrade}
+                    onGradeChange={setAcademicGrade}
+                    data={academicDev.byGrade[academicGrade]}
+                    onChange={(next) => setAcademicDev((prev) => ({ ...prev, byGrade: { ...prev.byGrade, [academicGrade]: next } }))}
+                  />
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {isAuthenticated && (
+                      <>
+                        <button type="button" onClick={() => saveForms({ academicDev })} disabled={formsSaveStatus === 'saving'} className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                          {formsSaveStatus === 'saving' ? '저장 중...' : formsSaveStatus === 'ok' ? '저장됨' : '저장'}
+                        </button>
+                        {formsSaveStatus === 'err' && <span className="text-sm text-red-600">저장 실패</span>}
+                      </>
+                    )}
+                    <button type="button" onClick={runDiagnosis} disabled={diagnosisLoading} className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                      {diagnosisLoading ? '진단 중...' : '4단계 필승구조 진단 받기'}
+                    </button>
+                  </div>
+                  {/* 과목별 진단 결과 */}
+                  <div className="mt-4 space-y-4">
+                    {[0, 1, 2].map((idx) => {
+                      const g = academicDev.byGrade[academicGrade]
+                      const subj = (g.subjects[idx] ?? '').trim()
+                      const note = (g.notes[idx] ?? '').trim()
+                      if (!subj && !note) return null
+                      const diagKey = `academicSubject-${academicGrade}-${idx}`
+                      const diag = diagnosisResults[diagKey]
+                      // 진단 결과가 있으면 original_text 사용, 없으면 note 사용
+                      const displayContent = diag?.original_text || note
+                      return (
+                        <SubjectDiagnosisPanel
+                          key={idx}
+                          subject={subj || `과목 ${idx + 1}`}
+                          content={displayContent}
+                          diagnosis={diag ?? null}
+                          loading={diagnosisLoading && !diag}
+                        />
+                      )
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           )}
           {listTab === 'academicIndividual' && (
             <div className="mb-6">
-              <IndividualDevForm />
+              {formsLoading ? (
+                <div className="py-8 text-center text-gray-500 text-sm">폼 불러오는 중...</div>
+              ) : (
+                <>
+                  <IndividualDevForm
+                    selectedGrade={individualGrade}
+                    onGradeChange={setIndividualGrade}
+                    data={individualDev}
+                    onChange={setIndividualDev}
+                  />
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {isAuthenticated && (
+                      <>
+                        <button type="button" onClick={() => saveForms({ individualDev })} disabled={formsSaveStatus === 'saving'} className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                          {formsSaveStatus === 'saving' ? '저장 중...' : formsSaveStatus === 'ok' ? '저장됨' : '저장'}
+                        </button>
+                        {formsSaveStatus === 'err' && <span className="text-sm text-red-600">저장 실패</span>}
+                      </>
+                    )}
+                    <button type="button" onClick={runDiagnosis} disabled={diagnosisLoading} className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                      {diagnosisLoading ? '진단 중...' : '4단계 필승구조 진단 받기'}
+                    </button>
+                  </div>
+                  <div className="mt-4">
+                    <SubjectDiagnosisPanel
+                      subject="개인별세부능력및특기사항"
+                      content={currentDiagnosis?.original_text || getContentForDiagnosis()}
+                      diagnosis={currentDiagnosis ?? null}
+                      loading={diagnosisLoading && !currentDiagnosis}
+                    />
+                  </div>
+                </>
+              )}
             </div>
           )}
           {listTab === 'behavior' && (
             <div className="mb-6">
-              <BehaviorOpinionForm />
+              {formsLoading ? (
+                <div className="py-8 text-center text-gray-500 text-sm">폼 불러오는 중...</div>
+              ) : (
+                <>
+                  <BehaviorOpinionForm
+                    selectedGrade={behaviorGrade}
+                    onGradeChange={setBehaviorGrade}
+                    data={behaviorOpinion}
+                    onChange={setBehaviorOpinion}
+                  />
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {isAuthenticated && (
+                      <>
+                        <button type="button" onClick={() => saveForms({ behaviorOpinion })} disabled={formsSaveStatus === 'saving'} className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">
+                          {formsSaveStatus === 'saving' ? '저장 중...' : formsSaveStatus === 'ok' ? '저장됨' : '저장'}
+                        </button>
+                        {formsSaveStatus === 'err' && <span className="text-sm text-red-600">저장 실패</span>}
+                      </>
+                    )}
+                    <button type="button" onClick={runDiagnosis} disabled={diagnosisLoading} className="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50">
+                      {diagnosisLoading ? '진단 중...' : '4단계 필승구조 진단 받기'}
+                    </button>
+                  </div>
+                  <div className="mt-4">
+                    <SubjectDiagnosisPanel
+                      subject="행동특성 및 종합의견"
+                      content={currentDiagnosis?.original_text || getContentForDiagnosis()}
+                      diagnosis={currentDiagnosis ?? null}
+                      loading={diagnosisLoading && !currentDiagnosis}
+                    />
+                  </div>
+                </>
+              )}
             </div>
           )}
           {listTab === 'all' && (
@@ -561,8 +1498,44 @@ export default function SchoolRecordEvalPage() {
                 <span className="text-sm font-medium">생기부 세특 평가 추가</span>
               </button>
 
-              {/* 최근 평가 카드 */}
-              {result?.result && (r?.grade || r?.rewrite) && (
+              {/* 유저 연동 저장 목록 (user_profiles.metadata.school_record) */}
+              {savedItemsLoading && savedItems.length === 0 ? (
+                <div className="min-h-[180px] rounded-xl border border-gray-200 flex items-center justify-center text-sm text-gray-400">
+                  저장 목록 불러오는 중...
+                </div>
+              ) : null}
+              {[...savedItems].reverse().map((item, idx) => {
+                const hasResult = item.result && (item.result.grade || item.result.rewrite)
+                const dateStr = item.created_at
+                  ? new Date(item.created_at).toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\. /g, '.').replace('.', '. ')
+                  : ''
+                return (
+                  <button
+                    key={`saved-${idx}-${item.created_at ?? idx}`}
+                    type="button"
+                    onClick={() => openSavedItem(item)}
+                    className="flex flex-col items-start justify-between min-h-[180px] rounded-xl border border-gray-200 bg-white p-4 text-left shadow-sm hover:shadow-md transition-shadow"
+                  >
+                    <div className="flex items-start justify-between w-full">
+                      <span className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 flex-shrink-0" />
+                      <span className="text-xs text-gray-400">생기부 세특 평가</span>
+                    </div>
+                    <p className="text-base font-semibold text-gray-900 truncate w-full">
+                      {item.hope_major || '희망 전공 미입력'}
+                    </p>
+                    <p className="text-sm text-gray-500">{hasResult ? '평가가 완료되었습니다.' : '평가 데이터'}</p>
+                    <div className="flex items-center justify-between w-full mt-2">
+                      <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
+                        평가완료
+                      </span>
+                      {dateStr && <span className="text-xs text-gray-400">{dateStr}</span>}
+                    </div>
+                  </button>
+                )
+              })}
+
+              {/* 비로그인 시 현재 세션 평가 카드 (로그인 시에는 savedItems에 이미 반영됨) */}
+              {result?.result && (r?.grade || r?.rewrite) && !isAuthenticated && (
                 <button
                   type="button"
                   onClick={() => setViewMode('detail')}

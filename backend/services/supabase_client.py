@@ -387,6 +387,60 @@ class SupabaseService:
             print(f"❌ 프로필 삭제 오류: {e}")
             return False
 
+    @classmethod
+    async def get_user_profile_metadata(cls, user_id: str) -> Optional[dict]:
+        """user_profiles의 metadata만 조회 (서버/RLS bypass용 admin client)"""
+        client = cls.get_admin_client()
+        try:
+            r = (
+                client.table("user_profiles")
+                .select("metadata")
+                .eq("user_id", user_id)
+                .execute()
+            )
+            if r.data and len(r.data) > 0:
+                return r.data[0].get("metadata") or {}
+            return {}
+        except Exception as e:
+            print(f"❌ get_user_profile_metadata 오류: {e}")
+            return None
+
+    @classmethod
+    async def update_user_profile_metadata(
+        cls, user_id: str, metadata_key: str, metadata_value: Any
+    ) -> bool:
+        """
+        user_profiles.metadata의 특정 키만 병합 업데이트 (나머지 metadata 유지).
+        예: metadata_key='school_record', metadata_value={ 'items': [...] }
+        """
+        if not user_id or not metadata_key:
+            return False
+        client = cls.get_admin_client()
+        try:
+            existing = (
+                client.table("user_profiles")
+                .select("user_id, scores, metadata")
+                .eq("user_id", user_id)
+                .execute()
+            )
+            meta = {}
+            if existing.data and len(existing.data) > 0:
+                row = existing.data[0]
+                meta = dict(row.get("metadata") or {})
+                meta[metadata_key] = metadata_value
+                client.table("user_profiles").update({"metadata": meta}).eq(
+                    "user_id", user_id
+                ).execute()
+            else:
+                meta = {metadata_key: metadata_value}
+                client.table("user_profiles").insert(
+                    {"user_id": user_id, "scores": {}, "metadata": meta}
+                ).execute()
+            return True
+        except Exception as e:
+            print(f"❌ update_user_profile_metadata 오류: {e}")
+            return False
+
 
 class SupabaseUploader:
     """Supabase에 문서 데이터를 업로드하는 클래스"""
