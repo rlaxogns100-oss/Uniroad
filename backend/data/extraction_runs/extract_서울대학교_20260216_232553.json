@@ -1,0 +1,118 @@
+{
+  "school": "서울대학교",
+  "filename_contains": "정시모집",
+  "documents_found": 1,
+  "document_ids": [
+    234
+  ],
+  "chunks_found": 361,
+  "chunks_used": 361,
+  "context_chars": 154595,
+  "model": "gpt-5.2-chat-4",
+  "api_version": "2024-02-15-preview",
+  "json_parse_error": null,
+  "validation_errors": [],
+  "raw_output": "{\n  \"university\": \"서울대학교\",\n  \"document_scope\": \"정시모집\",\n  \"rules\": [\n    {\n      \"rule_id\": \"SNU-REG-SONEUNG-CONV-01\",\n      \"admission_type\": \"정시\",\n      \"track\": \"수능위주전형(지역균형전형)\",\n      \"unit_or_major\": null,\n      \"stage\": \"최종\",\n      \"formula_type\": \"relative_minmax\",\n      \"expression\": \"① 최고점-최저점 ≥ 15: 15 * (지원자수능성적 - 최저점)/(최고점-최저점) + 45\\n② 최고점-최저점 < 15: 60 - (최고점 - 지원자수능성적)\",\n      \"piecewise\": [\n        {\n          \"if\": \"최고점-최저점 ≥ 15\",\n          \"value\": \"15 * (지원자수능성적 - 최저점)/(최고점-최저점) + 45\"\n        },\n        {\n          \"if\": \"최고점-최저점 < 15\",\n          \"value\": \"60 - (최고점 - 지원자수능성적)\"\n        }\n      ],\n      \"grade_map\": {},\n      \"variables\": [\"지원자수능성적\", \"최고점\", \"최저점\"],\n      \"requires_runtime_data\": true,\n      \"runtime_keys\": [\"cohort_max\", \"cohort_min\"],\n      \"source_page\": 23,\n      \"evidence_text\": \"【수능 성적 환산】① (모집단위 지원자 수능 성적 중 최고점 - 최저점)이 15점 이상인 경우 15 × {(지원자 수능 성적 - 최저점)/(최고점 - 최저점)} + 45 ② (최고점 - 최저점)이 15점 미만인 경우 60 - (최고점 - 지원자 수능 성적)\"\n    },\n    {\n      \"rule_id\": \"SNU-GEN-STAGE2-CONV-01\",\n      \"admission_type\": \"정시\",\n      \"track\": \"수능위주전형(일반전형)\",\n      \"unit_or_major\": \"전 모집단위(음악대학 제외)\",\n      \"stage\": \"2단계\",\n      \"formula_type\": \"relative_minmax\",\n      \"expression\": \"① 최고점-최저점 ≥ 20: 20 * (지원자수능성적 - 최저점)/(최고점-최저점) + 60\\n② 최고점-최저점 < 20: 80 - (최고점 - 지원자수능성적)\",\n      \"piecewise\": [\n        {\n          \"if\": \"최고점-최저점 ≥ 20\",\n          \"value\": \"20 * (지원자수능성적 - 최저점)/(최고점-최저점) + 60\"\n        },\n        {\n          \"if\": \"최고점-최저점 < 20\",\n          \"value\": \"80 - (최고점 - 지원자수능성적)\"\n        }\n      ],\n      \"grade_map\": {},\n      \"variables\": [\"지원자수능성적\", \"최고점\", \"최저점\"],\n      \"requires_runtime_data\": true,\n      \"runtime_keys\": [\"cohort_max\", \"cohort_min\"],\n      \"source_page\": 29,\n      \"evidence_text\": \"【2단계】 1단계 성적 환산 ① (모집단위 1단계 합격자 수능 성적 중 최고점 - 최저점)이 20점 이상인 경우 20 × {(지원자 수능 성적 - 최저점)/(최고점 - 최저점)} + 60 ② (최고점 - 최저점)이 20점 미만인 경우 80 - (최고점 - 지원자 수능 성적)\"\n    },\n    {\n      \"rule_id\": \"SNU-ART-STAGE2-CONV-01\",\n      \"admission_type\": \"정시\",\n      \"track\": \"수능위주전형(일반전형)\",\n      \"unit_or_major\": \"미술대학\",\n      \"stage\": \"2단계\",\n      \"formula_type\": \"relative_minmax\",\n      \"expression\": \"① 최고점-최저점 ≥ 30: 30 * (지원자수능성적 - 최저점)/(최고점-최저점) + 10\\n② 최고점-최저점 < 30: 40 - (최고점 - 지원자수능성적)\",\n      \"piecewise\": [\n        {\n          \"if\": \"최고점-최저점 ≥ 30\",\n          \"value\": \"30 * (지원자수능성적 - 최저점)/(최고점-최저점) + 10\"\n        },\n        {\n          \"if\": \"최고점-최저점 < 30\",\n          \"value\": \"40 - (최고점 - 지원자수능성적)\"\n        }\n      ],\n      \"grade_map\": {},\n      \"variables\": [\"지원자수능성적\", \"최고점\", \"최저점\"],\n      \"requires_runtime_data\": true,\n      \"runtime_keys\": [\"cohort_max\", \"cohort_min\"],\n      \"source_page\": 32,\n      \"evidence_text\": \"[2단계] 미술대학 1단계 성적 환산 ① (모집단위 1단계 합격자 수능 성적 중 최고점 - 최저점)이 30점 이상인 경우 {30 × (지원자 수능 성적 - 최저점)/(최고점 - 최저점)} + 10 ② (최고점 - 최저점)이 30점 미만인 경우 40 - (최고점 - 지원자 수능 성적)\"\n    }\n  ]\n}",
+  "result": {
+    "university": "서울대학교",
+    "document_scope": "정시모집",
+    "rules": [
+      {
+        "rule_id": "SNU-REG-SONEUNG-CONV-01",
+        "admission_type": "정시",
+        "track": "수능위주전형(지역균형전형)",
+        "unit_or_major": null,
+        "stage": "최종",
+        "formula_type": "relative_minmax",
+        "expression": "① 최고점-최저점 ≥ 15: 15 * (지원자수능성적 - 최저점)/(최고점-최저점) + 45\n② 최고점-최저점 < 15: 60 - (최고점 - 지원자수능성적)",
+        "piecewise": [
+          {
+            "if": "최고점-최저점 ≥ 15",
+            "value": "15 * (지원자수능성적 - 최저점)/(최고점-최저점) + 45"
+          },
+          {
+            "if": "최고점-최저점 < 15",
+            "value": "60 - (최고점 - 지원자수능성적)"
+          }
+        ],
+        "grade_map": {},
+        "variables": [
+          "지원자수능성적",
+          "최고점",
+          "최저점"
+        ],
+        "requires_runtime_data": true,
+        "runtime_keys": [
+          "cohort_max",
+          "cohort_min"
+        ],
+        "source_page": 23,
+        "evidence_text": "【수능 성적 환산】① (모집단위 지원자 수능 성적 중 최고점 - 최저점)이 15점 이상인 경우 15 × {(지원자 수능 성적 - 최저점)/(최고점 - 최저점)} + 45 ② (최고점 - 최저점)이 15점 미만인 경우 60 - (최고점 - 지원자 수능 성적)"
+      },
+      {
+        "rule_id": "SNU-GEN-STAGE2-CONV-01",
+        "admission_type": "정시",
+        "track": "수능위주전형(일반전형)",
+        "unit_or_major": "전 모집단위(음악대학 제외)",
+        "stage": "2단계",
+        "formula_type": "relative_minmax",
+        "expression": "① 최고점-최저점 ≥ 20: 20 * (지원자수능성적 - 최저점)/(최고점-최저점) + 60\n② 최고점-최저점 < 20: 80 - (최고점 - 지원자수능성적)",
+        "piecewise": [
+          {
+            "if": "최고점-최저점 ≥ 20",
+            "value": "20 * (지원자수능성적 - 최저점)/(최고점-최저점) + 60"
+          },
+          {
+            "if": "최고점-최저점 < 20",
+            "value": "80 - (최고점 - 지원자수능성적)"
+          }
+        ],
+        "grade_map": {},
+        "variables": [
+          "지원자수능성적",
+          "최고점",
+          "최저점"
+        ],
+        "requires_runtime_data": true,
+        "runtime_keys": [
+          "cohort_max",
+          "cohort_min"
+        ],
+        "source_page": 29,
+        "evidence_text": "【2단계】 1단계 성적 환산 ① (모집단위 1단계 합격자 수능 성적 중 최고점 - 최저점)이 20점 이상인 경우 20 × {(지원자 수능 성적 - 최저점)/(최고점 - 최저점)} + 60 ② (최고점 - 최저점)이 20점 미만인 경우 80 - (최고점 - 지원자 수능 성적)"
+      },
+      {
+        "rule_id": "SNU-ART-STAGE2-CONV-01",
+        "admission_type": "정시",
+        "track": "수능위주전형(일반전형)",
+        "unit_or_major": "미술대학",
+        "stage": "2단계",
+        "formula_type": "relative_minmax",
+        "expression": "① 최고점-최저점 ≥ 30: 30 * (지원자수능성적 - 최저점)/(최고점-최저점) + 10\n② 최고점-최저점 < 30: 40 - (최고점 - 지원자수능성적)",
+        "piecewise": [
+          {
+            "if": "최고점-최저점 ≥ 30",
+            "value": "30 * (지원자수능성적 - 최저점)/(최고점-최저점) + 10"
+          },
+          {
+            "if": "최고점-최저점 < 30",
+            "value": "40 - (최고점 - 지원자수능성적)"
+          }
+        ],
+        "grade_map": {},
+        "variables": [
+          "지원자수능성적",
+          "최고점",
+          "최저점"
+        ],
+        "requires_runtime_data": true,
+        "runtime_keys": [
+          "cohort_max",
+          "cohort_min"
+        ],
+        "source_page": 32,
+        "evidence_text": "[2단계] 미술대학 1단계 성적 환산 ① (모집단위 1단계 합격자 수능 성적 중 최고점 - 최저점)이 30점 이상인 경우 {30 × (지원자 수능 성적 - 최저점)/(최고점 - 최저점)} + 10 ② (최고점 - 최저점)이 30점 미만인 경우 40 - (최고점 - 지원자 수능 성적)"
+      }
+    ]
+  }
+}

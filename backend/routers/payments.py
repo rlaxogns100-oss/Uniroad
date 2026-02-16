@@ -5,6 +5,7 @@ Polar 결제 웹훅 API
 """
 import json
 import logging
+from typing import Optional
 from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from config.config import settings
@@ -20,7 +21,7 @@ router = APIRouter()
 CHECKOUT_COMPLETED_STATUSES = {"completed", "succeeded", "complete"}
 
 
-def _get_client_reference_id(data: dict) -> str | None:
+def _get_client_reference_id(data: dict) -> Optional[str]:
     """Polar 웹훅 data에서 client_reference_id 추출 (다양한 위치 대응)"""
     if not data:
         return None

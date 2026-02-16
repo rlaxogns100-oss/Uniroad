@@ -1,0 +1,383 @@
+{
+  "school": "서울대학교",
+  "filename_contains": "정시모집",
+  "documents_found": 1,
+  "document_ids": [
+    234
+  ],
+  "chunks_found": 361,
+  "chunks_used": 361,
+  "context_chars": 154595,
+  "model": "gemini-2.5-flash-lite",
+  "json_parse_error": null,
+  "validation_errors": [],
+  "raw_output": "{\n  \"university\": \"서울대학교\",\n  \"document_scope\": \"정시모집\",\n  \"rules\": [\n    {\n      \"rule_id\": \"SNA_2026_J_001\",\n      \"admission_type\": \"정시\",\n      \"track\": \"지역균형전형\",\n      \"unit_or_major\": \"인문대학 인문계열, 사회과학대학(정치외교학부, 경제학부, 인류학과, 사회복지학과), 공과대학 광역, 약학대학 약학계열, 의과대학 의예과, 첨단융합학부, 치의학대학원 치의학과\",\n      \"stage\": null,\n      \"formula_type\": \"piecewise\",\n      \"expression\": null,\n      \"piecewise\": [\n        {\n          \"if\": \"(모집단위 지원자 수능 성적 중 최고점 - 모집단위 지원자 수능 성적 중 최저점) >= 15\",\n          \"value\": \"15 * ((지원자 수능 성적 - 모집단위 지원자 수능 성적 중 최저점) / (모집단위 지원자 수능 성적 중 최고점 - 모집단위 지원자 수능 성적 중 최저점)) + 45\"\n        },\n        {\n          \"if\": \"(모집단위 지원자 수능 성적 중 최고점 - 모집단위 지원자 수능 성적 중 최저점) < 15\",\n          \"value\": \"60 - (모집단위 지원자 수능 성적 중 최고점 - 지원자 수능 성적)\"\n        }\n      ],\n      \"variables\": [\n        \"지원자 수능 성적\",\n        \"모집단위 지원자 수능 성적 중 최고점\",\n        \"모집단위 지원자 수능 성적 중 최저점\"\n      ],\n      \"requires_runtime_data\": true,\n      \"runtime_keys\": [\n        \"cohort_max\",\n        \"cohort_min\"\n      ],\n      \"source_page\": 22,\n      \"evidence_text\": \"【수능 성적 환산】\\n① (모집단위 지원자 수능 성적★ 중 최고점 - 모집단위 지원자 수능 성적★ 중 최저점)이 15점 이상인 경우\\n15 * ((지원자 수능 성적★ - 모집단위 지원자 수능 성적★ 중 최저점) / (모집단위 지원자 수능 성적★ 중 최고점 - 모집단위 지원자 수능 성적★ 중 최저점)) + 45\\n\\n② (모집단위 지원자 수능 성적★ 중 최고점 - 모집단위 지원자 수능 성적★ 중 최저점)이 15점 미만인 경우\\n60 - (모집단위 지원자 수능 성적★ 중 최고점 - 지원자 수능 성적★)\\n\\n★ 수능 성적: [19쪽의 '라) 수능 성적 산출'] 방식으로 계산된 지원자의 수능 성적\"\n    },\n    {\n      \"rule_id\": \"SNA_2026_J_002\",\n      \"admission_type\": \"정시\",\n      \"track\": \"지역균형전형\",\n      \"unit_or_major\": \"인문대학 인문계열, 사회과학대학(정치외교학부, 경제학부, 인류학과, 사회복지학과), 공과대학 광역, 약학대학 약학계열, 의과대학 의예과, 첨단융합학부, 치의학대학원 치의학과\",\n      \"stage\": \"교과평가\",\n      \"formula_type\": \"grade_map\",\n      \"expression\": null,\n      \"piecewise\": [\n        {\n          \"if\": \"A·A\",\n          \"value\": \"10\"\n        },\n        {\n          \"if\": \"A·B\",\n          \"value\": \"8\"\n        },\n        {\n          \"if\": \"B·B\",\n          \"value\": \"6\"\n        },\n        {\n          \"if\": \"B·C\",\n          \"value\": \"3\"\n        },\n        {\n          \"if\": \"C·C\",\n          \"value\": \"0\"\n        }\n      ],\n      \"grade_map\": {\n        \"A\": 10,\n        \"B\": 6,\n        \"C\": 0\n      },\n      \"variables\": [],\n      \"requires_runtime_data\": false,\n      \"runtime_keys\": [],\n      \"source_page\": 24,\n      \"evidence_text\": \"마) 평가등급: A(10점) > B(6점) > C(0점)\\n바) 2명의 평가자가 독립적으로 평가하여 등급을 부여하고 아래 조합에 따라 점수를 부여함\\n사) 교과평가 점수 = 2인 평가 등급 조합 + 30점\"\n    },\n    {\n      \"rule_id\": \"SNA_2026_J_003\",\n      \"admission_type\": \"정시\",\n      \"track\": \"일반전형\",\n      \"unit_or_major\": \"전 모집단위(미술대학, 사범대학 체육교육과 제외)\",\n      \"stage\": \"1단계\",\n      \"formula_type\": \"piecewise\",\n      \"expression\": null,\n      \"piecewise\": [\n        {\n          \"if\": \"(모집단위 1단계 합격자 수능 성적 중 최고점 - 모집단위 1단계 합격자 수능 성적 중 최저점) >= 20\",\n          \"value\": \"20 * ((지원자 수능 성적 - 모집단위 1단계 합격자 수능 성적 중 최저점) / (모집단위 1단계 합격자 수능 성적 중 최고점 - 모집단위 1단계 합격자 수능 성적 중 최저점)) + 60\"\n        },\n        {\n          \"if\": \"(모집단위 1단계 합격자 수능 성적 중 최고점 - 모집단위 1단계 합격자 수능 성적 중 최저점) < 20\",\n          \"value\": \"80 - (모집단위 1단계 합격자 수능 성적 중 최고점 - 지원자 수능 성적)\"\n        }\n      ],\n      \"variables\": [\n        \"지원자 수능 성적\",\n        \"모집단위 1단계 합격자 수능 성적 중 최고점\",\n        \"모집단위 1단계 합격자 수능 성적 중 최저점\"\n      ],\n      \"requires_runtime_data\": true,\n      \"runtime_keys\": [\n        \"cohort_max\",\n        \"cohort_min\"\n      ],\n      \"source_page\": 29,\n      \"evidence_text\": \"【2단계】 1단계 성적 환산\\n① (모집단위 1단계 합격자 수능 성적★ 중 최고점 - 모집단위 1단계 합격자 수능 성적★ 중 최저점)이 20점 이상인 경우\\n20 * ((지원자 수능 성적★ - 모집단위 1단계 합격자 수능 성적★ 중 최저점) / (모집단위 1단계 합격자 수능 성적★ 중 최고점 - 모집단위 1단계 합격자 수능 성적★ 중 최저점)) + 60\\n\\n② (모집단위 1단계 합격자 수능 성적★ 중 최고점 - 모집단위 1단계 합격자 수능 성적★ 중 최저점)이 20점 미만인 경우\\n80 - (모집단위 1단계 합격자 수능 성적★ 중 최고점 - 지원자 수능 성적★)\\n\\n★ 수능 성적: [25쪽의 ‘라) 1단계 수능 성적 산출’] 방식으로 계산된 지원자의 1단계 수능 성적\"\n    },\n    {\n      \"rule_id\": \"SNA_2026_J_004\",\n      \"admission_type\": \"정시\",\n      \"track\": \"일반전형\",\n      \"unit_or_major\": \"전 모집단위(미술대학, 사범대학 체육교육과 제외)\",\n      \"stage\": \"교과평가\",\n      \"formula_type\": \"grade_map\",\n      \"expression\": null,\n      \"piecewise\": [\n        {\n          \"if\": \"A·A\",\n          \"value\": \"5\"\n        },\n        {\n          \"if\": \"A·B\",\n          \"value\": \"4\"\n        },\n        {\n          \"if\": \"B·B\",\n          \"value\": \"3\"\n        },\n        {\n          \"if\": \"B·C\",\n          \"value\": \"1.5\"\n        },\n        {\n          \"if\": \"C·C\",\n          \"value\": \"0\"\n        }\n      ],\n      \"grade_map\": {\n        \"A\": 5,\n        \"B\": 3,\n        \"C\": 0\n      },\n      \"variables\": [],\n      \"requires_runtime_data\": false,\n      \"runtime_keys\": [],\n      \"source_page\": 30,\n      \"evidence_text\": \"마) 평가등급: A(5점) > B(3점) > C(0점)\\n바) 2명의 평가자가 독립적으로 평가하여 등급을 부여하고 아래 조합에 따라 점수를 부여함\\n사) 교과평가 점수 = 2인 평가 등급 조합 + 15점\"\n    },\n    {\n      \"rule_id\": \"SNA_2026_J_005\",\n      \"admission_type\": \"정시\",\n      \"track\": \"일반전형\",\n      \"unit_or_major\": \"미술대학 동양화과, 서양화과, 조소과, 공예과\",\n      \"stage\": \"1단계\",\n      \"formula_type\": \"piecewise\",\n      \"expression\": null,\n      \"piecewise\": [\n        {\n          \"if\": \"(모집단위 1단계 합격자 수능 성적 중 최고점 - 모집단위 1단계 합격자 수능 성적 중 최저점) >= 30\",\n          \"value\": \"30 * ((지원자 수능 성적 - 모집단위 1단계 합격자 수능 성적 중 최저점) / (모집단위 1단계 합격자 수능 성적 중 최고점 - 모집단위 1단계 합격자 수능 성적 중 최저점)) + 10\"\n        },\n        {\n          \"if\": \"(모집단위 1단계 합격자 수능 성적 중 최고점 - 모집단위 1단계 합격자 수능 성적 중 최저점) < 30\",\n          \"value\": \"40 - (모집단위 1단계 합격자 수능 성적 중 최고점 - 지원자 수능 성적)\"\n        }\n      ],\n      \"variables\": [\n        \"지원자 수능 성적\",\n        \"모집단위 1단계 합격자 수능 성적 중 최고점\",\n        \"모집단위 1단계 합격자 수능 성적 중 최저점\"\n      ],\n      \"requires_runtime_data\": true,\n      \"runtime_keys\": [\n        \"cohort_max\",\n        \"cohort_min\"\n      ],\n      \"source_page\": 32,\n      \"evidence_text\": \"② (모집단위 1단계 합격자 수능 성적★ 중 최고점 - 모집단위 1단계 합격자 수능 성적★ 중 최저점)이 30점 미만인 경우\\n40 - (모집단위 1단계 합격자 수능 성적★ 중 최고점 - 지원자 수능 성적★)\\n\\n★ 수능 성적: [27쪽의 '(가) 동양화과, 서양화과, 조소과, 공예과, (3) 1단계 수능 성적 산출'], [28쪽의 '(나) 디자인과, (3) 1단계 수능 성적 산출'] 방식으로 계산된 지원자의 1단계 수능 성적\"\n    },\n    {\n      \"rule_id\": \"SNA_2026_J_006\",\n      \"admission_type\": \"정시\",\n      \"track\": \"일반전형\",\n      \"unit_or_major\": \"음악대학 성악과\",\n      \"stage\": \"1단계\",\n      \"formula_type\": \"piecewise\",\n      \"expression\": null,\n      \"piecewise\": [\n        {\n          \"if\": \"지원자 수능 성적 * (16.5 / 400) + 38.5\",\n          \"value\": \"지원자 수능 성적 * (16.5 / 400) + 38.5\"\n        }\n      ],\n      \"variables\": [\n        \"지원자 수능 성적\"\n      ],\n      \"requires_runtime_data\": false,\n      \"runtime_keys\": [],\n      \"source_page\": 43,\n      \"evidence_text\": \"【1단계】 수능 성적 환산\\n{지원자 수능 성적★ * (16.5 / 400)} + 38.5\\n\\n★ 수능 성적: [39쪽의 ‘나) 작곡과, (3) 1단계 수능 성적 산출’] 방식으로 계산된 지원자의 수능 성적\"\n    },\n    {\n      \"rule_id\": \"SNA_2026_J_007\",\n      \"admission_type\": \"정시\",\n      \"track\": \"일반전형\",\n      \"unit_or_major\": \"음악대학 성악과\",\n      \"stage\": \"2단계\",\n      \"formula_type\": \"piecewise\",\n      \"expression\": null,\n      \"piecewise\": [\n        {\n          \"if\": \"(1단계 수능 성적 + 1단계 실기평가 성적) * (4 / 10)\",\n          \"value\": \"(1단계 수능 성적 + 1단계 실기평가 성적) * (4 / 10)\"\n        }\n      ],\n      \"variables\": [\n        \"1단계 수능 성적\",\n        \"1단계 실기평가 성적\"\n      ],\n      \"requires_runtime_data\": false,\n      \"runtime_keys\": [],\n      \"source_page\": 43,\n      \"evidence_text\": \"【2단계】 1단계 성적 환산\\n(1단계 수능 성적★ + 1단계 실기평가 성적) * (4 / 10)\\n\\n★ 수능 성적: [39쪽의 ‘나) 작곡과, 【1단계】 수능 성적 환산’] 방식으로 계산된 지원자의 1단계 수능 성적\"\n    },\n    {\n      \"rule_id\": \"SNA_2026_J_008\",\n      \"admission_type\": \"정시\",\n      \"track\": \"일반전형\",\n      \"unit_or_major\": \"음악대학 음악학과\",\n      \"stage\": null,\n      \"formula_type\": \"piecewise\",\n      \"expression\": null,\n      \"piecewise\": [\n        {\n          \"if\": \"지원자 수능 성적 * (15 / 400)\",\n          \"value\": \"(지원자 수능 성적 * (15 / 400)) + 35\"\n        }\n      ],\n      \"variables\": [\n        \"지원자 수능 성적\"\n      ],\n      \"requires_runtime_data\": false,\n      \"runtime_keys\": [],\n      \"source_page\": 43,\n      \"evidence_text\": \"【수능 성적 환산】\\n{지원자 수능 성적★ * (15 / 400)} + 35\\n\\n★ 수능 성적: [39쪽의 ‘다) 음악학과, (3) 수능 성적 산출’] 방식으로 계산된 지원자의 수능 성적\"\n    },\n    {\n      \"rule_id\": \"SNA_2026_J_009\",\n      \"admission_type\": \"정시\",\n      \"track\": \"기회균형특별전형(농어촌·저소득)\",\n      \"unit_or_major\": \"전 모집단위(미술대학, 사범대학 체육교육과, 음악대학 제외)\",\n      \"stage\": null,\n      \"formula_type\": \"absolute\",\n      \"expression\": \"100% (수능)\",\n      \"piecewise\": [],\n      \"variables\": [],\n      \"requires_runtime_data\": false,\n      \"runtime_keys\": [],\n      \"source_page\": 53,\n      \"evidence_text\": \"가. 전형요소 및 배점\\n전 모집단위(미술대학, 사범대학 체육교육과, 음악대학 제외)\\n수능\\n100%\"\n    },\n    {\n      \"rule_id\": \"SNA_2026_J_010\",\n      \"admission_type\": \"정시\",\n      \"track\": \"기회균형특별전형(농어촌·저소득)\",\n      \"unit_or_major\": \"사범대학 체육교육과\",\n      \"stage\": \"2단계\",\n      \"formula_type\": \"absolute\",\n      \"expression\": \"1단계 성적 80 + 실기평가 20\",\n      \"piecewise\": [],\n      \"variables\": [],\n      \"requires_runtime_data\": false,\n      \"runtime_keys\": [],\n      \"source_page\": 53,\n      \"evidence_text\": \"나. 전형요소 및 배점\\n사범대학 체육교육과\\n1단계 수능\\n100% (3배수)\\n2단계 1단계 성적\\n80\\n2단계 실기평가\\n20\"\n    },\n    {\n      \"rule_id\": \"SNA_2026_J_011\",\n      \"admission_type\": \"정시\",\n      \"track\": \"기회균형특별전형(농어촌·저소득)\",\n      \"unit_or_major\": \"음악대학 성악과\",\n      \"stage\": \"1단계\",\n      \"formula_type\": \"absolute\",\n      \"expression\": \"수능 51 + 실기평가 49\",\n      \"piecewise\": [],\n      \"variables\": [],\n      \"requires_runtime_data\": false,\n      \"runtime_keys\": [],\n      \"source_page\": 57,\n      \"evidence_text\": \"가. 전형요소 및 배점\\n성악과\\n1단계 수능\\n51\\n1단계 실기평가\\n49\\n2단계 1단계 성적\\n40\\n2단계 실기평가\\n40\\n2단계 면접\\n20\"\n    },\n    {\n      \"rule_id\": \"SNA_2026_J_012\",\n      \"admission_type\": \"정시\",\n      \"track\": \"기회균형특별전형(농어촌·저소득)\",\n      \"unit_or_major\": \"음악대학 성악과\",\n      \"stage\": \"2단계\",\n      \"formula_type\": \"absolute\",\n      \"expression\": \"1단계 성적 40 + 2단계 실기평가 40 + 2단계 면접 20\",\n      \"piecewise\": [],\n      \"variables\": [],\n      \"requires_runtime_data\": false,\n      \"runtime_keys\": [],\n      \"source_page\": 57,\n      \"evidence_text\": \"가. 전형요소 및 배점\\n성악과\\n1단계 수능\\n51\\n1단계 실기평가\\n49\\n2단계 1단계 성적\\n40\\n2단계 실기평가\\n40\\n2단계 면접\\n20\"\n    },\n    {\n      \"rule_id\": \"SNA_2026_J_013\",\n      \"admission_type\": \"정시\",\n      \"track\": \"기회균형특별전형(농어촌·저소득)\",\n      \"unit_or_major\": \"음악대학 작곡과\",\n      \"stage\": \"1단계\",\n      \"formula_type\": \"absolute\",\n      \"expression\": \"수능 55 + 실기평가 45\",\n      \"piecewise\": [],\n      \"variables\": [],\n      \"requires_runtime_data\": false,\n      \"runtime_keys\": [],\n      \"source_page\": 57,\n      \"evidence_text\": \"가. 전형요소 및 배점\\n작곡과\\n1단계 수능\\n55\\n1단계 실기평가\\n45\\n2단계 1단계 성적\\n40\\n2단계 실기평가\\n40\\n2단계 면접\\n20\"\n    },\n    {\n      \"rule_id\": \"SNA_2026_J_014\",\n      \"admission_type\": \"정시\",\n      \"track\": \"기회균형특별전형(농어촌·저소득)\",\n      \"unit_or_major\": \"음악대학 작곡과\",\n      \"stage\": \"2단계\",\n      \"formula_type\": \"absolute\",\n      \"expression\": \"1단계 성적 40 + 2단계 실기평가 40 + 2단계 면접 20\",\n      \"piecewise\": [],\n      \"variables\": [],\n      \"requires_runtime_data\": false,\n      \"runtime_keys\": [],\n      \"source_page\": 57,\n      \"evidence_text\": \"가. 전형요소 및 배점\\n작곡과\\n1단계 수능\\n55\\n1단계 실기평가\\n45\\n2단계 1단계 성적\\n40\\n2단계 실기평가\\n40\\n2단계 면접\\n20\"\n    },\n    {\n      \"rule_id\": \"SNA_2026_J_015\",\n      \"admission_type\": \"정시\",\n      \"track\": \"기회균형특별전형(농어촌·저소득)\",\n      \"unit_or_major\": \"음악대학 음악학과\",\n      \"stage\": null,\n      \"formula_type\": \"absolute\",\n      \"expression\": \"수능 50 + 실기평가 40 + 면접 10\",\n      \"piecewise\": [],\n      \"variables\": [],\n      \"requires_runtime_data\": false,\n      \"runtime_keys\": [],\n      \"source_page\": 57,\n      \"evidence_text\": \"나. 전형요소 및 배점\\n음악학과\\n수능\\n50\\n실기평가\\n40\\n면접\\n10\"\n    },\n    {\n      \"rule_id\": \"SNA_2026_J_016\",\n      \"admission_type\": \"정시\",\n      \"track\": \"일반전형\",\n      \"unit_or_major\": \"미술대학 동양화과, 서양화과, 조소과, 공예과, 디자인과\",\n      \"stage\": null,\n      \"formula_type\": \"absolute\",\n      \"expression\": \"수능 60 + 실기평가 20 + 면접 20\",\n      \"piecewise\": [],\n      \"variables\": [],\n      \"requires_runtime_data\": false,\n      \"runtime_keys\": [],\n      \"source_page\": 55,\n      \"evidence_text\": \"가. 전형요소 및 배점\\n동양화과, 서양화과, 조소과, 공예과, 디자인과\\n수능\\n60\\n실기평가\\n20\\n면접\\n20\"\n    }\n  ]\n}",
+  "result": {
+    "university": "서울대학교",
+    "document_scope": "정시모집",
+    "rules": [
+      {
+        "rule_id": "SNA_2026_J_001",
+        "admission_type": "정시",
+        "track": "지역균형전형",
+        "unit_or_major": "인문대학 인문계열, 사회과학대학(정치외교학부, 경제학부, 인류학과, 사회복지학과), 공과대학 광역, 약학대학 약학계열, 의과대학 의예과, 첨단융합학부, 치의학대학원 치의학과",
+        "stage": null,
+        "formula_type": "piecewise",
+        "expression": null,
+        "piecewise": [
+          {
+            "if": "(모집단위 지원자 수능 성적 중 최고점 - 모집단위 지원자 수능 성적 중 최저점) >= 15",
+            "value": "15 * ((지원자 수능 성적 - 모집단위 지원자 수능 성적 중 최저점) / (모집단위 지원자 수능 성적 중 최고점 - 모집단위 지원자 수능 성적 중 최저점)) + 45"
+          },
+          {
+            "if": "(모집단위 지원자 수능 성적 중 최고점 - 모집단위 지원자 수능 성적 중 최저점) < 15",
+            "value": "60 - (모집단위 지원자 수능 성적 중 최고점 - 지원자 수능 성적)"
+          }
+        ],
+        "variables": [
+          "지원자 수능 성적",
+          "모집단위 지원자 수능 성적 중 최고점",
+          "모집단위 지원자 수능 성적 중 최저점"
+        ],
+        "requires_runtime_data": true,
+        "runtime_keys": [
+          "cohort_max",
+          "cohort_min"
+        ],
+        "source_page": 22,
+        "evidence_text": "【수능 성적 환산】\n① (모집단위 지원자 수능 성적★ 중 최고점 - 모집단위 지원자 수능 성적★ 중 최저점)이 15점 이상인 경우\n15 * ((지원자 수능 성적★ - 모집단위 지원자 수능 성적★ 중 최저점) / (모집단위 지원자 수능 성적★ 중 최고점 - 모집단위 지원자 수능 성적★ 중 최저점)) + 45\n\n② (모집단위 지원자 수능 성적★ 중 최고점 - 모집단위 지원자 수능 성적★ 중 최저점)이 15점 미만인 경우\n60 - (모집단위 지원자 수능 성적★ 중 최고점 - 지원자 수능 성적★)\n\n★ 수능 성적: [19쪽의 '라) 수능 성적 산출'] 방식으로 계산된 지원자의 수능 성적"
+      },
+      {
+        "rule_id": "SNA_2026_J_002",
+        "admission_type": "정시",
+        "track": "지역균형전형",
+        "unit_or_major": "인문대학 인문계열, 사회과학대학(정치외교학부, 경제학부, 인류학과, 사회복지학과), 공과대학 광역, 약학대학 약학계열, 의과대학 의예과, 첨단융합학부, 치의학대학원 치의학과",
+        "stage": "교과평가",
+        "formula_type": "grade_map",
+        "expression": null,
+        "piecewise": [
+          {
+            "if": "A·A",
+            "value": "10"
+          },
+          {
+            "if": "A·B",
+            "value": "8"
+          },
+          {
+            "if": "B·B",
+            "value": "6"
+          },
+          {
+            "if": "B·C",
+            "value": "3"
+          },
+          {
+            "if": "C·C",
+            "value": "0"
+          }
+        ],
+        "grade_map": {
+          "A": 10,
+          "B": 6,
+          "C": 0
+        },
+        "variables": [],
+        "requires_runtime_data": false,
+        "runtime_keys": [],
+        "source_page": 24,
+        "evidence_text": "마) 평가등급: A(10점) > B(6점) > C(0점)\n바) 2명의 평가자가 독립적으로 평가하여 등급을 부여하고 아래 조합에 따라 점수를 부여함\n사) 교과평가 점수 = 2인 평가 등급 조합 + 30점"
+      },
+      {
+        "rule_id": "SNA_2026_J_003",
+        "admission_type": "정시",
+        "track": "일반전형",
+        "unit_or_major": "전 모집단위(미술대학, 사범대학 체육교육과 제외)",
+        "stage": "1단계",
+        "formula_type": "piecewise",
+        "expression": null,
+        "piecewise": [
+          {
+            "if": "(모집단위 1단계 합격자 수능 성적 중 최고점 - 모집단위 1단계 합격자 수능 성적 중 최저점) >= 20",
+            "value": "20 * ((지원자 수능 성적 - 모집단위 1단계 합격자 수능 성적 중 최저점) / (모집단위 1단계 합격자 수능 성적 중 최고점 - 모집단위 1단계 합격자 수능 성적 중 최저점)) + 60"
+          },
+          {
+            "if": "(모집단위 1단계 합격자 수능 성적 중 최고점 - 모집단위 1단계 합격자 수능 성적 중 최저점) < 20",
+            "value": "80 - (모집단위 1단계 합격자 수능 성적 중 최고점 - 지원자 수능 성적)"
+          }
+        ],
+        "variables": [
+          "지원자 수능 성적",
+          "모집단위 1단계 합격자 수능 성적 중 최고점",
+          "모집단위 1단계 합격자 수능 성적 중 최저점"
+        ],
+        "requires_runtime_data": true,
+        "runtime_keys": [
+          "cohort_max",
+          "cohort_min"
+        ],
+        "source_page": 29,
+        "evidence_text": "【2단계】 1단계 성적 환산\n① (모집단위 1단계 합격자 수능 성적★ 중 최고점 - 모집단위 1단계 합격자 수능 성적★ 중 최저점)이 20점 이상인 경우\n20 * ((지원자 수능 성적★ - 모집단위 1단계 합격자 수능 성적★ 중 최저점) / (모집단위 1단계 합격자 수능 성적★ 중 최고점 - 모집단위 1단계 합격자 수능 성적★ 중 최저점)) + 60\n\n② (모집단위 1단계 합격자 수능 성적★ 중 최고점 - 모집단위 1단계 합격자 수능 성적★ 중 최저점)이 20점 미만인 경우\n80 - (모집단위 1단계 합격자 수능 성적★ 중 최고점 - 지원자 수능 성적★)\n\n★ 수능 성적: [25쪽의 ‘라) 1단계 수능 성적 산출’] 방식으로 계산된 지원자의 1단계 수능 성적"
+      },
+      {
+        "rule_id": "SNA_2026_J_004",
+        "admission_type": "정시",
+        "track": "일반전형",
+        "unit_or_major": "전 모집단위(미술대학, 사범대학 체육교육과 제외)",
+        "stage": "교과평가",
+        "formula_type": "grade_map",
+        "expression": null,
+        "piecewise": [
+          {
+            "if": "A·A",
+            "value": "5"
+          },
+          {
+            "if": "A·B",
+            "value": "4"
+          },
+          {
+            "if": "B·B",
+            "value": "3"
+          },
+          {
+            "if": "B·C",
+            "value": "1.5"
+          },
+          {
+            "if": "C·C",
+            "value": "0"
+          }
+        ],
+        "grade_map": {
+          "A": 5,
+          "B": 3,
+          "C": 0
+        },
+        "variables": [],
+        "requires_runtime_data": false,
+        "runtime_keys": [],
+        "source_page": 30,
+        "evidence_text": "마) 평가등급: A(5점) > B(3점) > C(0점)\n바) 2명의 평가자가 독립적으로 평가하여 등급을 부여하고 아래 조합에 따라 점수를 부여함\n사) 교과평가 점수 = 2인 평가 등급 조합 + 15점"
+      },
+      {
+        "rule_id": "SNA_2026_J_005",
+        "admission_type": "정시",
+        "track": "일반전형",
+        "unit_or_major": "미술대학 동양화과, 서양화과, 조소과, 공예과",
+        "stage": "1단계",
+        "formula_type": "piecewise",
+        "expression": null,
+        "piecewise": [
+          {
+            "if": "(모집단위 1단계 합격자 수능 성적 중 최고점 - 모집단위 1단계 합격자 수능 성적 중 최저점) >= 30",
+            "value": "30 * ((지원자 수능 성적 - 모집단위 1단계 합격자 수능 성적 중 최저점) / (모집단위 1단계 합격자 수능 성적 중 최고점 - 모집단위 1단계 합격자 수능 성적 중 최저점)) + 10"
+          },
+          {
+            "if": "(모집단위 1단계 합격자 수능 성적 중 최고점 - 모집단위 1단계 합격자 수능 성적 중 최저점) < 30",
+            "value": "40 - (모집단위 1단계 합격자 수능 성적 중 최고점 - 지원자 수능 성적)"
+          }
+        ],
+        "variables": [
+          "지원자 수능 성적",
+          "모집단위 1단계 합격자 수능 성적 중 최고점",
+          "모집단위 1단계 합격자 수능 성적 중 최저점"
+        ],
+        "requires_runtime_data": true,
+        "runtime_keys": [
+          "cohort_max",
+          "cohort_min"
+        ],
+        "source_page": 32,
+        "evidence_text": "② (모집단위 1단계 합격자 수능 성적★ 중 최고점 - 모집단위 1단계 합격자 수능 성적★ 중 최저점)이 30점 미만인 경우\n40 - (모집단위 1단계 합격자 수능 성적★ 중 최고점 - 지원자 수능 성적★)\n\n★ 수능 성적: [27쪽의 '(가) 동양화과, 서양화과, 조소과, 공예과, (3) 1단계 수능 성적 산출'], [28쪽의 '(나) 디자인과, (3) 1단계 수능 성적 산출'] 방식으로 계산된 지원자의 1단계 수능 성적"
+      },
+      {
+        "rule_id": "SNA_2026_J_006",
+        "admission_type": "정시",
+        "track": "일반전형",
+        "unit_or_major": "음악대학 성악과",
+        "stage": "1단계",
+        "formula_type": "piecewise",
+        "expression": null,
+        "piecewise": [
+          {
+            "if": "지원자 수능 성적 * (16.5 / 400) + 38.5",
+            "value": "지원자 수능 성적 * (16.5 / 400) + 38.5"
+          }
+        ],
+        "variables": [
+          "지원자 수능 성적"
+        ],
+        "requires_runtime_data": false,
+        "runtime_keys": [],
+        "source_page": 43,
+        "evidence_text": "【1단계】 수능 성적 환산\n{지원자 수능 성적★ * (16.5 / 400)} + 38.5\n\n★ 수능 성적: [39쪽의 ‘나) 작곡과, (3) 1단계 수능 성적 산출’] 방식으로 계산된 지원자의 수능 성적"
+      },
+      {
+        "rule_id": "SNA_2026_J_007",
+        "admission_type": "정시",
+        "track": "일반전형",
+        "unit_or_major": "음악대학 성악과",
+        "stage": "2단계",
+        "formula_type": "piecewise",
+        "expression": null,
+        "piecewise": [
+          {
+            "if": "(1단계 수능 성적 + 1단계 실기평가 성적) * (4 / 10)",
+            "value": "(1단계 수능 성적 + 1단계 실기평가 성적) * (4 / 10)"
+          }
+        ],
+        "variables": [
+          "1단계 수능 성적",
+          "1단계 실기평가 성적"
+        ],
+        "requires_runtime_data": false,
+        "runtime_keys": [],
+        "source_page": 43,
+        "evidence_text": "【2단계】 1단계 성적 환산\n(1단계 수능 성적★ + 1단계 실기평가 성적) * (4 / 10)\n\n★ 수능 성적: [39쪽의 ‘나) 작곡과, 【1단계】 수능 성적 환산’] 방식으로 계산된 지원자의 1단계 수능 성적"
+      },
+      {
+        "rule_id": "SNA_2026_J_008",
+        "admission_type": "정시",
+        "track": "일반전형",
+        "unit_or_major": "음악대학 음악학과",
+        "stage": null,
+        "formula_type": "piecewise",
+        "expression": null,
+        "piecewise": [
+          {
+            "if": "지원자 수능 성적 * (15 / 400)",
+            "value": "(지원자 수능 성적 * (15 / 400)) + 35"
+          }
+        ],
+        "variables": [
+          "지원자 수능 성적"
+        ],
+        "requires_runtime_data": false,
+        "runtime_keys": [],
+        "source_page": 43,
+        "evidence_text": "【수능 성적 환산】\n{지원자 수능 성적★ * (15 / 400)} + 35\n\n★ 수능 성적: [39쪽의 ‘다) 음악학과, (3) 수능 성적 산출’] 방식으로 계산된 지원자의 수능 성적"
+      },
+      {
+        "rule_id": "SNA_2026_J_009",
+        "admission_type": "정시",
+        "track": "기회균형특별전형(농어촌·저소득)",
+        "unit_or_major": "전 모집단위(미술대학, 사범대학 체육교육과, 음악대학 제외)",
+        "stage": null,
+        "formula_type": "absolute",
+        "expression": "100% (수능)",
+        "piecewise": [],
+        "variables": [],
+        "requires_runtime_data": false,
+        "runtime_keys": [],
+        "source_page": 53,
+        "evidence_text": "가. 전형요소 및 배점\n전 모집단위(미술대학, 사범대학 체육교육과, 음악대학 제외)\n수능\n100%"
+      },
+      {
+        "rule_id": "SNA_2026_J_010",
+        "admission_type": "정시",
+        "track": "기회균형특별전형(농어촌·저소득)",
+        "unit_or_major": "사범대학 체육교육과",
+        "stage": "2단계",
+        "formula_type": "absolute",
+        "expression": "1단계 성적 80 + 실기평가 20",
+        "piecewise": [],
+        "variables": [],
+        "requires_runtime_data": false,
+        "runtime_keys": [],
+        "source_page": 53,
+        "evidence_text": "나. 전형요소 및 배점\n사범대학 체육교육과\n1단계 수능\n100% (3배수)\n2단계 1단계 성적\n80\n2단계 실기평가\n20"
+      },
+      {
+        "rule_id": "SNA_2026_J_011",
+        "admission_type": "정시",
+        "track": "기회균형특별전형(농어촌·저소득)",
+        "unit_or_major": "음악대학 성악과",
+        "stage": "1단계",
+        "formula_type": "absolute",
+        "expression": "수능 51 + 실기평가 49",
+        "piecewise": [],
+        "variables": [],
+        "requires_runtime_data": false,
+        "runtime_keys": [],
+        "source_page": 57,
+        "evidence_text": "가. 전형요소 및 배점\n성악과\n1단계 수능\n51\n1단계 실기평가\n49\n2단계 1단계 성적\n40\n2단계 실기평가\n40\n2단계 면접\n20"
+      },
+      {
+        "rule_id": "SNA_2026_J_012",
+        "admission_type": "정시",
+        "track": "기회균형특별전형(농어촌·저소득)",
+        "unit_or_major": "음악대학 성악과",
+        "stage": "2단계",
+        "formula_type": "absolute",
+        "expression": "1단계 성적 40 + 2단계 실기평가 40 + 2단계 면접 20",
+        "piecewise": [],
+        "variables": [],
+        "requires_runtime_data": false,
+        "runtime_keys": [],
+        "source_page": 57,
+        "evidence_text": "가. 전형요소 및 배점\n성악과\n1단계 수능\n51\n1단계 실기평가\n49\n2단계 1단계 성적\n40\n2단계 실기평가\n40\n2단계 면접\n20"
+      },
+      {
+        "rule_id": "SNA_2026_J_013",
+        "admission_type": "정시",
+        "track": "기회균형특별전형(농어촌·저소득)",
+        "unit_or_major": "음악대학 작곡과",
+        "stage": "1단계",
+        "formula_type": "absolute",
+        "expression": "수능 55 + 실기평가 45",
+        "piecewise": [],
+        "variables": [],
+        "requires_runtime_data": false,
+        "runtime_keys": [],
+        "source_page": 57,
+        "evidence_text": "가. 전형요소 및 배점\n작곡과\n1단계 수능\n55\n1단계 실기평가\n45\n2단계 1단계 성적\n40\n2단계 실기평가\n40\n2단계 면접\n20"
+      },
+      {
+        "rule_id": "SNA_2026_J_014",
+        "admission_type": "정시",
+        "track": "기회균형특별전형(농어촌·저소득)",
+        "unit_or_major": "음악대학 작곡과",
+        "stage": "2단계",
+        "formula_type": "absolute",
+        "expression": "1단계 성적 40 + 2단계 실기평가 40 + 2단계 면접 20",
+        "piecewise": [],
+        "variables": [],
+        "requires_runtime_data": false,
+        "runtime_keys": [],
+        "source_page": 57,
+        "evidence_text": "가. 전형요소 및 배점\n작곡과\n1단계 수능\n55\n1단계 실기평가\n45\n2단계 1단계 성적\n40\n2단계 실기평가\n40\n2단계 면접\n20"
+      },
+      {
+        "rule_id": "SNA_2026_J_015",
+        "admission_type": "정시",
+        "track": "기회균형특별전형(농어촌·저소득)",
+        "unit_or_major": "음악대학 음악학과",
+        "stage": null,
+        "formula_type": "absolute",
+        "expression": "수능 50 + 실기평가 40 + 면접 10",
+        "piecewise": [],
+        "variables": [],
+        "requires_runtime_data": false,
+        "runtime_keys": [],
+        "source_page": 57,
+        "evidence_text": "나. 전형요소 및 배점\n음악학과\n수능\n50\n실기평가\n40\n면접\n10"
+      },
+      {
+        "rule_id": "SNA_2026_J_016",
+        "admission_type": "정시",
+        "track": "일반전형",
+        "unit_or_major": "미술대학 동양화과, 서양화과, 조소과, 공예과, 디자인과",
+        "stage": null,
+        "formula_type": "absolute",
+        "expression": "수능 60 + 실기평가 20 + 면접 20",
+        "piecewise": [],
+        "variables": [],
+        "requires_runtime_data": false,
+        "runtime_keys": [],
+        "source_page": 55,
+        "evidence_text": "가. 전형요소 및 배점\n동양화과, 서양화과, 조소과, 공예과, 디자인과\n수능\n60\n실기평가\n20\n면접\n20"
+      }
+    ]
+  }
+}

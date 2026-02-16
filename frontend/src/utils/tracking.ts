@@ -253,6 +253,23 @@ export function trackGA4Login(method: 'email' | 'google' | 'kakao'): void {
   sendGA4Event('login', { method })
 }
 
+/** Meta Pixel 이벤트 전송 */
+function sendMetaPixelEvent(eventName: string, params?: Record<string, any>): void {
+  try {
+    if (typeof window === 'undefined') return
+    const fbq = (window as any).fbq
+    if (typeof fbq !== 'function') return
+    fbq('track', eventName, params)
+  } catch (e) {
+    console.warn(`Meta Pixel ${eventName} 이벤트 전송 실패:`, e)
+  }
+}
+
+/** Meta Pixel: 회원가입 완료 시 호출 */
+export function trackMetaSignUp(method: 'email' | 'google' | 'kakao'): void {
+  sendMetaPixelEvent('CompleteRegistration', { content_name: method })
+}
+
 // 특정 이벤트 추적 헬퍼
 export const TrackingEvents = {
   // 채팅 관련

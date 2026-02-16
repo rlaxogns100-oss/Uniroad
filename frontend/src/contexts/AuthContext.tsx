@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import axios from 'axios'
-import { trackGA4SignUp, trackGA4Login, trackUserAction } from '../utils/tracking'
+import { trackGA4SignUp, trackGA4Login, trackUserAction, trackMetaSignUp } from '../utils/tracking'
 import { migrateMessages } from '../api/client'
 import { isCapacitorApp } from '../config'
 
@@ -58,6 +58,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const signupSource = sessionStorage.getItem('uniroad_oauth_signup_source') || 'unknown'
           if (is_new_user) {
             trackGA4SignUp(provider)
+            trackMetaSignUp(provider)
             trackUserAction('signup_success', provider, {
               customData: { signup_source: signupSource }
             })
@@ -182,6 +183,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem('user', JSON.stringify(userData))
       
       trackGA4SignUp('email')
+      trackMetaSignUp('email')
       return userData
     } catch (error: any) {
       throw new Error(error.response?.data?.detail || '회원가입 실패')
