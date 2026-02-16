@@ -159,3 +159,23 @@ async def get_subscription_status(user: dict = Depends(get_current_user)):
         "is_active": is_active,
         "subscriptions": summary,
     }
+
+
+@router.post("/subscribe")
+async def subscribe_pro(user: dict = Depends(get_current_user)):
+    """
+    PRO 구독 처리 (테스트용 - 결제 없이 바로 구독 처리)
+    - users.is_premium = true로 설정
+    """
+    user_id = user.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User id not found")
+    
+    print(f"[subscribe_pro] PRO 구독 요청: user_id={user_id}")
+    ok = await set_user_premium(user_id, is_premium=True)
+    print(f"[subscribe_pro] 구독 처리 완료: ok={ok}, user_id={user_id}")
+    
+    if not ok:
+        raise HTTPException(status_code=500, detail="구독 처리 실패")
+    
+    return {"ok": True, "message": "구독이 완료되었습니다!", "user_id": user_id}

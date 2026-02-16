@@ -9,11 +9,12 @@ import PreregisterModal from '../components/PreregisterModal'
 import RollingPlaceholder from '../components/RollingPlaceholder'
 import ProfileForm from '../components/ProfileForm'
 import { SubscribeButton } from '../components/SubscribeButton'
+import { redirectToPolarCheckout } from '../utils/polar'
 import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
 import { getSessionId, trackUserAction } from '../utils/tracking'
 import { FrontendTimingLogger } from '../utils/timingLogger'
-import { API_BASE } from '../config'
+import { API_BASE, isCapacitorApp } from '../config'
 import { addLog } from '../utils/adminLogger'
 
 interface UsedChunk {
@@ -142,6 +143,22 @@ export default function ChatPage() {
   const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false)
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
   const [isPreregisterModalOpen, setIsPreregisterModalOpen] = useState(false)
+  const [isProModalOpen, setIsProModalOpen] = useState(false)
+  const [dailyQuestionCount, setDailyQuestionCount] = useState<number>(() => {
+    // localStorage에서 오늘 질문 횟수 불러오기
+    const today = new Date().toDateString()
+    const stored = localStorage.getItem('uniroad_daily_questions')
+    if (stored) {
+      const { date, count } = JSON.parse(stored)
+      if (date === today) return count
+    }
+    return 0
+  })
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState(false)
+  const DAILY_QUESTION_LIMIT_BASIC = 20
+  const DAILY_QUESTION_LIMIT_PRO = 100
+  const [isProPopupVisible, setIsProPopupVisible] = useState(true)
+  const [isProPopupHovered, setIsProPopupHovered] = useState(false)
   const [authModalMessage, setAuthModalMessage] = useState<{ title: string; description: string } | undefined>(undefined)
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false)
   const [feedbackText, setFeedbackText] = useState('')
@@ -609,6 +626,13 @@ export default function ChatPage() {
   const handleSend = async (directMessage?: string) => {
     const messageToSend = directMessage || input
     
+    // 일일 질문 횟수 체크 (로그인한 유저만)
+    const dailyLimit = user?.is_premium ? DAILY_QUESTION_LIMIT_PRO : DAILY_QUESTION_LIMIT_BASIC
+    if (isAuthenticated && dailyQuestionCount >= dailyLimit) {
+      setIsQuotaExceeded(true)
+      return
+    }
+    
     // 중복 전송 방지 (더블 클릭, 빠른 Enter 연타 방지)
     // 이미지가 있으면 텍스트 없이도 전송 가능
     if ((!messageToSend.trim() && !selectedImage) || isLoading || sendingRef.current) {
@@ -619,6 +643,16 @@ export default function ChatPage() {
         alreadySending: sendingRef.current 
       })
       return
+    }
+
+    // 일일 질문 횟수 증가 (로그인한 유저만)
+    if (isAuthenticated) {
+      const newCount = dailyQuestionCount + 1
+      setDailyQuestionCount(newCount)
+      localStorage.setItem('uniroad_daily_questions', JSON.stringify({
+        date: new Date().toDateString(),
+        count: newCount
+      }))
     }
 
     console.log('📤 메시지 전송 시작:', messageToSend)
@@ -1071,13 +1105,13 @@ export default function ChatPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
               </svg>
               <span className="text-sm font-medium flex-1 text-left">공지사항</span>
-              {/* 5일 이내 공지사항이 있으면 NEW 배지 표시 */}
+              {/* 24시간 이내 공지사항이 있으면 NEW 배지 표시 */}
               {announcements.some(announcement => {
                 const createdDate = new Date(announcement.created_at)
                 const now = new Date()
                 const diffTime = now.getTime() - createdDate.getTime()
-                const diffDays = diffTime / (1000 * 60 * 60 * 24)
-                return diffDays <= 5
+                const diffHours = diffTime / (1000 * 60 * 60)
+                return diffHours <= 24
               }) && (
                 <span className="new-badge animate-shake-new flex-shrink-0">NEW</span>
               )}
@@ -1098,12 +1132,12 @@ export default function ChatPage() {
                   <p className="text-xs text-gray-500 py-2">등록된 공지사항이 없습니다.</p>
                 ) : (
                   announcements.map((announcement) => {
-                    // 5일 이내인지 확인
+                    // 24시간 이내인지 확인
                     const createdDate = new Date(announcement.created_at)
                     const now = new Date()
                     const diffTime = now.getTime() - createdDate.getTime()
-                    const diffDays = diffTime / (1000 * 60 * 60 * 24)
-                    const isNew = diffDays <= 5
+                    const diffHours = diffTime / (1000 * 60 * 60)
+                    const isNew = diffHours <= 24
 
                     return (
                     <div key={announcement.id} className={`group ${isNew ? 'animate-shake-new' : ''}`}>
@@ -1124,9 +1158,9 @@ export default function ChatPage() {
                             </svg>
                           )}
                         </div>
-                        <div className="flex-1 min-w-0">
+                        <div className="flex-1 min-w-0 relative">
                           <div className="flex items-center gap-2">
-                            <p className="text-xs font-medium text-gray-900 truncate">{announcement.title}</p>
+                            <p className="text-xs font-medium text-gray-900 truncate pr-1">{announcement.title}</p>
                             {isNew && (
                               <span className="new-badge flex-shrink-0">NEW</span>
                             )}
@@ -1134,35 +1168,36 @@ export default function ChatPage() {
                           <p className="text-[10px] text-gray-500">
                             {new Date(announcement.created_at).toLocaleDateString('ko-KR')}
                           </p>
+                          {/* 관리자 아이콘 - hover시 제목 위에 겹쳐서 표시 */}
+                          {isAuthenticated && isAdmin && (
+                            <div className="absolute right-0 top-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 rounded px-1">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  openEditModal(announcement)
+                                }}
+                                className="p-1 hover:bg-blue-100 rounded text-blue-600"
+                                title="수정"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                                </svg>
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  handleDeleteAnnouncement(announcement.id)
+                                }}
+                                className="p-1 hover:bg-red-100 rounded text-red-600"
+                                title="삭제"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </button>
+                            </div>
+                          )}
                         </div>
-                        {isAuthenticated && isAdmin && (
-                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                openEditModal(announcement)
-                              }}
-                              className="p-1 hover:bg-blue-100 rounded text-blue-600"
-                              title="수정"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                              </svg>
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation()
-                                handleDeleteAnnouncement(announcement.id)
-                              }}
-                              className="p-1 hover:bg-red-100 rounded text-red-600"
-                              title="삭제"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                              </svg>
-                            </button>
-                          </div>
-                        )}
                       </button>
                     </div>
                     )
@@ -1212,9 +1247,12 @@ export default function ChatPage() {
             {/* 드롭다운 메뉴 */}
             {isRecordDropdownOpen && (
               <div className="mt-2 ml-4 space-y-1 border-l-2 border-gray-200 pl-4">
-                {/* 내 생활기록부 관리 */}
-                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left group">
-                  <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
+                {/* 내 생활기록부 관리 - 잠금 */}
+                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left group opacity-60 cursor-not-allowed">
+                  <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-gray-900">내 생활기록부 관리</p>
@@ -1247,9 +1285,12 @@ export default function ChatPage() {
                   </div>
                 </button>
 
-                {/* 내신 성적 입력 */}
-                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left group">
-                  <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0 group-hover:border-blue-500 transition-colors">
+                {/* 내신 성적 입력 - 잠금 */}
+                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left group opacity-60 cursor-not-allowed">
+                  <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0">
+                    <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-gray-900">내신 성적 입력</p>
@@ -1273,11 +1314,17 @@ export default function ChatPage() {
             </button>
           </div>
 
-          {/* 생기부 세특 평가 */}
+          {/* 생기부 세특 평가 - PRO 유저는 바로 이동, Basic 유저는 PRO 모달 */}
           <div className="px-4 sm:px-6 pb-2">
             <button
               onClick={() => {
-                navigate('/school-record')
+                if (user?.is_premium) {
+                  // PRO 유저는 생기부 평가 페이지로 이동
+                  window.location.href = '/school-record'
+                } else {
+                  // Basic 유저는 PRO 모달 열기
+                  setIsProModalOpen(true)
+                }
                 if (window.innerWidth < 640) setIsSideNavOpen(false)
               }}
               className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
@@ -1286,6 +1333,7 @@ export default function ChatPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
               </svg>
               <span className="text-sm font-medium text-left">생기부 세특 평가</span>
+              <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded font-medium">beta</span>
             </button>
           </div>
 
@@ -1406,15 +1454,15 @@ export default function ChatPage() {
           <div className="p-4 sm:p-6 pt-3 sm:pt-4">
             {isAuthenticated ? (
               <div>
-                <SubscribeButton
-                  className="w-full flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 mb-3 bg-gradient-to-r from-amber-500 to-orange-500 text-white rounded-lg hover:from-amber-600 hover:to-orange-600 transition-colors font-medium text-xs sm:text-sm"
-                >
-                  <svg className="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" />
-                  </svg>
-                  구독하기
-                </SubscribeButton>
-                <div className="flex justify-center gap-3 mb-3 sm:mb-4">
+                {/* 요금제 표시 */}
+                <div className="flex items-center justify-center gap-2 mb-3 px-3 py-2 bg-gray-100 rounded-lg">
+                  {user?.is_premium ? (
+                    <span className="text-xs font-semibold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">PRO</span>
+                  ) : (
+                    <span className="text-xs font-semibold text-gray-900">Basic</span>
+                  )}
+                </div>
+                <div className="flex justify-center gap-3">
                   <a 
                     href="/policy" 
                     className="text-[10px] sm:text-xs text-gray-500 hover:text-blue-500 hover:underline transition-colors"
@@ -1429,16 +1477,6 @@ export default function ChatPage() {
                     회원 탈퇴
                   </a>
                 </div>
-                <button
-                  onClick={() => {
-                    if (confirm('로그아웃 하시겠습니까?')) {
-                      signOut()
-                    }
-                  }}
-                  className="w-full px-3 sm:px-4 py-2 text-xs sm:text-sm text-gray-600 hover:text-gray-900 transition-colors"
-                >
-                  로그아웃
-                </button>
               </div>
             ) : (
               <div>
@@ -1509,14 +1547,6 @@ export default function ChatPage() {
             </div>
             
             <div className="flex items-center gap-2">
-              {/* 사전신청 버튼 */}
-              <button
-                onClick={() => setIsPreregisterModalOpen(true)}
-                className="px-2.5 py-1.5 text-xs bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-lg font-medium hover:from-purple-600 hover:to-blue-600 transition-all shadow-sm"
-              >
-                🎁 PRO 무료 사전신청
-              </button>
-              
               {isAuthenticated ? (
                 <button
                   onClick={() => {
@@ -1649,14 +1679,6 @@ export default function ChatPage() {
                 </>
               )}
             
-              {/* 사전신청 버튼 */}
-              <button
-                onClick={() => setIsPreregisterModalOpen(true)}
-                className="px-3 py-2 text-sm bg-gradient-to-r from-purple-500 to-blue-500 text-white rounded-lg font-medium hover:from-purple-600 hover:to-blue-600 transition-all shadow-sm"
-              >
-                🎁 PRO 무료 사전신청
-              </button>
-              
               {isAuthenticated ? (
             <button
               onClick={() => {
@@ -2281,25 +2303,23 @@ export default function ChatPage() {
               </button>
               <button
                 onClick={() => {
-                  if (!isAuthenticated) {
+                  if (user?.is_premium) {
+                    setThinkingMode(true)
                     closeThinkingModeModal()
-                    trackUserAction('login_modal_open', 'thinking_mode_button')
-                    sessionStorage.setItem('uniroad_login_modal_source', 'thinking_mode_button')
-                    setAuthModalMessage({
-                      title: 'Thinking 모드',
-                      description: 'Thinking 모드는 로그인 후 사용할 수 있습니다. 더 깊은 분석과 정확한 답변을 받아보세요!'
-                    })
-                    setIsAuthModalOpen(true)
-                    return
+                  } else {
+                    closeThinkingModeModal()
+                    setIsProModalOpen(true)
                   }
-                  setThinkingMode(true)
-                  closeThinkingModeModal()
                 }}
                 className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl hover:bg-gray-50 transition-colors text-left"
               >
-                <div>
-                  <p className="font-medium text-gray-900">Thinking</p>
-                  <p className="text-sm text-gray-500 mt-0.5">더 많은 자료 참고하여 더 깊이 생각</p>
+                <div className="flex items-center gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-gray-900">Thinking</p>
+                    </div>
+                    <p className="text-sm text-gray-500 mt-0.5">더 많은 자료 참고하여 더 깊이 생각</p>
+                  </div>
                 </div>
                 {thinkingMode && (
                   <svg className="w-5 h-5 text-gray-900 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2378,6 +2398,153 @@ export default function ChatPage() {
         userId={user?.id}
         userName={user?.name}
       />
+
+      {/* 일일 질문 초과 모달 */}
+      {isQuotaExceeded && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden animate-scaleIn">
+            <div className="p-6 text-center">
+              <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                <svg className="w-8 h-8 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">오늘의 질문량 끝!</h3>
+              <p className="text-gray-600 mb-1">일일 무료 질문 {user?.is_premium ? DAILY_QUESTION_LIMIT_PRO : DAILY_QUESTION_LIMIT_BASIC}회를 모두 사용했어요.</p>
+              <p className="text-sm text-gray-500 mb-6">내일 자정에 초기화됩니다.</p>
+              
+              <div className="space-y-3">
+                <button
+                  onClick={() => {
+                    setIsQuotaExceeded(false)
+                    setIsProModalOpen(true)
+                  }}
+                  className="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all"
+                >
+                  PRO 구독해서 더 많이 쓰기
+                </button>
+                <button
+                  onClick={() => setIsQuotaExceeded(false)}
+                  className="w-full py-2 text-gray-500 hover:text-gray-700 transition-colors text-sm"
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PRO 구독 모달 (Fake Door Test) */}
+      {isProModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden animate-scaleIn">
+            {/* 헤더 */}
+            <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-6 text-white text-center relative">
+              <button
+                onClick={() => setIsProModalOpen(false)}
+                className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center text-white/80 hover:text-white hover:bg-white/20 rounded-full transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              <div className="inline-flex items-center gap-2 bg-white/20 rounded-full px-3 py-1 text-sm mb-3">
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+                </svg>
+                PRO
+              </div>
+              <h2 className="text-2xl font-bold mb-2">유니로드 PRO</h2>
+              <p className="text-white/80 text-sm">더 강력한 AI 상담을 경험하세요</p>
+            </div>
+            
+            {/* 가격 */}
+            <div className="p-6 text-center border-b">
+              <div className="flex items-baseline justify-center gap-1">
+                <span className="text-4xl font-bold text-gray-900">$19</span>
+                <span className="text-gray-500">/월</span>
+              </div>
+            </div>
+            
+            {/* 혜택 */}
+            <div className="p-6 space-y-3">
+              <div className="flex items-center gap-3">
+                <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <span className="text-sm text-gray-700">일일 100회 AI 상담</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <span className="text-sm text-gray-700">Thinking 모드 (심층 분석)</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <span className="text-sm text-gray-700">생기부 세특 평가</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <span className="text-sm text-gray-700">우선 응답 처리</span>
+              </div>
+            </div>
+            
+            {/* 버튼 */}
+            <div className="p-6 pt-0">
+              <button
+                onClick={async () => {
+                  try {
+                    const token = localStorage.getItem('access_token')
+                    if (!token) {
+                      alert('로그인이 필요합니다.')
+                      setIsProModalOpen(false)
+                      setIsAuthModalOpen(true)
+                      return
+                    }
+                    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/payments/subscribe`, {
+                      method: 'POST',
+                      headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                      }
+                    })
+                    if (response.ok) {
+                      alert('구독되었습니다! 🎉')
+                      setIsProModalOpen(false)
+                      // 유저 정보 새로고침
+                      window.location.reload()
+                    } else {
+                      const data = await response.json()
+                      alert(data.detail || '구독 처리 중 오류가 발생했습니다.')
+                    }
+                  } catch (error) {
+                    console.error('구독 오류:', error)
+                    alert('구독 처리 중 오류가 발생했습니다.')
+                  }
+                }}
+                className="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all shadow-lg"
+              >
+                구독하기
+              </button>
+              <p className="text-xs text-gray-400 text-center mt-3">언제든지 취소 가능</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 의견 보내기 모달 */}
       {isFeedbackModalOpen && (
@@ -2624,6 +2791,57 @@ export default function ChatPage() {
         }}
         showGuide={showProfileGuide}
       />
+
+      {/* PRO 업그레이드 팝업 - 웹 + 로그인한 Basic 유저에게만 표시 (PRO 유저는 숨김) */}
+      {isProPopupVisible && !isCapacitorApp() && isAuthenticated && user?.id && !user?.is_premium && (
+        <div 
+          className="fixed bottom-4 right-4 z-40 group"
+          onMouseEnter={() => setIsProPopupHovered(true)}
+          onMouseLeave={() => setIsProPopupHovered(false)}
+        >
+          <div 
+            className="relative bg-[#1a1a2e] text-white rounded-2xl p-4 shadow-2xl min-w-[260px] cursor-pointer overflow-hidden border border-gray-700/50"
+            onClick={() => setIsProModalOpen(true)}
+          >
+            {/* 배경 별 효과 */}
+            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+              <div className="absolute w-1 h-1 bg-white rounded-full top-4 right-8 animate-pulse"></div>
+              <div className="absolute w-0.5 h-0.5 bg-white/80 rounded-full top-8 right-16 animate-pulse" style={{ animationDelay: '0.5s' }}></div>
+              <div className="absolute w-1 h-1 bg-white/90 rounded-full bottom-6 right-12 animate-pulse" style={{ animationDelay: '1s' }}></div>
+              <div className="absolute w-0.5 h-0.5 bg-white rounded-full top-12 right-20 animate-pulse" style={{ animationDelay: '0.3s' }}></div>
+              <div className="absolute w-0.5 h-0.5 bg-white/70 rounded-full bottom-10 right-6 animate-pulse" style={{ animationDelay: '0.7s' }}></div>
+            </div>
+            
+            {/* X 버튼 - 모바일에서는 항상 표시, 데스크톱에서는 hover 시 표시 */}
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                setIsProPopupVisible(false)
+              }}
+              className={`absolute top-2 right-2 w-6 h-6 flex items-center justify-center text-gray-400 hover:text-white transition-all rounded-full hover:bg-white/10 ${
+                isProPopupHovered ? 'opacity-100' : 'opacity-0'
+              } max-sm:opacity-100`}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+            
+            <div className="relative z-10 flex items-center gap-4">
+              {/* 왼쪽: 텍스트 */}
+              <div className="flex-1">
+                <h3 className="text-base font-bold">유니로드 PRO</h3>
+                <p className="text-sm text-gray-400">확장된 기능을 만나보세요</p>
+              </div>
+              
+              {/* 오른쪽: 업그레이드 버튼 */}
+              <div className="px-4 py-2 bg-white text-gray-900 rounded-full font-semibold text-sm whitespace-nowrap">
+                업그레이드
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   )

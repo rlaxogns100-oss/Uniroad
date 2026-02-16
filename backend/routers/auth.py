@@ -126,14 +126,26 @@ async def get_me(user: dict = Depends(get_current_user)):
     - get_current_user 미들웨어에서 JWT 토큰을 검증하고 사용자 정보를 추출
     - 공유 Supabase 클라이언트의 auth.get_user() 사용 시 동시 요청에서 
       다른 사용자 정보가 반환될 수 있으므로, 미들웨어에서 검증된 정보를 그대로 반환
+    - is_premium: users 테이블에서 조회
     """
-    # get_current_user에서 이미 JWT 토큰을 검증하고 사용자 정보를 추출했으므로
-    # 공유 클라이언트를 사용하지 않고 검증된 정보를 그대로 반환
+    user_id = user.get("user_id")
+    is_premium = False
+    
+    # users 테이블에서 is_premium 조회
+    if user_id:
+        try:
+            result = supabase_service.client.table("users").select("is_premium").eq("id", user_id).execute()
+            if result.data and len(result.data) > 0:
+                is_premium = result.data[0].get("is_premium", False)
+        except Exception as e:
+            print(f"[auth/me] is_premium 조회 실패: {e}")
+    
     return {
         "id": user.get("user_id"),
         "email": user.get("email"),
         "name": user.get("name"),
         "created_at": user.get("created_at"),
+        "is_premium": is_premium,
     }
 
 

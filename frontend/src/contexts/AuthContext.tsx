@@ -9,6 +9,7 @@ interface User {
   email: string
   name?: string
   avatar_url?: string
+  is_premium?: boolean
 }
 
 interface AuthContextType {

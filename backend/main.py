@@ -30,12 +30,14 @@ app.add_middleware(
         "http://localhost:5175",
         "http://localhost:8147",
         "http://localhost:8148",
+        "http://localhost:8152",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
         "http://127.0.0.1:5175",
         "http://127.0.0.1:8147",
         "http://127.0.0.1:8148",
         "http://127.0.0.1:8149",
+        "http://127.0.0.1:8152",
         "http://localhost:3000",  # Next.js 호환
         "http://3.107.178.26",  # 프로덕션 서버
         "http://172.30.1.20:5173",  # 로컬 네트워크 접근
