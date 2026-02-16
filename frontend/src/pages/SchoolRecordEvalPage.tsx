@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { getApiBaseUrl } from '../config'
+import { BestPracticeCard } from '../components/BestPracticeCard'
+import { getMajorCategoryFromHopeMajor } from '../data/bestPractices'
 
 interface EvalResult {
   success: boolean
@@ -291,11 +293,13 @@ function SubjectDiagnosisPanel({
   content,
   diagnosis,
   loading,
+  majorCategory,
 }: {
   subject: string
   content: string
   diagnosis: DiagnosisResultV2 | null
   loading: boolean
+  majorCategory?: string | null
 }) {
   const [activeHighlight, setActiveHighlight] = useState<number | null>(null)
   const textContainerRef = useRef<HTMLDivElement>(null)
@@ -394,6 +398,10 @@ function SubjectDiagnosisPanel({
               <CopyButton text={diagnosis.rewritten_version} />
             </div>
           )}
+          {/* 원문 아래: 비교용 S등급 합격자 표준 사례 */}
+          <div className="mt-6">
+            <BestPracticeCard majorCategory={majorCategory} />
+          </div>
         </div>
 
         {/* 오른쪽: 입학사정관 분석 노트 — 스티키 + 페이퍼 섀도우 */}
@@ -830,6 +838,9 @@ export default function SchoolRecordEvalPage() {
   // 새로운 API 응답 스키마 (highlights + indices 포함)
   const [diagnosisResults, setDiagnosisResults] = useState<Record<string, DiagnosisResultV2>>({})
   const [diagnosisLoading, setDiagnosisLoading] = useState(false)
+
+  // 희망 전공 → 전공 계열 (S등급 표준 사례 카드용)
+  const majorCategoryForPractice = getMajorCategoryFromHopeMajor(hopeMajor)
 
   const baseUrl = getApiBaseUrl()
 
@@ -1355,6 +1366,7 @@ export default function SchoolRecordEvalPage() {
                       content={currentDiagnosis?.original_text || getContentForDiagnosis()}
                       diagnosis={currentDiagnosis ?? null}
                       loading={diagnosisLoading && !currentDiagnosis}
+                      majorCategory={majorCategoryForPractice}
                     />
                   </div>
                 </>
@@ -1404,6 +1416,7 @@ export default function SchoolRecordEvalPage() {
                           content={displayContent}
                           diagnosis={diag ?? null}
                           loading={diagnosisLoading && !diag}
+                          majorCategory={majorCategoryForPractice}
                         />
                       )
                     })}
@@ -1443,6 +1456,7 @@ export default function SchoolRecordEvalPage() {
                       content={currentDiagnosis?.original_text || getContentForDiagnosis()}
                       diagnosis={currentDiagnosis ?? null}
                       loading={diagnosisLoading && !currentDiagnosis}
+                      majorCategory={majorCategoryForPractice}
                     />
                   </div>
                 </>
@@ -1480,6 +1494,7 @@ export default function SchoolRecordEvalPage() {
                       content={currentDiagnosis?.original_text || getContentForDiagnosis()}
                       diagnosis={currentDiagnosis ?? null}
                       loading={diagnosisLoading && !currentDiagnosis}
+                      majorCategory={majorCategoryForPractice}
                     />
                   </div>
                 </>
