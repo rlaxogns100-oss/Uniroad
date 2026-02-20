@@ -7,9 +7,11 @@ const CHECKOUT_BASE = import.meta.env.VITE_GUMROAD_CHECKOUT_URL ?? ''
 
 export function getGumroadCheckoutUrl(userId: string, email?: string): string {
   if (!CHECKOUT_BASE || !userId) return ''
-  // Gumroad checkout 안정성을 위해 원본 링크를 그대로 사용
-  // (추가 쿼리 파라미터 부착 시 일부 환경에서 checkout 에러가 발생할 수 있음)
-  return CHECKOUT_BASE
+  const url = new URL(CHECKOUT_BASE)
+  // 사용자 식별 강화를 위해 user_id를 항상 전달
+  url.searchParams.set('user_id', userId)
+  // email은 결제창 안정성을 위해 기본 전달하지 않음 (서버 fallback은 구매 이메일 사용)
+  return url.toString()
 }
 
 export function redirectToGumroadCheckout(userId: string, email?: string): boolean {

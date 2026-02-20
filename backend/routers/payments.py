@@ -55,6 +55,7 @@ def _extract_user_id(payload: dict) -> Optional[str]:
         "external_customer_id",
         "custom_fields[user_id]",
         "custom_field[user_id]",
+        "url_params[user_id]",
     )
     for key in direct_keys:
         value = _to_str(payload.get(key))
