@@ -70,7 +70,7 @@ def _extract_user_id(payload: dict) -> Optional[str]:
 
 
 def _extract_email(payload: dict) -> Optional[str]:
-    for key in ("email", "purchaser_email"):
+    for key in ("email", "purchaser_email", "url_params[email]"):
         value = _to_str(payload.get(key))
         if value:
             return value

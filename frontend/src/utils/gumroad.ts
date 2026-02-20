@@ -10,7 +10,10 @@ export function getGumroadCheckoutUrl(userId: string, email?: string): string {
   const url = new URL(CHECKOUT_BASE)
   // 사용자 식별 강화를 위해 user_id를 항상 전달
   url.searchParams.set('user_id', userId)
-  // email은 결제창 안정성을 위해 기본 전달하지 않음 (서버 fallback은 구매 이메일 사용)
+  // webhook 매칭 보강을 위해 email도 함께 전달
+  if (email) {
+    url.searchParams.set('email', email.trim().toLowerCase())
+  }
   return url.toString()
 }
 
