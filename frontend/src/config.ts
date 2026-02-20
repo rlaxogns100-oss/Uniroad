@@ -82,8 +82,16 @@ export const isGalaxyAppSession = (): boolean => {
       new URLSearchParams(window.location.search).get(GALAXY_APP_SOURCE_QUERY_KEY) ===
       GALAXY_APP_SOURCE_QUERY_VALUE
     const hasGalaxyReferrer = (document.referrer || '').startsWith(GALAXY_APP_REFERRER_PREFIX)
+    const ua = window.navigator?.userAgent || ''
+    const isAndroidUa = /Android/i.test(ua)
+    const isStandaloneMode =
+      (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches) ||
+      // iOS PWA 호환 속성 (Android TWA에서는 false일 수 있으나 안전하게 체크)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      Boolean((window.navigator as any).standalone)
+    const hasAndroidAppLikeContext = isAndroidUa && isStandaloneMode
 
-    if (hasGalaxyQuery || hasGalaxyReferrer) {
+    if (hasGalaxyQuery || hasGalaxyReferrer || hasAndroidAppLikeContext) {
       persistGalaxySessionFlag()
       return true
     }
