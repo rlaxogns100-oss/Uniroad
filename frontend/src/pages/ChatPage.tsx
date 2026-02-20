@@ -8,13 +8,12 @@ import AuthModal from '../components/AuthModal'
 import PreregisterModal from '../components/PreregisterModal'
 import RollingPlaceholder from '../components/RollingPlaceholder'
 import ProfileForm from '../components/ProfileForm'
-import { SubscribeButton } from '../components/SubscribeButton'
-import { redirectToPolarCheckout } from '../utils/polar'
+import { redirectToGumroadCheckout } from '../utils/gumroad'
 import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
 import { getSessionId, trackUserAction } from '../utils/tracking'
 import { FrontendTimingLogger } from '../utils/timingLogger'
-import { API_BASE, isCapacitorApp } from '../config'
+import { API_BASE, isCapacitorApp, isGalaxyAppSession } from '../config'
 import { addLog } from '../utils/adminLogger'
 
 interface UsedChunk {
@@ -191,6 +190,8 @@ export default function ChatPage() {
   const [thinkingMode, setThinkingMode] = useState<boolean>(false) // Thinking 모드 (기본값 Auto)
   const [isThinkingModeModalOpen, setIsThinkingModeModalOpen] = useState(false) // Auto/Thinking 선택 모달
   const [thinkingModeModalAnchor, setThinkingModeModalAnchor] = useState<{ top: number; left: number; width: number } | null>(null) // 모달이 뜰 기준 위치 (Auto 버튼)
+  const isGalaxySession = isGalaxyAppSession()
+  const hasProAccess = !!user?.is_premium || isGalaxySession
 
   const openThinkingModeModal = (e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -200,6 +201,23 @@ export default function ChatPage() {
   const closeThinkingModeModal = () => {
     setIsThinkingModeModalOpen(false)
     setThinkingModeModalAnchor(null)
+  }
+  const openProModal = () => {
+    if (isGalaxySession) return
+    setIsProModalOpen(true)
+  }
+  const goToGumroadCheckout = () => {
+    if (!isAuthenticated || !user?.id) {
+      setIsProModalOpen(false)
+      setIsAuthModalOpen(true)
+      return
+    }
+    const ok = redirectToGumroadCheckout(user.id, user.email)
+    if (!ok) {
+      alert('결제 페이지 URL이 설정되지 않았습니다. 잠시 후 다시 시도해 주세요.')
+      return
+    }
+    setIsProModalOpen(false)
   }
 
   // 이미지 업로드 관련
@@ -627,7 +645,7 @@ export default function ChatPage() {
     const messageToSend = directMessage || input
     
     // 일일 질문 횟수 체크 (로그인한 유저만)
-    const dailyLimit = user?.is_premium ? DAILY_QUESTION_LIMIT_PRO : DAILY_QUESTION_LIMIT_BASIC
+    const dailyLimit = hasProAccess ? DAILY_QUESTION_LIMIT_PRO : DAILY_QUESTION_LIMIT_BASIC
     if (isAuthenticated && dailyQuestionCount >= dailyLimit) {
       setIsQuotaExceeded(true)
       return
@@ -1318,12 +1336,12 @@ export default function ChatPage() {
           <div className="px-4 sm:px-6 pb-2">
             <button
               onClick={() => {
-                if (user?.is_premium) {
+                if (hasProAccess) {
                   // PRO 유저는 생기부 평가 페이지로 이동
                   window.location.href = '/school-record'
                 } else {
                   // Basic 유저는 PRO 모달 열기
-                  setIsProModalOpen(true)
+                  openProModal()
                 }
                 if (window.innerWidth < 640) setIsSideNavOpen(false)
               }}
@@ -1456,7 +1474,9 @@ export default function ChatPage() {
               <div>
                 {/* 요금제 표시 */}
                 <div className="flex items-center justify-center gap-2 mb-3 px-3 py-2 bg-gray-100 rounded-lg">
-                  {user?.is_premium ? (
+                  {isGalaxySession ? (
+                    <span className="text-xs font-semibold text-gray-900">앱</span>
+                  ) : user?.is_premium ? (
                     <span className="text-xs font-semibold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">PRO</span>
                   ) : (
                     <span className="text-xs font-semibold text-gray-900">Basic</span>
@@ -2303,12 +2323,12 @@ export default function ChatPage() {
               </button>
               <button
                 onClick={() => {
-                  if (user?.is_premium) {
+                  if (hasProAccess) {
                     setThinkingMode(true)
                     closeThinkingModeModal()
                   } else {
                     closeThinkingModeModal()
-                    setIsProModalOpen(true)
+                    openProModal()
                   }
                 }}
                 className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl hover:bg-gray-50 transition-colors text-left"
@@ -2410,19 +2430,21 @@ export default function ChatPage() {
                 </svg>
               </div>
               <h3 className="text-xl font-bold text-gray-900 mb-2">오늘의 질문량 끝!</h3>
-              <p className="text-gray-600 mb-1">일일 무료 질문 {user?.is_premium ? DAILY_QUESTION_LIMIT_PRO : DAILY_QUESTION_LIMIT_BASIC}회를 모두 사용했어요.</p>
+              <p className="text-gray-600 mb-1">일일 질문 {hasProAccess ? DAILY_QUESTION_LIMIT_PRO : DAILY_QUESTION_LIMIT_BASIC}회를 모두 사용했어요.</p>
               <p className="text-sm text-gray-500 mb-6">내일 자정에 초기화됩니다.</p>
               
               <div className="space-y-3">
-                <button
-                  onClick={() => {
-                    setIsQuotaExceeded(false)
-                    setIsProModalOpen(true)
-                  }}
-                  className="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all"
-                >
-                  PRO 구독해서 더 많이 쓰기
-                </button>
+                {!isGalaxySession && (
+                  <button
+                    onClick={() => {
+                      setIsQuotaExceeded(false)
+                      openProModal()
+                    }}
+                    className="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all"
+                  >
+                    PRO 구독해서 더 많이 쓰기
+                  </button>
+                )}
                 <button
                   onClick={() => setIsQuotaExceeded(false)}
                   className="w-full py-2 text-gray-500 hover:text-gray-700 transition-colors text-sm"
@@ -2436,7 +2458,7 @@ export default function ChatPage() {
       )}
 
       {/* PRO 구독 모달 (Fake Door Test) */}
-      {isProModalOpen && (
+      {!isGalaxySession && isProModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden animate-scaleIn">
             {/* 헤더 */}
@@ -2506,36 +2528,7 @@ export default function ChatPage() {
             {/* 버튼 */}
             <div className="p-6 pt-0">
               <button
-                onClick={async () => {
-                  try {
-                    const token = localStorage.getItem('access_token')
-                    if (!token) {
-                      alert('로그인이 필요합니다.')
-                      setIsProModalOpen(false)
-                      setIsAuthModalOpen(true)
-                      return
-                    }
-                    const response = await fetch(`${import.meta.env.VITE_API_URL}/api/v1/payments/subscribe`, {
-                      method: 'POST',
-                      headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                      }
-                    })
-                    if (response.ok) {
-                      alert('구독되었습니다! 🎉')
-                      setIsProModalOpen(false)
-                      // 유저 정보 새로고침
-                      window.location.reload()
-                    } else {
-                      const data = await response.json()
-                      alert(data.detail || '구독 처리 중 오류가 발생했습니다.')
-                    }
-                  } catch (error) {
-                    console.error('구독 오류:', error)
-                    alert('구독 처리 중 오류가 발생했습니다.')
-                  }
-                }}
+                onClick={goToGumroadCheckout}
                 className="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all shadow-lg"
               >
                 구독하기
@@ -2793,7 +2786,7 @@ export default function ChatPage() {
       />
 
       {/* PRO 업그레이드 팝업 - 웹 + 로그인한 Basic 유저에게만 표시 (PRO 유저는 숨김) */}
-      {isProPopupVisible && !isCapacitorApp() && isAuthenticated && user?.id && !user?.is_premium && (
+      {isProPopupVisible && !isGalaxySession && !isCapacitorApp() && isAuthenticated && user?.id && !user?.is_premium && (
         <div 
           className="fixed bottom-4 right-4 z-40 group"
           onMouseEnter={() => setIsProPopupHovered(true)}
@@ -2801,7 +2794,7 @@ export default function ChatPage() {
         >
           <div 
             className="relative bg-[#1a1a2e] text-white rounded-2xl p-4 shadow-2xl min-w-[260px] cursor-pointer overflow-hidden border border-gray-700/50"
-            onClick={() => setIsProModalOpen(true)}
+            onClick={openProModal}
           >
             {/* 배경 별 효과 */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">

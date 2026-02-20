@@ -9,6 +9,10 @@ export const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
 /** 프로덕션 API 서버 (Capacitor 앱에서 env 미설정 시 폴백) */
 const PRODUCTION_API_BASE = 'https://uni2road.com'
+const GALAXY_APP_SOURCE_QUERY_VALUE = 'galaxy'
+const GALAXY_APP_SOURCE_QUERY_KEY = 'app_source'
+const GALAXY_APP_REFERRER_PREFIX = 'android-app://com.uniroad.app'
+const GALAXY_APP_SESSION_KEY = 'uniroad_galaxy_app_session'
 
 /**
  * 실제 요청에 쓸 API 베이스 URL.
@@ -47,5 +51,45 @@ export const getPlatform = (): string => {
     return Capacitor.getPlatform()
   } catch (e) {
     return 'web'
+  }
+}
+
+const readGalaxySessionFlag = (): boolean => {
+  try {
+    if (typeof window === 'undefined') return false
+    return (
+      window.localStorage.getItem(GALAXY_APP_SESSION_KEY) === '1' ||
+      window.sessionStorage.getItem(GALAXY_APP_SESSION_KEY) === '1'
+    )
+  } catch (_) {
+    return false
+  }
+}
+
+const persistGalaxySessionFlag = (): void => {
+  try {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(GALAXY_APP_SESSION_KEY, '1')
+    window.sessionStorage.setItem(GALAXY_APP_SESSION_KEY, '1')
+  } catch (_) {}
+}
+
+export const isGalaxyAppSession = (): boolean => {
+  try {
+    if (typeof window === 'undefined') return false
+
+    const hasGalaxyQuery =
+      new URLSearchParams(window.location.search).get(GALAXY_APP_SOURCE_QUERY_KEY) ===
+      GALAXY_APP_SOURCE_QUERY_VALUE
+    const hasGalaxyReferrer = (document.referrer || '').startsWith(GALAXY_APP_REFERRER_PREFIX)
+
+    if (hasGalaxyQuery || hasGalaxyReferrer) {
+      persistGalaxySessionFlag()
+      return true
+    }
+
+    return readGalaxySessionFlag()
+  } catch (_) {
+    return false
   }
 }

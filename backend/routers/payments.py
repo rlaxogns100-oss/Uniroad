@@ -1,181 +1,156 @@
 """
-Polar 결제 웹훅 API
-- POST /api/v1/payments/webhook: checkout.updated / subscription.created 처리, 결제 완료 시 users.is_premium 업데이트
-- GET /api/v1/payments/subscription-status: 로그인 유저의 Polar 구독 상태 조회
+Gumroad 결제 웹훅 API
+- POST /api/v1/payments/webhook: Gumroad 웹훅 수신 후 users.is_premium 업데이트
 """
 import json
 import logging
-from typing import Optional
-from fastapi import APIRouter, Request, HTTPException, Depends
+from typing import Any, Optional
+
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
+
 from config.config import settings
-from middleware.auth import get_current_user
 from services.payment_service import set_user_premium
-from services.polar_api import get_subscriptions_by_external_customer_id
-from utils.polar_webhook import verify_polar_webhook
+from services.supabase_client import SupabaseService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# 결제 완료로 간주할 checkout status 값
-CHECKOUT_COMPLETED_STATUSES = {"completed", "succeeded", "complete"}
+
+def _to_str(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
 
 
-def _get_client_reference_id(data: dict) -> Optional[str]:
-    """Polar 웹훅 data에서 client_reference_id 추출 (다양한 위치 대응)"""
-    if not data:
-        return None
-    for key in ("client_reference_id", "customer_id", "external_customer_id"):
-        if data.get(key):
-            return str(data[key]).strip() or None
-    sub = data.get("subscription") or data.get("subscription_id")
-    if isinstance(sub, dict) and sub.get("client_reference_id"):
-        return str(sub["client_reference_id"]).strip()
-    checkout = data.get("checkout")
-    if isinstance(checkout, dict):
-        cid = checkout.get("client_reference_id")
-        if cid:
-            return str(cid).strip()
-        # checkout 객체 자체에 없으면 data 루트에서
-        cid = checkout.get("customer", {}).get("external_id") if isinstance(checkout.get("customer"), dict) else None
-        if cid:
-            return str(cid).strip()
+def _parse_custom_fields(payload: dict) -> dict:
+    custom_fields = payload.get("custom_fields")
+    if isinstance(custom_fields, dict):
+        return custom_fields
+    if isinstance(custom_fields, str):
+        try:
+            decoded = json.loads(custom_fields)
+            if isinstance(decoded, dict):
+                return decoded
+        except Exception:
+            return {}
+    return {}
+
+
+def _extract_token(payload: dict, request: Request) -> str:
+    query_token = _to_str(request.query_params.get("token"))
+    if query_token:
+        return query_token
+    for key in ("token", "webhook_token", "gumroad_webhook_token"):
+        value = _to_str(payload.get(key))
+        if value:
+            return value
+    return ""
+
+
+def _extract_user_id(payload: dict) -> Optional[str]:
+    direct_keys = (
+        "user_id",
+        "client_reference_id",
+        "external_customer_id",
+        "custom_fields[user_id]",
+        "custom_field[user_id]",
+    )
+    for key in direct_keys:
+        value = _to_str(payload.get(key))
+        if value:
+            return value
+
+    custom_fields = _parse_custom_fields(payload)
+    value = _to_str(custom_fields.get("user_id"))
+    if value:
+        return value
     return None
 
 
-def _is_checkout_completed(data: dict) -> bool:
-    """checkout.updated 데이터에서 결제 완료 여부 판단"""
-    checkout = data.get("checkout") if isinstance(data.get("checkout"), dict) else None
-    if not checkout:
-        status = data.get("status")
-    else:
-        status = checkout.get("status") or data.get("status")
+def _extract_email(payload: dict) -> Optional[str]:
+    for key in ("email", "purchaser_email"):
+        value = _to_str(payload.get(key))
+        if value:
+            return value
+    return None
+
+
+def _is_purchase_success(payload: dict) -> bool:
+    # Gumroad webhook payload는 기본적으로 판매 완료 이벤트지만,
+    # 테스트/확장 대비로 상태값이 있으면 성공 상태만 허용한다.
+    status = _to_str(payload.get("status")).lower()
     if not status:
-        return False
-    return str(status).strip().lower() in CHECKOUT_COMPLETED_STATUSES
+        return True
+    return status in {"paid", "completed", "complete", "succeeded", "success"}
+
+
+async def _find_user_id_by_email(email: str) -> Optional[str]:
+    if not email:
+        return None
+    client = SupabaseService.get_admin_client()
+    try:
+        response = (
+            client.table("users")
+            .select("id")
+            .eq("email", email)
+            .limit(1)
+            .execute()
+        )
+        if response.data and len(response.data) > 0:
+            return _to_str(response.data[0].get("id")) or None
+    except Exception as e:
+        logger.warning("users 테이블 email 조회 실패: %s", e)
+    return None
+
+
+async def _parse_payload(request: Request) -> dict:
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+            return body if isinstance(body, dict) else {}
+        except Exception:
+            return {}
+
+    if "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type:
+        form = await request.form()
+        return {k: v for k, v in form.items()}
+
+    raw = await request.body()
+    if not raw:
+        return {}
+    try:
+        body = json.loads(raw.decode("utf-8"))
+        return body if isinstance(body, dict) else {}
+    except Exception:
+        return {}
 
 
 @router.post("/webhook")
-async def polar_webhook(request: Request):
-    """
-    Polar 웹훅 수신.
-    - POLAR_WEBHOOK_SECRET으로 서명 검증
-    - checkout.updated / subscription.created 시 결제 완료면 client_reference_id로 users.is_premium = true
-    """
-    print("[Polar webhook] 요청 수신")
-    secret = getattr(settings, "POLAR_WEBHOOK_SECRET", None) or ""
-    if not secret:
-        print("[Polar webhook] ❌ POLAR_WEBHOOK_SECRET 미설정")
-        logger.warning("POLAR_WEBHOOK_SECRET 미설정")
+async def gumroad_webhook(request: Request):
+    expected_token = _to_str(getattr(settings, "GUMROAD_WEBHOOK_TOKEN", ""))
+    if not expected_token:
+        logger.warning("GUMROAD_WEBHOOK_TOKEN 미설정")
         raise HTTPException(status_code=500, detail="Webhook not configured")
 
-    body = await request.body()
-    headers = dict(request.headers)
-    print(f"[Polar webhook] 본문 길이={len(body)} bytes, 서명 검증 시도")
+    payload = await _parse_payload(request)
+    incoming_token = _extract_token(payload, request)
+    if not incoming_token or incoming_token != expected_token:
+        logger.warning("Gumroad webhook token 검증 실패")
+        raise HTTPException(status_code=403, detail="Invalid webhook token")
 
-    if not verify_polar_webhook(body, headers, secret):
-        print("[Polar webhook] ❌ 서명 검증 실패 (Invalid signature)")
-        logger.warning("Polar webhook signature verification failed")
-        raise HTTPException(status_code=403, detail="Invalid signature")
-    print("[Polar webhook] ✅ 서명 검증 성공")
+    if not _is_purchase_success(payload):
+        return JSONResponse(status_code=200, content={"ok": True, "message": "Not paid"})
 
-    try:
-        payload = json.loads(body.decode("utf-8"))
-    except Exception as e:
-        print(f"[Polar webhook] ❌ JSON 파싱 실패: {e}")
-        logger.warning("Webhook body decode error: %s", e)
-        raise HTTPException(status_code=400, detail="Invalid body")
-
-    event_type = payload.get("type") or payload.get("event_type")
-    data = payload.get("data") or payload
-    print(f"[Polar webhook] 이벤트 타입={event_type}, data 키={list(data.keys()) if isinstance(data, dict) else 'n/a'}")
-
-    if event_type == "subscription.created":
-        user_id = _get_client_reference_id(data)
-        print(f"[Polar webhook] subscription.created → client_reference_id={user_id}")
-        if not user_id:
-            print("[Polar webhook] subscription.created: client_reference_id 없음, 스킵")
-            logger.warning("subscription.created: client_reference_id not found in payload")
-            return JSONResponse(
-                status_code=200,
-                content={"ok": True, "message": "No client_reference_id, skipped"},
-            )
-        print(f"[Polar webhook] 결제 완료 처리: user_id={user_id}, is_premium=true 반영 중")
-        ok = await set_user_premium(user_id, is_premium=True)
-        print(f"[Polar webhook] subscription.created 처리 완료: ok={ok}, user_id={user_id}")
-        return JSONResponse(status_code=200, content={"ok": ok, "user_id": user_id})
-
-    if event_type == "checkout.updated":
-        if not _is_checkout_completed(data):
-            print(f"[Polar webhook] checkout.updated: 결제 완료 상태 아님 (status 등 확인), 200 반환")
-            return JSONResponse(status_code=200, content={"ok": True, "message": "Not completed"})
-        user_id = _get_client_reference_id(data)
-        print(f"[Polar webhook] checkout.updated (결제 완료) → client_reference_id={user_id}")
-        if not user_id:
-            print("[Polar webhook] checkout.updated: client_reference_id 없음, 스킵")
-            return JSONResponse(
-                status_code=200,
-                content={"ok": True, "message": "No client_reference_id, skipped"},
-            )
-        print(f"[Polar webhook] 결제 완료 처리: user_id={user_id}, is_premium=true 반영 중")
-        ok = await set_user_premium(user_id, is_premium=True)
-        print(f"[Polar webhook] checkout.updated 처리 완료: ok={ok}, user_id={user_id}")
-        return JSONResponse(status_code=200, content={"ok": ok, "user_id": user_id})
-
-    print(f"[Polar webhook] 미처리 이벤트 타입={event_type}, 200 반환")
-    return JSONResponse(status_code=200, content={"ok": True})
-
-
-@router.get("/subscription-status")
-async def get_subscription_status(user: dict = Depends(get_current_user)):
-    """
-    현재 로그인한 유저의 Polar 구독 상태 조회.
-    POLAR_ACCESS_TOKEN으로 Polar API를 호출하며, external_customer_id = Supabase user id 사용.
-    """
-    token = getattr(settings, "POLAR_ACCESS_TOKEN", None) or ""
-    if not token:
-        raise HTTPException(
-            status_code=503,
-            detail="Polar API not configured (POLAR_ACCESS_TOKEN missing)",
-        )
-    user_id = user.get("user_id")
+    user_id = _extract_user_id(payload)
     if not user_id:
-        raise HTTPException(status_code=401, detail="User id not found")
-    subs = get_subscriptions_by_external_customer_id(user_id, active_only=True)
-    active_statuses = {"active", "trialing"}
-    active_subs = [s for s in subs if (s.get("status") or "").lower() in active_statuses]
-    is_active = len(active_subs) > 0
-    # 클라이언트에 필요한 최소 정보만 반환
-    summary = [
-        {
-            "id": s.get("id"),
-            "status": s.get("status"),
-            "current_period_end": s.get("current_period_end"),
-            "cancel_at_period_end": s.get("cancel_at_period_end"),
-        }
-        for s in active_subs
-    ]
-    return {
-        "is_active": is_active,
-        "subscriptions": summary,
-    }
+        email = _extract_email(payload)
+        user_id = await _find_user_id_by_email(email or "")
 
-
-@router.post("/subscribe")
-async def subscribe_pro(user: dict = Depends(get_current_user)):
-    """
-    PRO 구독 처리 (테스트용 - 결제 없이 바로 구독 처리)
-    - users.is_premium = true로 설정
-    """
-    user_id = user.get("user_id")
     if not user_id:
-        raise HTTPException(status_code=401, detail="User id not found")
-    
-    print(f"[subscribe_pro] PRO 구독 요청: user_id={user_id}")
+        logger.warning("Gumroad webhook 사용자 매핑 실패. payload_keys=%s", list(payload.keys()))
+        return JSONResponse(status_code=200, content={"ok": False, "message": "User mapping failed"})
+
     ok = await set_user_premium(user_id, is_premium=True)
-    print(f"[subscribe_pro] 구독 처리 완료: ok={ok}, user_id={user_id}")
-    
-    if not ok:
-        raise HTTPException(status_code=500, detail="구독 처리 실패")
-    
-    return {"ok": True, "message": "구독이 완료되었습니다!", "user_id": user_id}
+    return JSONResponse(status_code=200, content={"ok": ok, "user_id": user_id})

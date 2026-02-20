@@ -1,5 +1,5 @@
 import { useAuth } from '../contexts/AuthContext'
-import { redirectToPolarCheckout } from '../utils/polar'
+import { redirectToGumroadCheckout } from '../utils/gumroad'
 
 interface SubscribeButtonProps {
   className?: string
@@ -7,8 +7,7 @@ interface SubscribeButtonProps {
 }
 
 /**
- * 구독하기 버튼: 클릭 시 Polar Checkout URL로 리다이렉트
- * client_reference_id에 현재 로그인한 Supabase 유저 ID 포함
+ * 구독하기 버튼: 클릭 시 Gumroad Checkout URL로 리다이렉트
  */
 export function SubscribeButton({ className = '', children }: SubscribeButtonProps) {
   const { user, isAuthenticated } = useAuth()
@@ -17,7 +16,7 @@ export function SubscribeButton({ className = '', children }: SubscribeButtonPro
     if (!isAuthenticated || !user?.id) {
       return
     }
-    const ok = redirectToPolarCheckout(user.id)
+    const ok = redirectToGumroadCheckout(user.id, user.email)
     if (!ok) {
       alert('구독 페이지 URL이 설정되지 않았습니다. 잠시 후 다시 시도해 주세요.')
     }

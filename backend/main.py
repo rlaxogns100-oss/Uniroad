@@ -73,7 +73,7 @@ app.include_router(feedback.router, tags=["피드백"])
 app.include_router(preregister.router, tags=["사전신청"])
 app.include_router(share.router, prefix="/api/share", tags=["공유"])
 app.include_router(school_record_router, prefix="/api/school-record", tags=["생기부평가"])
-app.include_router(payments.router, prefix="/api/v1/payments", tags=["결제(Polar)"])
+app.include_router(payments.router, prefix="/api/v1/payments", tags=["결제(Gumroad)"])
 
 # 정적 파일 경로 설정
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
