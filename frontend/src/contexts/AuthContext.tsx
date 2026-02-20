@@ -143,23 +143,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const response = await axios.post('/api/auth/signin', { email, password }, { timeout: 15000 })
       const { access_token, user: userData } = response.data
-      
+      let verifiedUser = userData
+
+      // 로그인 직후에도 /me 기준 is_premium을 즉시 동기화
+      try {
+        const meResponse = await axios.get('/api/auth/me', {
+          headers: { Authorization: `Bearer ${access_token}` }
+        })
+        verifiedUser = meResponse.data
+      } catch (verifyError) {
+        console.warn('로그인 직후 /me 동기화 실패, signin 응답 사용:', verifyError)
+      }
+
       setAccessToken(access_token)
-      setUser(userData)
-      
+      setUser(verifiedUser)
+
       localStorage.setItem('access_token', access_token)
-      localStorage.setItem('user', JSON.stringify(userData))
+      localStorage.setItem('user', JSON.stringify(verifiedUser))
       
       trackGA4Login('email')
       
       // skipRedirect가 true면 리다이렉트 하지 않음 (모달에서 로그인 시)
       // Capacitor 앱에서는 window.location.href 사용 시 전체 리로드로 하얀 화면이 나올 수 있으므로 리다이렉트 생략 → 호출부에서 navigate 사용
       if (!skipRedirect && !isCapacitorApp()) {
-        const isAdmin = userData?.name === '김도균' || userData?.email === 'herry0515@naver.com'
+        const isAdmin = verifiedUser?.name === '김도균' || verifiedUser?.email === 'herry0515@naver.com'
         window.location.href = isAdmin ? '/chat/login/admin' : '/chat/login'
       }
       
-      return userData
+      return verifiedUser
     } catch (error: any) {
       if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
         throw new Error('요청 시간이 초과되었습니다. 백엔드가 켜져 있는지 확인해 주세요.')

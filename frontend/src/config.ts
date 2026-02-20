@@ -13,6 +13,8 @@ const GALAXY_APP_SOURCE_QUERY_VALUE = 'galaxy'
 const GALAXY_APP_SOURCE_QUERY_KEY = 'app_source'
 const GALAXY_APP_REFERRER_PREFIX = 'android-app://com.uniroad.app'
 const GALAXY_APP_SESSION_KEY = 'uniroad_galaxy_app_session'
+const GALAXY_APP_SESSION_TS_KEY = 'uniroad_galaxy_app_session_ts'
+const GALAXY_APP_SESSION_TTL_MS = 1000 * 60 * 60 * 6
 
 /**
  * 실제 요청에 쓸 API 베이스 URL.
@@ -57,10 +59,27 @@ export const getPlatform = (): string => {
 const readGalaxySessionFlag = (): boolean => {
   try {
     if (typeof window === 'undefined') return false
-    return (
+    const ua = window.navigator?.userAgent || ''
+    const isAndroidUa = /Android/i.test(ua)
+    const isStandaloneMode =
+      (typeof window.matchMedia === 'function' && window.matchMedia('(display-mode: standalone)').matches) ||
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      Boolean((window.navigator as any).standalone)
+    const isNativeApp = isCapacitorApp()
+    const isAppLikeRuntime = isAndroidUa && (isStandaloneMode || isNativeApp)
+    if (!isAppLikeRuntime) return false
+
+    const hasFlag =
       window.localStorage.getItem(GALAXY_APP_SESSION_KEY) === '1' ||
       window.sessionStorage.getItem(GALAXY_APP_SESSION_KEY) === '1'
-    )
+    if (!hasFlag) return false
+
+    const tsRaw =
+      window.localStorage.getItem(GALAXY_APP_SESSION_TS_KEY) ||
+      window.sessionStorage.getItem(GALAXY_APP_SESSION_TS_KEY)
+    const ts = Number(tsRaw)
+    if (!Number.isFinite(ts)) return false
+    return Date.now() - ts <= GALAXY_APP_SESSION_TTL_MS
   } catch (_) {
     return false
   }
@@ -69,8 +88,11 @@ const readGalaxySessionFlag = (): boolean => {
 const persistGalaxySessionFlag = (): void => {
   try {
     if (typeof window === 'undefined') return
+    const now = String(Date.now())
     window.localStorage.setItem(GALAXY_APP_SESSION_KEY, '1')
     window.sessionStorage.setItem(GALAXY_APP_SESSION_KEY, '1')
+    window.localStorage.setItem(GALAXY_APP_SESSION_TS_KEY, now)
+    window.sessionStorage.setItem(GALAXY_APP_SESSION_TS_KEY, now)
   } catch (_) {}
 }
 

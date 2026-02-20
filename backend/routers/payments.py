@@ -76,13 +76,47 @@ def _extract_email(payload: dict) -> Optional[str]:
     return None
 
 
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    s = _to_str(value).lower()
+    return s in {"1", "true", "yes", "y"}
+
+
 def _is_purchase_success(payload: dict) -> bool:
-    # Gumroad webhook payload는 기본적으로 판매 완료 이벤트지만,
-    # 테스트/확장 대비로 상태값이 있으면 성공 상태만 허용한다.
+    # 명시적 실패/테스트 신호는 즉시 차단
+    if _to_bool(payload.get("test")):
+        return False
+    if any(
+        _to_bool(payload.get(key))
+        for key in ("refunded", "is_refunded", "chargebacked", "chargeback", "disputed")
+    ):
+        return False
+
+    # 이벤트 타입이 오면 sale/subscription만 허용
+    resource_name = _to_str(payload.get("resource_name")).lower()
+    if resource_name and resource_name not in {"sale", "subscription"}:
+        return False
+
+    # 상태값이 있을 때만 성공 상태 허용
     status = _to_str(payload.get("status")).lower()
-    if not status:
-        return True
-    return status in {"paid", "completed", "complete", "succeeded", "success"}
+    if status:
+        return status in {"paid", "completed", "complete", "succeeded", "success"}
+
+    # status가 비어 있으면 판매 이벤트로 보이는 최소 필드 조합이 있어야 성공 처리
+    has_email = bool(_extract_email(payload))
+    has_sale_identifier = any(
+        _to_str(payload.get(key))
+        for key in ("sale_id", "purchase_id", "order_id", "order_number", "id")
+    )
+    has_product = any(_to_str(payload.get(key)) for key in ("product_id", "product_name", "permalink"))
+    has_price = any(
+        _to_str(payload.get(key))
+        for key in ("price", "amount_cents", "formatted_display_price", "currency")
+    )
+    return has_email and (has_sale_identifier or (has_product and has_price))
 
 
 async def _find_user_id_by_email(email: str) -> Optional[str]:
