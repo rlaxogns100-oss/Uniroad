@@ -1,19 +1,15 @@
 /**
  * Gumroad 결제 연동 유틸
  * - 결제 버튼 클릭 시 Gumroad Checkout URL로 즉시 이동
- * - 로그인 사용자 매핑 강화를 위해 user_id/email 쿼리를 함께 전달
  */
 
 const CHECKOUT_BASE = import.meta.env.VITE_GUMROAD_CHECKOUT_URL ?? ''
 
 export function getGumroadCheckoutUrl(userId: string, email?: string): string {
   if (!CHECKOUT_BASE || !userId) return ''
-  const url = new URL(CHECKOUT_BASE)
-  url.searchParams.set('user_id', userId)
-  if (email) {
-    url.searchParams.set('email', email)
-  }
-  return url.toString()
+  // Gumroad checkout 안정성을 위해 원본 링크를 그대로 사용
+  // (추가 쿼리 파라미터 부착 시 일부 환경에서 checkout 에러가 발생할 수 있음)
+  return CHECKOUT_BASE
 }
 
 export function redirectToGumroadCheckout(userId: string, email?: string): boolean {
