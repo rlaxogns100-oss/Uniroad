@@ -11,6 +11,39 @@ from middleware.auth import get_current_user
 
 router = APIRouter()
 
+def _safe_name(name: Optional[str], email: Optional[str]) -> str:
+    raw = (name or "").strip()
+    if raw:
+        return raw
+    if email and "@" in email:
+        return email.split("@")[0]
+    return ""
+
+
+def _sync_user_row(user_id: Optional[str], email: Optional[str], name: Optional[str]) -> None:
+    """
+    Auth 사용자 정보를 public.users 테이블에 동기화.
+    - 관리자 페이지의 유저 탭이 users 테이블을 기준으로 동작하므로
+      가입/로그인 시점에 id/email/name을 보정한다.
+    """
+    if not user_id:
+        return
+
+    payload = {
+        "id": user_id,
+        "email": email,
+        "name": _safe_name(name, email),
+    }
+    try:
+        supabase_service.get_admin_client().table("users").upsert(payload, on_conflict="id").execute()
+    except Exception:
+        # 일부 환경에서는 name 컬럼이 없을 수 있어 fallback
+        fallback = {"id": user_id, "email": email}
+        try:
+            supabase_service.get_admin_client().table("users").upsert(fallback, on_conflict="id").execute()
+        except Exception as e:
+            print(f"[auth] users 동기화 실패: user_id={user_id}, error={e}")
+
 
 class SignUpRequest(BaseModel):
     email: EmailStr = Field(..., max_length=30)
@@ -48,6 +81,12 @@ async def sign_up(request: SignUpRequest):
         
         if response.user is None:
             raise HTTPException(status_code=400, detail="회원가입 실패")
+
+        _sync_user_row(
+            user_id=response.user.id,
+            email=response.user.email,
+            name=response.user.user_metadata.get("name") if response.user.user_metadata else request.name,
+        )
         
         # 이메일 확인이 필요한 경우 session이 None일 수 있음
         if response.session is None:
@@ -86,6 +125,12 @@ async def sign_in(request: SignInRequest):
         
         if response.user is None:
             raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 올바르지 않습니다")
+
+        _sync_user_row(
+            user_id=response.user.id,
+            email=response.user.email,
+            name=response.user.user_metadata.get("name") if response.user.user_metadata else None,
+        )
         
         if response.session is None:
             raise HTTPException(status_code=401, detail="이메일 확인이 필요합니다")
@@ -129,6 +174,11 @@ async def get_me(user: dict = Depends(get_current_user)):
     - is_premium: users 테이블에서 조회
     """
     user_id = user.get("user_id")
+    _sync_user_row(
+        user_id=user_id,
+        email=user.get("email"),
+        name=user.get("name"),
+    )
     is_premium = False
     
     # users 테이블에서 is_premium 조회
@@ -226,6 +276,11 @@ async def oauth_callback(request: OAuthCallbackRequest):
             raise HTTPException(status_code=400, detail="토큰 교환 실패")
 
         user = response.user
+        _sync_user_row(
+            user_id=user.id,
+            email=user.email,
+            name=user.user_metadata.get("name") or user.user_metadata.get("full_name"),
+        )
         created_at = getattr(user, "created_at", None)
         created_dt = _parse_created_at(created_at)
         now = datetime.now(timezone.utc)
