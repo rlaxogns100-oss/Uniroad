@@ -3,7 +3,7 @@
  * - 결제 버튼 클릭 시 Gumroad Checkout URL로 즉시 이동
  */
 
-const CHECKOUT_BASE = import.meta.env.VITE_GUMROAD_CHECKOUT_URL ?? ''
+const CHECKOUT_BASE = 'https://roadmaster34.gumroad.com/l/zuqsd/PUO216D?wanted=true'
 
 export function getGumroadCheckoutUrl(userId: string, email?: string): string {
   if (!CHECKOUT_BASE || !userId) return ''
@@ -20,9 +20,7 @@ export function getGumroadCheckoutUrl(userId: string, email?: string): string {
 export function redirectToGumroadCheckout(userId: string, email?: string): boolean {
   const url = getGumroadCheckoutUrl(userId, email)
   if (!url) {
-    if (!(import.meta.env.VITE_GUMROAD_CHECKOUT_URL ?? '')) {
-      console.warn('[Gumroad] VITE_GUMROAD_CHECKOUT_URL이 설정되지 않았습니다. frontend/.env에 추가해 주세요.')
-    }
+    console.warn('[Gumroad] Checkout URL 생성에 실패했습니다.')
     return false
   }
   window.location.href = url

@@ -34,7 +34,7 @@ class BankTransferSubmitRequest(BaseModel):
 
 
 class CardCheckoutAttemptRequest(BaseModel):
-    amount: int = 25900
+    amount: int = 2900
     source: str = "gumroad"
 
 
@@ -228,7 +228,7 @@ async def submit_bank_transfer(
     item = {
         "name": _to_str(body.name),
         "phone": phone,
-        "amount": 25900,
+        "amount": 2900,
         "bank_account": "3333354523620",
         "bank_name": "카카오뱅크",
         "account_holder": "김태훈",
@@ -253,7 +253,7 @@ async def log_card_checkout_attempt(
         raise HTTPException(status_code=401, detail="로그인이 필요합니다.")
 
     item = {
-        "amount": int(body.amount or 25900),
+        "amount": int(body.amount or 2900),
         "source": _to_str(body.source) or "gumroad",
         "status": "requested",
         "created_at": datetime.utcnow().isoformat(),
@@ -372,7 +372,7 @@ async def get_admin_users_overview(user: dict = Depends(get_current_user)):
                             "user_name": name_by_user.get(uid, ""),
                             "name": _to_str(item.get("name")),
                             "phone": _to_str(item.get("phone")),
-                            "amount": int(item.get("amount") or 25900),
+                            "amount": int(item.get("amount") or 2900),
                             "status": _to_str(item.get("status")) or "applied",
                             "created_at": _safe_iso(item.get("created_at")),
                         }
@@ -388,7 +388,7 @@ async def get_admin_users_overview(user: dict = Depends(get_current_user)):
                             "user_id": uid,
                             "email": email_by_user.get(uid, ""),
                             "user_name": name_by_user.get(uid, ""),
-                            "amount": int(item.get("amount") or 25900),
+                            "amount": int(item.get("amount") or 2900),
                             "source": _to_str(item.get("source")) or "gumroad",
                             "status": _to_str(item.get("status")) or "requested",
                             "created_at": _safe_iso(item.get("created_at")),

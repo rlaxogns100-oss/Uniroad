@@ -195,6 +195,26 @@ def run_suneung_search(
     history = scores.get("한국사", {}).get("등급") or 1
     
     results = []
+
+    def _closest_cut_distance(item: Dict[str, Any]) -> float:
+        """
+        학생 점수(my_score)와 컷 점수들 사이의 최소 거리.
+        거리(절대값)가 작을수록 '학생 점수에 가까운' 결과로 간주.
+        """
+        my_score = item.get("my_score")
+        if my_score is None:
+            return float("inf")
+
+        cut_values = []
+        for key in ("safe_score", "appropriate_score", "expected_score", "challenge_score"):
+            val = item.get(key)
+            if isinstance(val, (int, float)):
+                cut_values.append(float(val))
+
+        if not cut_values:
+            return float("inf")
+
+        return min(abs(float(my_score) - cut) for cut in cut_values)
     
     for univ in universities:
         # 필터 적용
@@ -235,16 +255,6 @@ def run_suneung_search(
         # 판정
         판정 = classify_by_cutoff(my_score, univ)
         
-        # 판정 필터
-        # 기본적으로 "하향"은 제외 (명시적으로 요청한 경우에만 포함)
-        if target_range:
-            if 판정 not in target_range:
-                continue
-        else:
-            # target_range가 없으면 "하향" 제외
-            if 판정 == "하향":
-                continue
-        
         results.append({
             "univ": univ.get("university", ""),
             "major": univ.get("department", ""),
@@ -258,14 +268,41 @@ def run_suneung_search(
             "판정": 판정,
             "formula_id": univ.get("formulaId"),
         })
-    
-    # 점수 높은 순 정렬 (하향은 맨 뒤로)
-    results.sort(key=lambda x: (
-        ["안정", "적정", "소신", "도전", "어려움", "하향"].index(x["판정"]),
-        -x["my_score"]
-    ))
-    
-    return results
+
+    # ------------------------------------------------------------
+    # 판정(range) 필터 + fallback 규칙
+    # - 기본: 선택한 range만 반환
+    # - 단, 선택 결과가 10개 이하이면 비선택 range도 함께 반환
+    # ------------------------------------------------------------
+    if target_range:
+        selected = [r for r in results if r.get("판정") in target_range]
+        if len(selected) <= 10:
+            others = [r for r in results if r.get("판정") not in target_range]
+            filtered_results = selected + others
+        else:
+            filtered_results = selected
+    else:
+        # range 미지정이면 기존 정책 유지: 하향 제외
+        filtered_results = [r for r in results if r.get("판정") != "하향"]
+
+    # ------------------------------------------------------------
+    # 정렬/상한
+    # - 학생 점수에 가까운 순(컷과의 최소 거리 오름차순)
+    # - target_range가 있는 경우 selected 우선
+    # - 최대 100개 반환
+    # ------------------------------------------------------------
+    if target_range:
+        selected_set = set(target_range)
+        filtered_results.sort(
+            key=lambda x: (
+                0 if x.get("판정") in selected_set else 1,
+                _closest_cut_distance(x),
+            )
+        )
+    else:
+        filtered_results.sort(key=_closest_cut_distance)
+
+    return filtered_results[:100]
 
 
 def get_all_universities() -> List[Dict]:

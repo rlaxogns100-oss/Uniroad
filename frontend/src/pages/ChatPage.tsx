@@ -15,6 +15,7 @@ import { getSessionId, trackUserAction } from '../utils/tracking'
 import { FrontendTimingLogger } from '../utils/timingLogger'
 import { API_BASE, isCapacitorApp, isGalaxyAppSession } from '../config'
 import { addLog } from '../utils/adminLogger'
+import { QUICK_EXAMPLE_RESPONSES } from '../data/quickExampleResponses'
 
 interface UsedChunk {
   id: string
@@ -102,6 +103,10 @@ const formatLogMessage = (log: string): string => {
   return log
 }
 
+const getQuickExampleResponse = (question: string): string | undefined => {
+  return QUICK_EXAMPLE_RESPONSES[question.trim()]
+}
+
 // 공지사항 인터페이스
 interface Announcement {
   id: string
@@ -158,7 +163,7 @@ export default function ChatPage() {
     return 0
   })
   const [isQuotaExceeded, setIsQuotaExceeded] = useState(false)
-  const DAILY_QUESTION_LIMIT_BASIC = 20
+  const DAILY_QUESTION_LIMIT_BASIC = 3
   const DAILY_QUESTION_LIMIT_PRO = 100
   const [isProPopupVisible, setIsProPopupVisible] = useState(true)
   const [isProPopupHovered, setIsProPopupHovered] = useState(false)
@@ -210,6 +215,14 @@ export default function ChatPage() {
     if (isGalaxySession) return
     setIsProModalOpen(true)
   }
+  const handleSchoolRecordShortcut = () => {
+    if (hasProAccess) {
+      window.location.href = '/school-record'
+    } else {
+      openProModal()
+    }
+    if (window.innerWidth < 640) setIsSideNavOpen(false)
+  }
   const goToGumroadCheckout = () => {
     if (!isAuthenticated || !user?.id) {
       setIsProModalOpen(false)
@@ -223,7 +236,7 @@ export default function ChatPage() {
         'Content-Type': 'application/json',
         ...(accessToken && { Authorization: `Bearer ${accessToken}` }),
       },
-      body: JSON.stringify({ amount: 25900, source: 'gumroad' }),
+      body: JSON.stringify({ amount: 2900, source: 'gumroad' }),
     }).catch(() => undefined)
 
     const ok = redirectToGumroadCheckout(user.id, user.email)
@@ -708,6 +721,7 @@ export default function ChatPage() {
 
   const handleSend = async (directMessage?: string) => {
     const messageToSend = directMessage || input
+    const trimmedMessage = messageToSend.trim()
     
     // 일일 질문 횟수 체크 (로그인한 유저만)
     const dailyLimit = hasProAccess ? DAILY_QUESTION_LIMIT_PRO : DAILY_QUESTION_LIMIT_BASIC
@@ -718,9 +732,9 @@ export default function ChatPage() {
     
     // 중복 전송 방지 (더블 클릭, 빠른 Enter 연타 방지)
     // 이미지가 있으면 텍스트 없이도 전송 가능
-    if ((!messageToSend.trim() && !selectedImage) || isLoading || sendingRef.current) {
+    if ((!trimmedMessage && !selectedImage) || isLoading || sendingRef.current) {
       console.log('🚫 전송 차단:', { 
-        hasInput: !!messageToSend.trim(), 
+        hasInput: !!trimmedMessage, 
         hasImage: !!selectedImage,
         isLoading, 
         alreadySending: sendingRef.current 
@@ -736,6 +750,42 @@ export default function ChatPage() {
         date: new Date().toDateString(),
         count: newCount
       }))
+    }
+
+    // 예시 질문 하드코딩 응답: API 호출 없이 빠르게 반환
+    const quickExampleResponse = !selectedImage ? getQuickExampleResponse(trimmedMessage) : undefined
+    if (quickExampleResponse) {
+      const userInput = trimmedMessage
+      const userMessageId = Date.now().toString()
+      const botMessageId = (Date.now() + 1).toString()
+
+      sendingRef.current = true
+      isStreamingRef.current = true
+      setInput('')
+      setIsLoading(true)
+      setCurrentLog('⚡ 빠른 답변을 준비하는 중...')
+
+      setMessages((prev) => [
+        ...prev,
+        { id: userMessageId, text: userInput, isUser: true },
+        { id: botMessageId, text: '', isUser: false, isStreaming: true },
+      ])
+
+      window.setTimeout(() => {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === botMessageId
+              ? { ...msg, text: quickExampleResponse, isStreaming: false }
+              : msg
+          )
+        )
+        setIsLoading(false)
+        setCurrentLog('')
+        sendingRef.current = false
+        isStreamingRef.current = false
+      }, 600)
+
+      return
     }
 
     console.log('📤 메시지 전송 시작:', messageToSend)
@@ -1400,16 +1450,7 @@ export default function ChatPage() {
           {/* 생기부 세특 평가 - PRO 유저는 바로 이동, Basic 유저는 PRO 모달 */}
           <div className="px-4 sm:px-6 pb-2">
             <button
-              onClick={() => {
-                if (hasProAccess) {
-                  // PRO 유저는 생기부 평가 페이지로 이동
-                  window.location.href = '/school-record'
-                } else {
-                  // Basic 유저는 PRO 모달 열기
-                  openProModal()
-                }
-                if (window.innerWidth < 640) setIsSideNavOpen(false)
-              }}
+              onClick={handleSchoolRecordShortcut}
               className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
             >
               <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1836,6 +1877,7 @@ export default function ChatPage() {
                         setShowProfileGuide(true)
                         setIsProfileFormOpen(true)
                       }}
+                      onSchoolRecordClick={handleSchoolRecordShortcut}
                     />
                   </div>
 
@@ -2554,8 +2596,7 @@ export default function ChatPage() {
                   <span className="text-lg font-bold text-emerald-600">무료</span>
                 </div>
                 <ul className="space-y-2 text-sm text-gray-700">
-                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />일일 20회 AI 상담</li>
-                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />월 3회 생기부 분석</li>
+                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />일일 {DAILY_QUESTION_LIMIT_BASIC}회 AI 상담</li>
                   <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />최신 모집 요강</li>
                   <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />성적 분석 및 대학 추천</li>
                 </ul>
@@ -2565,14 +2606,17 @@ export default function ChatPage() {
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <h3 className="text-xl font-semibold text-gray-900">Pro</h3>
-                    <span className="text-[11px] font-semibold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">추천</span>
+                    <span className="text-[11px] font-semibold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">새학기 특가 할인!</span>
                   </div>
-                  <span className="text-lg font-bold text-gray-900">25,900원/월</span>
+                  <div className="flex items-end gap-2">
+                    <span className="text-sm text-gray-400 line-through">25,900원</span>
+                    <span className="text-lg font-bold text-gray-900">2,900원/월</span>
+                  </div>
                 </div>
                 <ul className="space-y-2 text-sm text-gray-700">
-                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />일일 100회 AI 상담</li>
+                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />일일 {DAILY_QUESTION_LIMIT_PRO}회 AI 상담</li>
                   <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />심층 분석을 위한 Thinking 모드</li>
-                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />월 30회 생기부 분석</li>
+                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />학교생활기록부 완벽 분석</li>
                   <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />최신 기능 우선 적용</li>
                 </ul>
               </div>
@@ -2619,7 +2663,8 @@ export default function ChatPage() {
             <div className="p-5 space-y-4">
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
                 <p className="text-gray-600">가격</p>
-                <p className="text-lg font-bold text-gray-900">25,900원</p>
+                <p className="text-sm text-gray-400 line-through">25,900원</p>
+                <p className="text-lg font-bold text-gray-900">2,900원</p>
                 <p className="text-gray-600 mt-3">입금계좌</p>
                 <p className="font-semibold text-gray-900">3333354523620</p>
                 <p className="text-gray-700">카카오뱅크 (김태훈)</p>
@@ -2912,7 +2957,11 @@ export default function ChatPage() {
         >
           <div 
             className="relative bg-[#1a1a2e] text-white rounded-2xl p-4 shadow-2xl min-w-[260px] cursor-pointer overflow-hidden border border-gray-700/50"
-            onClick={openProModal}
+            onClick={(e) => {
+              const target = e.target as HTMLElement
+              if (target.closest('button')) return
+              openProModal()
+            }}
           >
             {/* 배경 별 효과 */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -2942,7 +2991,7 @@ export default function ChatPage() {
               {/* 왼쪽: 텍스트 */}
               <div className="flex-1">
                 <h3 className="text-base font-bold">유니로드 PRO</h3>
-                <p className="text-sm text-gray-400">확장된 기능을 만나보세요</p>
+                <p className="text-sm text-gray-400">새학기 기념 90% 할인!</p>
               </div>
               
               {/* 오른쪽: 업그레이드 버튼 */}
