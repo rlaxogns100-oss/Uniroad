@@ -10,6 +10,7 @@ import re
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
 from dotenv import load_dotenv
+from services.score_review import to_consult_j_scores
 
 load_dotenv()
 
@@ -17,7 +18,7 @@ load_dotenv()
 if os.getenv("GEMINI_API_KEY") and not os.getenv("GOOGLE_API_KEY"):
     os.environ["GOOGLE_API_KEY"] = os.getenv("GEMINI_API_KEY")
 
-from services.supabase_client import SupabaseService
+from services.supabase_client import SupabaseService, supabase_service
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 # 업로드와 동일한 임베딩 모델 사용 (768차원, DB vector(768)와 일치)
@@ -359,7 +360,7 @@ class RAGFunctions:
         }
 
 
-async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
+async def execute_function_calls(function_calls: List[Dict], user_id: str = None) -> Dict[str, Any]:
     """
     router_agent의 function_calls 실행
     
@@ -421,6 +422,20 @@ async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
                 # 1. router_agent의 j_scores 형식 변환
                 # 간단 형식: {"국어": 1, "수학": 2} → 표준 형식: {"국어": {"type": "등급", "value": 1}}
                 raw_scores = params.get("j_scores", {})
+                score_id = params.get("score_id")
+                loaded_score_name = None
+                if score_id:
+                    try:
+                        score_row = await supabase_service.get_user_score_set_by_id(
+                            str(score_id), user_id=user_id
+                        )
+                        if score_row and score_row.get("scores"):
+                            raw_scores = to_consult_j_scores(score_row.get("scores") or {})
+                            score_name = (score_row.get("name") or "").strip()
+                            if score_name:
+                                loaded_score_name = f"@{score_name}"
+                    except Exception as e:
+                        print(f"⚠️ score_id 조회 실패: {e}")
                 converted_scores = {}
                 
                 for key, val in raw_scores.items():
@@ -592,6 +607,7 @@ async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
                     "total_tokens": total_tokens,
                     "total_universities": 86,
                     "total_departments": len(reverse_results),
+                    "loaded_score_name": loaded_score_name,
                 }
             
             elif func_name == "consult_susi":

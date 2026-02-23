@@ -465,11 +465,11 @@ async def route_query(message: str, history: List[Dict] = None, user_id: str = N
     """
     router = get_router()
     result = await router.route(message, history)
-    
-    # consult 호출인데 scores가 없으면 프로필에서 가져오기
-    if user_id:
-        await _fill_scores_from_profile(result, user_id)
-    
+    # Router는 score payload를 전달하지 않는다.
+    for call in result.get("function_calls", []):
+        if call.get("function") == "consult_jungsi":
+            params = call.setdefault("params", {})
+            params.pop("j_scores", None)
     return result
 
 

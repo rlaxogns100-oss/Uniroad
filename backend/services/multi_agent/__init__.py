@@ -19,7 +19,13 @@ AVAILABLE_AGENTS = [
 ]
 
 
-async def run_orchestration_agent(message: str, history: List[Dict] = None, timing_logger=None, user_id: str = None) -> Dict[str, Any]:
+async def run_orchestration_agent(
+    message: str,
+    history: List[Dict] = None,
+    timing_logger=None,
+    user_id: str = None,
+    score_id: str = None,
+) -> Dict[str, Any]:
     """
     Orchestration Agent 실행 (router_agent 래퍼)
     - 기존 chat.py 호환 유지
@@ -42,6 +48,12 @@ async def run_orchestration_agent(message: str, history: List[Dict] = None, timi
         
         # function_calls 추출
         function_calls = result.get("function_calls", [])
+        if score_id:
+            for call in function_calls:
+                if call.get("function") == "consult_jungsi":
+                    params = call.setdefault("params", {})
+                    params.pop("j_scores", None)
+                    params["score_id"] = score_id
         print(f"   ✅ Router 완료: {len(function_calls)}개 함수 호출 ({timing['router']}ms)")
         
         # 2. function_calls 실행 (RAG 검색)
@@ -50,7 +62,7 @@ async def run_orchestration_agent(message: str, history: List[Dict] = None, timi
         func_start = time.time()
         if function_calls:
             try:
-                function_results = await execute_function_calls(function_calls)
+                function_results = await execute_function_calls(function_calls, user_id=user_id)
                 timing["function"] = round((time.time() - func_start) * 1000)
                 print(f"   ✅ Functions 완료: {len(function_results)}개 결과 ({timing['function']}ms)")
             except Exception as func_error:
@@ -116,7 +128,13 @@ async def run_orchestration_agent(message: str, history: List[Dict] = None, timi
         }
 
 
-def run_orchestration_agent_stream(message: str, history: List[Dict] = None, timing_logger=None, user_id: str = None):
+def run_orchestration_agent_stream(
+    message: str,
+    history: List[Dict] = None,
+    timing_logger=None,
+    user_id: str = None,
+    score_id: str = None,
+):
     """
     Orchestration Agent 실행 (스트리밍 버전)
     - Router → Functions 후 Main Agent 응답을 스트리밍
@@ -153,6 +171,12 @@ def run_orchestration_agent_stream(message: str, history: List[Dict] = None, tim
         timing["router"] = round((time.time() - router_start) * 1000)
         
         function_calls = result.get("function_calls", [])
+        if score_id:
+            for call in function_calls:
+                if call.get("function") == "consult_jungsi":
+                    params = call.setdefault("params", {})
+                    params.pop("j_scores", None)
+                    params["score_id"] = score_id
         
         # Router 완료 시 검색 쿼리 상세 정보 포함
         queries_detail = []
@@ -220,7 +244,9 @@ def run_orchestration_agent_stream(message: str, history: List[Dict] = None, tim
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
                 try:
-                    function_results = loop.run_until_complete(execute_function_calls(function_calls))
+                    function_results = loop.run_until_complete(
+                        execute_function_calls(function_calls, user_id=user_id)
+                    )
                 finally:
                     loop.close()
                 

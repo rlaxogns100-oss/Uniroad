@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>UniRoad Profile Agent Lab</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Noto+Sans+KR:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="bg-shape shape-a"></div>
+    <div class="bg-shape shape-b"></div>
+    <main class="layout">
+      <section class="hero">
+        <h1>Profile Agent Sandbox</h1>
+        <p>
+          채팅 입력에서 성적을 추출하고, 부족한 과목은 자동 보완/추정한 뒤
+          <code>adiga2 input</code> 형식으로 구조화합니다.
+        </p>
+      </section>
+
+      <section class="panel controls">
+        <label for="userId">User ID</label>
+        <input id="userId" type="text" value="demo-student-001" />
+
+        <button id="loadProfileBtn" class="ghost">저장된 user_profile 조회</button>
+      </section>
+
+      <section class="panel chat">
+        <div class="latest-input">
+          <div class="meta">방금 입력</div>
+          <div id="lastInputText">아직 입력 없음</div>
+        </div>
+        <form id="chatForm" class="composer">
+          <textarea
+            id="chatInput"
+            rows="3"
+            placeholder="예: 나 11232인데 국어는 화작, 수학은 미적이고 생윤 2등급 사문 3등급이야"
+          ></textarea>
+          <button id="sendBtn" type="submit">추출 실행</button>
+        </form>
+      </section>
+
+      <section class="panel output">
+        <h2>Latest Structured Output</h2>
+        <div id="tableError" class="error"></div>
+        <div class="score-table-wrap">
+          <table class="score-table">
+            <thead>
+              <tr>
+                <th>과목</th>
+                <th>선택과목</th>
+                <th>표준점수</th>
+                <th>백분위</th>
+                <th>등급</th>
+              </tr>
+            </thead>
+            <tbody id="scoreTableBody"></tbody>
+          </table>
+        </div>
+        <h3 class="raw-json-title">Extractor JSON Output</h3>
+        <pre id="extractorJson" class="raw-json"></pre>
+      </section>
+    </main>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
+

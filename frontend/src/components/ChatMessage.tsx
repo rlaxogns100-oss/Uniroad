@@ -1,9 +1,16 @@
 import { useState, useEffect } from 'react'
 import ShareModal from './ShareModal'
 
+interface ScoreReviewCardData {
+  pendingId: string
+  titleAuto: string
+  scores: Record<string, any>
+}
+
 interface ChatMessageProps {
   message: string
   isUser: boolean
+  scoreMentions?: string[]
   sources?: string[]
   source_urls?: string[]  // 다운로드 URL (기존 방식용)
   userQuery?: string  // AI 답변일 때 연결된 사용자 질문
@@ -23,12 +30,26 @@ interface ChatMessageProps {
   } | null
   isAdmin?: boolean  // 관리자 여부
   onAgentClick?: () => void  // Agent 버튼 클릭 콜백
+  scoreReview?: ScoreReviewCardData
+  onScoreReviewApprove?: (pendingId: string, title: string, scores: Record<string, any>) => void
+  onScoreReviewSkipSession?: (pendingId: string) => void
+  onScoreTagClick?: (name: string) => void
 }
 
-export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming, onRegenerate, imageUrl, showLoginPrompt, onLoginClick, isMasked, agentData, isAdmin, onAgentClick }: ChatMessageProps) {
+export default function ChatMessage({ message, isUser, scoreMentions, sources, source_urls, userQuery, isStreaming, onRegenerate, imageUrl, showLoginPrompt, onLoginClick, isMasked, agentData, isAdmin, onAgentClick, scoreReview, onScoreReviewApprove, onScoreReviewSkipSession, onScoreTagClick }: ChatMessageProps) {
   const [showFactCheck, setShowFactCheck] = useState(false)
   const [showGlow, setShowGlow] = useState(false)
   const [showShareModal, setShowShareModal] = useState(false)  // 공유 모달 상태
+  const [isEditScoreReview, setIsEditScoreReview] = useState(false)
+  const [scoreReviewTitle, setScoreReviewTitle] = useState((scoreReview?.titleAuto || '@내성적1').replace(/^@/, ''))
+  const [scoreReviewScores, setScoreReviewScores] = useState<Record<string, any>>(scoreReview?.scores || {})
+
+  useEffect(() => {
+    if (scoreReview) {
+      setScoreReviewTitle((scoreReview.titleAuto || '@내성적1').replace(/^@/, '').slice(0, 10))
+      setScoreReviewScores(scoreReview.scores)
+    }
+  }, [scoreReview])
   
   // AI 답변 스트리밍이 완료되면 글로우 효과 트리거
   useEffect(() => {
@@ -263,6 +284,47 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
     return content
   }
 
+  // 본문 내 @성적명 텍스트를 인라인 칩으로 변환
+  const renderInlineScoreMentions = (content: React.ReactNode): React.ReactNode => {
+    if (typeof content === 'string') {
+      const mentionRegex = /(@[가-힣a-zA-Z0-9_]{1,10})/g
+      const parts = content.split(mentionRegex)
+      if (parts.length <= 1) return content
+
+      return parts.map((part, idx) => {
+        if (mentionRegex.test(part)) {
+          mentionRegex.lastIndex = 0
+          return (
+            <button
+              key={`inline-score-${idx}-${part}`}
+              className="inline-flex items-center align-baseline bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full px-2 py-0.5 text-xs hover:bg-indigo-100 transition-colors mx-0.5"
+              onClick={() => onScoreTagClick?.(part)}
+            >
+              {part}
+            </button>
+          )
+        }
+        return part
+      })
+    }
+
+    if (Array.isArray(content)) {
+      return content.map((node) => renderInlineScoreMentions(node))
+    }
+
+    if (content && typeof content === 'object' && 'props' in content) {
+      const element = content as React.ReactElement
+      if (element.props && element.props.children) {
+        const processedChildren = renderInlineScoreMentions(element.props.children)
+        if (processedChildren !== element.props.children) {
+          return { ...element, props: { ...element.props, children: processedChildren } }
+        }
+      }
+    }
+
+    return content
+  }
+
   // cite 태그 개수 세기
   const countCiteTags = () => {
     const newCiteRegex = /<cite\s+data-source="([^"]*)"(?:\s+data-url="([^"]*)")?\s*>([\s\S]*?)<\/cite>/g
@@ -380,7 +442,7 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
       }
 
       const content = wrapBulletLines(parts.length > 0 ? parts : parseTitles(cleanedMessage))
-      return <div className="whitespace-pre-wrap">{addSectionDividers(content)}</div>
+      return <div className="whitespace-pre-wrap">{renderInlineScoreMentions(addSectionDividers(content))}</div>
     }
 
     // 기존 형식 처리 (하위 호환성)
@@ -393,7 +455,7 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
       // cite 태그 제거하고 일반 텍스트로
       const finalClean = cleanedMessage.replace(/<\/?cite>/g, '')
       const content = wrapBulletLines(parseTitles(finalClean))
-      return <div className="whitespace-pre-wrap">{addSectionDividers(content)}</div>
+      return <div className="whitespace-pre-wrap">{renderInlineScoreMentions(addSectionDividers(content))}</div>
     }
 
     // 기존 <cite>...</cite> 패턴 찾기
@@ -464,12 +526,147 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
     }
 
     const content = wrapBulletLines(parts.length > 0 ? parts : parseTitles(cleanedMessage))
-    return <div className="whitespace-pre-wrap">{addSectionDividers(content)}</div>
+    return <div className="whitespace-pre-wrap">{renderInlineScoreMentions(addSectionDividers(content))}</div>
   }
 
   // 메시지에서 [이미지 첨부] 태그 제거
   const getDisplayMessage = () => {
     return message.replace(/^\[이미지 첨부\]\s*/, '')
+  }
+
+  if (!isUser && scoreReview) {
+    const subjects = ['한국사', '국어', '수학', '영어', '탐구1', '탐구2', '제2외국어/한문']
+    const electiveOptionsMap: Record<string, string[]> = {
+      국어: ['미응시', '화법과작문', '언어와매체'],
+      수학: ['미응시', '확률과통계', '기하', '미적분'],
+      영어: ['미응시', '영어'],
+      탐구1: ['미응시', '한국지리', '윤리와사상', '생활과윤리', '사회문화', '정치와법', '경제', '세계사', '동아시아사', '세계지리', '물리학1', '물리학2', '화학1', '화학2', '생명과학1', '생명과학2', '지구과학1', '지구과학2'],
+      탐구2: ['미응시', '한국지리', '윤리와사상', '생활과윤리', '사회문화', '정치와법', '경제', '세계사', '동아시아사', '세계지리', '물리학1', '물리학2', '화학1', '화학2', '생명과학1', '생명과학2', '지구과학1', '지구과학2'],
+      '제2외국어/한문': ['미응시', '독일어1', '프랑스어1', '스페인어1', '중국어1', '일본어1', '러시아어1', '아랍어1', '베트남어1', '한문1'],
+    }
+    return (
+      <div className="flex justify-start mb-4 w-full">
+        <div className="w-full bg-white border border-gray-200 rounded-xl p-4">
+          <div className="flex items-start justify-between gap-2 mb-3">
+            <div className="font-semibold text-gray-900 pt-1">다음 성적을 기반으로 답변할까요?</div>
+            <div className="flex gap-2">
+              <button className="px-3 py-1.5 rounded-lg bg-gray-100 text-sm" onClick={() => setIsEditScoreReview((v) => !v)}>
+                {isEditScoreReview ? '수정 완료' : '수정'}
+              </button>
+              <button
+                className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm"
+                onClick={() =>
+                  onScoreReviewApprove?.(
+                    scoreReview.pendingId,
+                    `@${(scoreReviewTitle || '내성적1').slice(0, 10)}`,
+                    scoreReviewScores
+                  )
+                }
+              >
+                확인
+              </button>
+              <button
+                className="px-3 py-1.5 rounded-lg bg-gray-800 text-white text-sm"
+                onClick={() => onScoreReviewSkipSession?.(scoreReview.pendingId)}
+              >
+                다시 묻지 않기
+              </button>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 mb-3">
+            <div className="text-sm text-gray-600 shrink-0">제목</div>
+            <div className="flex-1 flex items-center rounded-lg border border-gray-300 bg-white">
+              <span className="px-3 text-sm text-gray-500">@</span>
+              <input
+                className="w-full py-2 pr-3 rounded-r-lg text-sm focus:outline-none"
+                value={scoreReviewTitle}
+                disabled={!isEditScoreReview}
+                onChange={(e) => setScoreReviewTitle(e.target.value.slice(0, 10))}
+              />
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="text-left">
+                  <th className="py-1">과목</th>
+                  <th className="py-1">선택과목</th>
+                  <th className="py-1">표준점수</th>
+                  <th className="py-1">백분위</th>
+                  <th className="py-1">등급</th>
+                </tr>
+              </thead>
+              <tbody>
+                {subjects.map((subject) => {
+                  const row = scoreReviewScores?.[subject] || {}
+                  const setVal = (key: string, value: any) =>
+                    setScoreReviewScores((prev) => ({
+                      ...prev,
+                      [subject]: { ...(prev?.[subject] || {}), [key]: value },
+                    }))
+                  return (
+                    <tr key={subject} className="border-t border-gray-100">
+                      <td className="py-1">{subject}</td>
+                      <td className="py-1">
+                        {subject === '한국사' ? (
+                          <span>-</span>
+                        ) : (
+                          <select
+                            className="w-full px-2 py-1 rounded border border-gray-200 bg-white"
+                            disabled={!isEditScoreReview}
+                            value={row['선택과목'] ?? row['과목명'] ?? '미응시'}
+                            onChange={(e) => setVal('선택과목', e.target.value)}
+                          >
+                            {(electiveOptionsMap[subject] || ['미응시']).map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </td>
+                      <td className="py-1">
+                        <input
+                          type="number"
+                          min={0}
+                          max={200}
+                          className="w-full px-2 py-1 rounded border border-gray-200"
+                          disabled={!isEditScoreReview}
+                          value={row['표준점수'] ?? ''}
+                          onChange={(e) => setVal('표준점수', e.target.value === '' ? null : Number(e.target.value))}
+                        />
+                      </td>
+                      <td className="py-1">
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          className="w-full px-2 py-1 rounded border border-gray-200"
+                          disabled={!isEditScoreReview}
+                          value={row['백분위'] ?? ''}
+                          onChange={(e) => setVal('백분위', e.target.value === '' ? null : Number(e.target.value))}
+                        />
+                      </td>
+                      <td className="py-1">
+                        <input
+                          type="number"
+                          min={1}
+                          max={9}
+                          className="w-full px-2 py-1 rounded border border-gray-200"
+                          disabled={!isEditScoreReview}
+                          value={row['등급'] ?? ''}
+                          onChange={(e) => setVal('등급', e.target.value === '' ? null : Number(e.target.value))}
+                        />
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -488,6 +685,15 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
             </div>
           )}
           <div className="rounded-2xl px-4 py-3 text-gray-800" style={{ backgroundColor: '#F1F5FB' }}>
+            {!!scoreMentions?.length && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {scoreMentions.map((tag) => (
+                  <span key={tag} className="inline-flex items-center bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full px-2 py-0.5 text-xs">
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="whitespace-pre-wrap">{getDisplayMessage()}</div>
           </div>
         </div>

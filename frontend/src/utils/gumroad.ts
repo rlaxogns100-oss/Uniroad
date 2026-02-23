@@ -7,12 +7,9 @@ const CHECKOUT_BASE = import.meta.env.VITE_GUMROAD_CHECKOUT_URL ?? ''
 
 export function getGumroadCheckoutUrl(userId: string, email?: string): string {
   if (!CHECKOUT_BASE || !userId) return ''
+  // 성공했던 운영 조건: 상품페이지 경유 + user_id/email 전달 (wanted=true 미사용)
   const url = new URL(CHECKOUT_BASE)
-  // product 페이지 대신 checkout으로 바로 진입되도록 강제
-  url.searchParams.set('wanted', 'true')
-  // 사용자 식별 강화를 위해 user_id를 항상 전달
   url.searchParams.set('user_id', userId)
-  // webhook 매칭 보강을 위해 email도 함께 전달
   if (email) {
     url.searchParams.set('email', email.trim().toLowerCase())
   }

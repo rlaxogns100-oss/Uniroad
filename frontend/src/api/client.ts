@@ -21,6 +21,7 @@ export interface ChatRequest {
   message: string
   session_id?: string
   thinking?: boolean  // Thinking 모드 활성화 여부
+  score_id?: string
 }
 
 // 멀티에이전트 응답 타입
@@ -94,6 +95,20 @@ export interface ChatResponse {
   sub_agent_results?: Record<string, SubAgentResult>
   metadata?: Record<string, any>
   require_login?: boolean  // 비로그인 3회째 질문 시 마스킹 필요
+  score_id?: string
+}
+
+export interface ScoreReviewRequiredEvent {
+  pending_id: string
+  title_auto: string
+  scores: Record<string, any>
+  constraints: Record<string, any>
+  actions: string[]
+}
+
+export interface ScoreSetSuggestItem {
+  id: string
+  name: string
 }
 
 export interface UploadResponse {
@@ -234,7 +249,9 @@ export const sendMessageStream = async (
   abortSignal?: AbortSignal,
   onChunk?: (chunk: string) => void,  // 실시간 텍스트 청크 콜백
   token?: string,  // 인증 토큰
-  thinking?: boolean  // Thinking 모드
+  thinking?: boolean,  // Thinking 모드
+  onScoreReviewRequired?: (payload: ScoreReviewRequiredEvent) => void,
+  scoreId?: string
 ): Promise<void> => {
   const IS_CAPACITOR_APP = isCapacitorApp()
   console.log('[sendMessageStream] IS_CAPACITOR_APP:', IS_CAPACITOR_APP)
@@ -266,6 +283,7 @@ export const sendMessageStream = async (
         message,
         session_id: sessionId,
         thinking: thinking || false,
+        score_id: scoreId || null,
       }),
       signal: abortSignal,
     })
@@ -351,6 +369,9 @@ export const sendMessageStream = async (
             // 완료
             finalData = event
             onLog('✨ 답변 완료!')
+          } else if (event.type === 'score_review_required') {
+            onScoreReviewRequired?.(event as ScoreReviewRequiredEvent)
+            return
           } else if (event.type === 'error') {
             onError?.(event.message || '알 수 없는 오류')
             return
@@ -376,7 +397,8 @@ export const sendMessageStream = async (
         timing: finalData?.timing,
         pipeline_time: finalData?.pipeline_time
       },
-      require_login: finalData?.require_login || false  // 비로그인 3회째 질문 시 마스킹
+      require_login: finalData?.require_login || false,  // 비로그인 3회째 질문 시 마스킹
+      score_id: finalData?.score_id
     }
     
     onResult(chatResponse)
@@ -513,7 +535,9 @@ export const sendMessageStreamWithImage = async (
   onError?: (error: string) => void,
   abortSignal?: AbortSignal,
   onChunk?: (chunk: string) => void,
-  token?: string  // 인증 토큰
+  token?: string,  // 인증 토큰
+  onScoreReviewRequired?: (payload: ScoreReviewRequiredEvent) => void,
+  scoreId?: string
 ): Promise<void> => {
   const IS_CAPACITOR_APP = isCapacitorApp()
   
@@ -530,6 +554,9 @@ export const sendMessageStreamWithImage = async (
     formData.append('message', message)
     formData.append('session_id', sessionId)
     formData.append('image', image)
+    if (scoreId) {
+      formData.append('score_id', scoreId)
+    }
     
     // 헤더 구성
     const headers: Record<string, string> = {}
@@ -617,6 +644,9 @@ export const sendMessageStreamWithImage = async (
           } else if (event.type === 'done') {
             finalData = event
             onLog('✨ 이미지 분석 완료!')
+          } else if (event.type === 'score_review_required') {
+            onScoreReviewRequired?.(event as ScoreReviewRequiredEvent)
+            return
           } else if (event.type === 'error') {
             onError?.(event.message || '알 수 없는 오류')
             return
@@ -642,7 +672,8 @@ export const sendMessageStreamWithImage = async (
         image_analysis: finalData?.image_analysis,
         pipeline_time: finalData?.pipeline_time
       },
-      require_login: finalData?.require_login || false  // 비로그인 3회째 질문 시 마스킹
+      require_login: finalData?.require_login || false,  // 비로그인 3회째 질문 시 마스킹
+      score_id: finalData?.score_id
     }
     
     onResult(chatResponse)
@@ -796,6 +827,70 @@ export const deleteProfile = async (token: string): Promise<void> => {
   await api.delete('/profile/me', {
     headers: { Authorization: `Bearer ${token}` }
   })
+}
+
+export const approveScoreReview = async (
+  pendingId: string,
+  sessionId: string,
+  title: string,
+  scores: Record<string, any>,
+  token?: string
+): Promise<{ pending_id: string; score_id: string; score_name: string }> => {
+  const response = await api.post(
+    '/chat/v2/score-review/approve',
+    {
+      pending_id: pendingId,
+      session_id: sessionId,
+      title,
+      scores,
+    },
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    }
+  )
+  return response.data
+}
+
+export const skipScoreReviewSession = async (
+  sessionId: string,
+  pendingId?: string,
+  token?: string
+): Promise<void> => {
+  await api.post(
+    '/chat/v2/score-review/skip-session',
+    {
+      session_id: sessionId,
+      pending_id: pendingId || null,
+    },
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    }
+  )
+}
+
+export const suggestScoreSets = async (
+  query: string,
+  sessionId: string,
+  token?: string
+): Promise<ScoreSetSuggestItem[]> => {
+  const response = await api.get('/chat/v2/score-sets/suggest', {
+    params: { q: query, session_id: sessionId },
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  })
+  return response.data?.items || []
+}
+
+export const getScoreSetByName = async (
+  name: string,
+  sessionId: string,
+  token?: string
+): Promise<{ id: string; name: string; scores: Record<string, any> }> => {
+  const encoded = encodeURIComponent(name.startsWith('@') ? name.slice(1) : name)
+  const response = await api.get(`/chat/v2/score-set/${encoded}`, {
+    params: { session_id: sessionId },
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  })
+  return response.data
 }
 
 // ============================================================

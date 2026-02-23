@@ -441,6 +441,229 @@ class SupabaseService:
             print(f"❌ update_user_profile_metadata 오류: {e}")
             return False
 
+    @staticmethod
+    def _normalize_score_name(name: str) -> str:
+        raw = (name or "").strip()
+        if raw.startswith("@"):
+            raw = raw[1:]
+        normalized = raw[:10] if raw else "내성적1"
+        return normalized
+
+    @classmethod
+    async def upsert_user_score_set(
+        cls,
+        user_id: str,
+        name: str,
+        scores: Dict[str, Any],
+        source_message: Optional[str] = None,
+        title_auto_generated: bool = True,
+    ) -> Optional[Dict[str, Any]]:
+        """성적 세트 upsert (user_id + name unique)."""
+        client = cls.get_admin_client()
+        try:
+            score_name = cls._normalize_score_name(name)
+            payload = {
+                "user_id": user_id,
+                "name": score_name,
+                "scores": scores or {},
+                "source_message": source_message,
+                "title_auto_generated": title_auto_generated,
+            }
+            response = (
+                client.table("user_score_sets")
+                .upsert(payload, on_conflict="user_id,name")
+                .execute()
+            )
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+        except Exception as e:
+            print(f"❌ upsert_user_score_set 오류: {e}")
+            return None
+
+    @classmethod
+    async def get_user_score_set_by_id(
+        cls, score_set_id: str, user_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        client = cls.get_admin_client()
+        try:
+            query = client.table("user_score_sets").select("*").eq("id", score_set_id)
+            if user_id:
+                query = query.eq("user_id", user_id)
+            response = query.limit(1).execute()
+            if response.data:
+                return response.data[0]
+            return None
+        except Exception as e:
+            print(f"❌ get_user_score_set_by_id 오류: {e}")
+            return None
+
+    @classmethod
+    async def get_user_score_set_by_name(
+        cls, user_id: str, name: str
+    ) -> Optional[Dict[str, Any]]:
+        client = cls.get_admin_client()
+        try:
+            score_name = cls._normalize_score_name(name)
+            response = (
+                client.table("user_score_sets")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("name", score_name)
+                .limit(1)
+                .execute()
+            )
+            if response.data:
+                return response.data[0]
+            return None
+        except Exception as e:
+            print(f"❌ get_user_score_set_by_name 오류: {e}")
+            return None
+
+    @classmethod
+    async def list_user_score_sets(
+        cls, user_id: str, keyword: str = "", limit: int = 8
+    ) -> List[Dict[str, Any]]:
+        client = cls.get_admin_client()
+        try:
+            query = (
+                client.table("user_score_sets")
+                .select("id,name,updated_at")
+                .eq("user_id", user_id)
+                .order("updated_at", desc=True)
+                .limit(limit)
+            )
+            if keyword:
+                query = query.ilike("name", f"%{keyword.replace('@', '')}%")
+            response = query.execute()
+            return response.data or []
+        except Exception as e:
+            print(f"❌ list_user_score_sets 오류: {e}")
+            return []
+
+    @classmethod
+    async def create_chat_score_pending(
+        cls,
+        user_id: Optional[str],
+        session_id: str,
+        raw_message: str,
+        router_output: Dict[str, Any],
+        candidate_scores: Dict[str, Any],
+        title_auto: str,
+    ) -> Optional[Dict[str, Any]]:
+        client = cls.get_admin_client()
+        try:
+            payload = {
+                "user_id": user_id,
+                "session_id": session_id,
+                "raw_message": raw_message,
+                "router_output": router_output or {},
+                "candidate_scores": candidate_scores or {},
+                "title_auto": cls._normalize_score_name(title_auto),
+                "status": "review_required",
+            }
+            response = client.table("chat_score_pending").insert(payload).execute()
+            if response.data:
+                return response.data[0]
+            return None
+        except Exception as e:
+            print(f"❌ create_chat_score_pending 오류: {e}")
+            return None
+
+    @classmethod
+    async def get_chat_score_pending(
+        cls, pending_id: str, session_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        client = cls.get_admin_client()
+        try:
+            query = client.table("chat_score_pending").select("*").eq("id", pending_id)
+            if session_id:
+                query = query.eq("session_id", session_id)
+            response = query.limit(1).execute()
+            if response.data:
+                return response.data[0]
+            return None
+        except Exception as e:
+            print(f"❌ get_chat_score_pending 오류: {e}")
+            return None
+
+    @classmethod
+    async def resolve_chat_score_pending(
+        cls, pending_id: str, status: str, score_set_id: Optional[str] = None
+    ) -> bool:
+        client = cls.get_admin_client()
+        try:
+            payload: Dict[str, Any] = {"status": status}
+            if score_set_id:
+                payload["score_set_id"] = score_set_id
+            client.table("chat_score_pending").update(payload).eq("id", pending_id).execute()
+            return True
+        except Exception as e:
+            print(f"❌ resolve_chat_score_pending 오류: {e}")
+            return False
+
+    @classmethod
+    async def set_session_skip_score_review(
+        cls, session_id: str, user_id: Optional[str], skip: bool
+    ) -> bool:
+        client = cls.get_admin_client()
+        try:
+            user_key = user_id or "guest"
+            payload = {
+                "session_id": session_id,
+                "user_id": user_key,
+                "skip_score_review": bool(skip),
+            }
+            client.table("chat_session_flags").upsert(
+                payload, on_conflict="session_id,user_id"
+            ).execute()
+            return True
+        except Exception as e:
+            print(f"❌ set_session_skip_score_review 오류: {e}")
+            return False
+
+    @classmethod
+    async def get_session_skip_score_review(
+        cls, session_id: str, user_id: Optional[str]
+    ) -> bool:
+        client = cls.get_admin_client()
+        try:
+            user_key = user_id or "guest"
+            query = client.table("chat_session_flags").select("skip_score_review").eq(
+                "session_id", session_id
+            ).eq("user_id", user_key)
+            response = query.limit(1).execute()
+            if response.data:
+                return bool(response.data[0].get("skip_score_review"))
+            return False
+        except Exception as e:
+            print(f"❌ get_session_skip_score_review 오류: {e}")
+            return False
+
+    @classmethod
+    async def insert_chat_score_link(
+        cls,
+        session_id: str,
+        score_set_id: str,
+        score_name: str,
+        user_message_id: Optional[str] = None,
+        assistant_message_id: Optional[str] = None,
+    ) -> bool:
+        client = cls.get_admin_client()
+        try:
+            payload = {
+                "session_id": session_id,
+                "user_message_id": user_message_id,
+                "assistant_message_id": assistant_message_id,
+                "score_set_id": score_set_id,
+                "score_name": cls._normalize_score_name(score_name),
+            }
+            client.table("chat_score_links").insert(payload).execute()
+            return True
+        except Exception as e:
+            print(f"❌ insert_chat_score_link 오류: {e}")
+            return False
+
 
 class SupabaseUploader:
     """Supabase에 문서 데이터를 업로드하는 클래스"""

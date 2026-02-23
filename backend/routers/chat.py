@@ -2,7 +2,7 @@
 채팅 API 라우터 (멀티에이전트 기반)
 전체 파이프라인: Orchestration Agent → Sub Agents → Final Agent → 최종 답변
 """
-from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Request, Header
+from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Request, Header, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -18,6 +18,11 @@ from services.multi_agent import (
     execute_sub_agents,
     generate_final_answer,
     AVAILABLE_AGENTS
+)
+from services.multi_agent.router_agent import route_query
+from services.score_review import (
+    run_router_and_profile_parallel,
+    resolve_score_id_from_message,
 )
 from utils.timing_logger import TimingLogger
 from utils.admin_filter import should_skip_logging
@@ -145,6 +150,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = "default"
     thinking: Optional[bool] = False  # Thinking 모드 활성화 여부
+    score_id: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -160,6 +166,84 @@ class ChatResponse(BaseModel):
     sub_agent_results: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
     logs: List[str] = []
+
+
+class ScoreReviewApproveRequest(BaseModel):
+    pending_id: str
+    session_id: str
+    title: str
+    scores: Dict[str, Any]
+
+
+class ScoreReviewSkipSessionRequest(BaseModel):
+    pending_id: Optional[str] = None
+    session_id: str
+
+
+async def _prepare_score_review_gate(
+    message: str,
+    history: List[Dict[str, Any]],
+    user_id: Optional[str],
+    session_id: str,
+    score_id_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Run router/profile in parallel and decide review gate."""
+    if score_id_override:
+        return {"mode": "pass", "score_id": score_id_override}
+
+    score_id_from_token = await resolve_score_id_from_message(user_id, message)
+    if score_id_from_token:
+        return {"mode": "pass", "score_id": score_id_from_token}
+
+    skip_session = await supabase_service.get_session_skip_score_review(session_id, user_id)
+    score_owner = user_id or f"guest:{session_id}"
+    existing = await supabase_service.list_user_score_sets(score_owner, limit=20)
+
+    router_coro = route_query(message, history, user_id=user_id)
+    router_output, candidate = await run_router_and_profile_parallel(
+        router_coro=router_coro,
+        message=message,
+        existing_score_sets=existing,
+    )
+
+    if not candidate.has_candidate:
+        return {"mode": "pass", "score_id": None, "router_output": router_output}
+
+    title_auto = candidate.title_auto
+    title_without_at = title_auto[1:] if title_auto.startswith("@") else title_auto
+
+    if skip_session:
+        saved = await supabase_service.upsert_user_score_set(
+            user_id=score_owner,
+            name=title_without_at,
+            scores=candidate.completed_scores,
+            source_message=message,
+            title_auto_generated=True,
+        )
+        return {
+            "mode": "auto",
+            "score_id": saved.get("id") if saved else None,
+            "score_name": f"@{saved.get('name')}" if saved else title_auto,
+            "router_output": router_output,
+        }
+
+    pending = await supabase_service.create_chat_score_pending(
+        user_id=user_id,
+        session_id=session_id,
+        raw_message=message,
+        router_output=router_output,
+        candidate_scores=candidate.completed_scores,
+        title_auto=title_without_at,
+    )
+    if not pending:
+        return {"mode": "pass", "score_id": None, "router_output": router_output}
+
+    return {
+        "mode": "review",
+        "pending_id": pending.get("id"),
+        "title_auto": title_auto,
+        "scores": candidate.completed_scores,
+    }
 
 
 @router.post("/", response_model=ChatResponse)
@@ -514,6 +598,7 @@ MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024
 async def chat_stream_v2_with_image(
     message: str = Form(...),
     session_id: str = Form(default="default"),
+    score_id: Optional[str] = Form(default=None),
     image: UploadFile = File(...),
     http_request: Request = None,
     authorization: Optional[str] = Header(None)
@@ -593,6 +678,7 @@ async def chat_stream_v2_with_image(
         sources = []
         source_urls = []
         used_chunks = []
+        active_score_id = score_id
         
         try:
             # 1단계: 이미지 분석 시작 상태 전송
@@ -636,11 +722,48 @@ async def chat_stream_v2_with_image(
 사용자 질문: {message}
 
 위 이미지 분석 결과를 참고하여 사용자의 질문에 답변해주세요."""
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                gate = loop.run_until_complete(
+                    _prepare_score_review_gate(
+                        message=enhanced_message,
+                        history=history,
+                        user_id=user_id,
+                        session_id=session_id,
+                        score_id_override=active_score_id,
+                    )
+                )
+            finally:
+                loop.close()
+
+            gate_mode = gate.get("mode")
+            if gate_mode == "review":
+                review_event = {
+                    "type": "score_review_required",
+                    "pending_id": gate.get("pending_id"),
+                    "title_auto": gate.get("title_auto"),
+                    "scores": gate.get("scores", {}),
+                    "constraints": {
+                        "title_max_length": 10,
+                        "standard_score": {"min": 0, "max": 200},
+                        "percentile": {"min": 0, "max": 100},
+                        "grade": {"min": 1, "max": 9},
+                    },
+                    "actions": ["edit", "approve", "skip_session"],
+                }
+                yield f"data: {json.dumps(review_event, ensure_ascii=False)}\n\n"
+                return
+            if gate_mode in {"auto", "pass"}:
+                active_score_id = gate.get("score_id") or active_score_id
             
             yield f"data: {json.dumps({'type': 'status', 'step': 'agent_start', 'message': '답변을 생성하는 중...'}, ensure_ascii=False)}\n\n"
             
             # 4단계: 기존 멀티에이전트 파이프라인 실행
-            for event in run_orchestration_agent_stream(enhanced_message, history):
+            for event in run_orchestration_agent_stream(
+                enhanced_message, history, user_id=user_id, score_id=active_score_id
+            ):
                 event_type = event.get("type")
                 
                 if event_type == "status":
@@ -699,7 +822,8 @@ async def chat_stream_v2_with_image(
                 "sources": sources,
                 "source_urls": source_urls,
                 "used_chunks": used_chunks,
-                "require_login": require_login  # 비로그인 3회째 질문 시 True
+                "require_login": require_login,  # 비로그인 3회째 질문 시 True
+                "score_id": active_score_id,
             }
             yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
             
@@ -796,8 +920,46 @@ async def chat_stream_v2(
         sources = []
         source_urls = []
         used_chunks = []
+        active_score_id = request.score_id
         
         try:
+            # 성적 리뷰 게이트 (Router/Profile 동시 실행)
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                gate = loop.run_until_complete(
+                    _prepare_score_review_gate(
+                        message=message,
+                        history=history,
+                        user_id=user_id,
+                        session_id=session_id,
+                        score_id_override=active_score_id,
+                    )
+                )
+            finally:
+                loop.close()
+
+            gate_mode = gate.get("mode")
+            if gate_mode == "review":
+                review_event = {
+                    "type": "score_review_required",
+                    "pending_id": gate.get("pending_id"),
+                    "title_auto": gate.get("title_auto"),
+                    "scores": gate.get("scores", {}),
+                    "constraints": {
+                        "title_max_length": 10,
+                        "standard_score": {"min": 0, "max": 200},
+                        "percentile": {"min": 0, "max": 100},
+                        "grade": {"min": 1, "max": 9},
+                    },
+                    "actions": ["edit", "approve", "skip_session"],
+                }
+                yield f"data: {json.dumps(review_event, ensure_ascii=False)}\n\n"
+                return
+
+            if gate_mode in {"auto", "pass"}:
+                active_score_id = gate.get("score_id") or active_score_id
+
             if thinking_mode:
                 # ========================================
                 # Thinking 모드: MainAgentThinking 사용
@@ -819,6 +981,12 @@ async def chat_stream_v2(
                     router_output = router_result
                     
                     function_calls = router_result.get("function_calls", [])
+                    for call in function_calls:
+                        if call.get("function") == "consult_jungsi":
+                            params = call.setdefault("params", {})
+                            params.pop("j_scores", None)
+                            if active_score_id:
+                                params["score_id"] = active_score_id
                     
                     # Router 완료 시 검색 쿼리 상세 정보 포함 (main_agent와 동일)
                     queries_detail = []
@@ -856,7 +1024,9 @@ async def chat_stream_v2(
                                 target_univ = params.get('target_univ', [])
                                 yield f"data: {json.dumps({'type': 'status', 'step': 'search_start', 'message': '📊 성적 분석 중...', 'detail': {'index': idx, 'type': 'consult', 'target_univ': target_univ}}, ensure_ascii=False)}\n\n"
                         
-                        initial_results = loop.run_until_complete(execute_function_calls(function_calls))
+                        initial_results = loop.run_until_complete(
+                            execute_function_calls(function_calls, user_id=user_id)
+                        )
                         function_results = initial_results
                         
                         # 검색 완료 상세 정보 추출 (찾은 문서 목록)
@@ -960,7 +1130,12 @@ async def chat_stream_v2(
                 # ========================================
                 # 기본 모드: 기존 파이프라인 사용
                 # ========================================
-                for event in run_orchestration_agent_stream(message, history, user_id=user_id):
+                for event in run_orchestration_agent_stream(
+                    message,
+                    history,
+                    user_id=user_id,
+                    score_id=active_score_id,
+                ):
                     event_type = event.get("type")
                     
                     if event_type == "status":
@@ -1021,7 +1196,8 @@ async def chat_stream_v2(
                 "source_urls": source_urls,
                 "used_chunks": used_chunks,
                 "thinking_mode": thinking_mode,
-                "require_login": require_login  # 비로그인 3회째 질문 시 True
+                "require_login": require_login,  # 비로그인 3회째 질문 시 True
+                "score_id": active_score_id,
             }
             yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
             
@@ -1515,6 +1691,107 @@ def emit_log(session_id: str, message: str):
             pass
 
 
+@router.post("/v2/score-review/approve")
+async def approve_score_review(
+    request: ScoreReviewApproveRequest,
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    pending = await supabase_service.get_chat_score_pending(
+        request.pending_id, session_id=request.session_id
+    )
+    if not pending:
+        raise HTTPException(status_code=404, detail="pending review를 찾을 수 없습니다.")
+    if pending.get("status") != "review_required":
+        raise HTTPException(status_code=400, detail="이미 처리된 pending review입니다.")
+
+    owner = user_id or f"guest:{request.session_id}"
+    title = (request.title or pending.get("title_auto") or "내성적1").strip()
+    if title.startswith("@"):
+        title = title[1:]
+    if len(title) > 10:
+        raise HTTPException(status_code=400, detail="성적 제목은 최대 10자입니다.")
+
+    saved = await supabase_service.upsert_user_score_set(
+        user_id=owner,
+        name=title,
+        scores=request.scores or {},
+        source_message=pending.get("raw_message") or "",
+        title_auto_generated=False,
+    )
+    if not saved:
+        raise HTTPException(status_code=500, detail="성적 저장에 실패했습니다.")
+
+    await supabase_service.resolve_chat_score_pending(
+        request.pending_id, status="approved", score_set_id=str(saved["id"])
+    )
+    return {
+        "pending_id": request.pending_id,
+        "score_id": saved["id"],
+        "score_name": f"@{saved['name']}",
+    }
+
+
+@router.post("/v2/score-review/skip-session")
+async def skip_score_review_for_session(
+    request: ScoreReviewSkipSessionRequest,
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    await supabase_service.set_session_skip_score_review(
+        session_id=request.session_id,
+        user_id=user_id,
+        skip=True,
+    )
+    if request.pending_id:
+        await supabase_service.resolve_chat_score_pending(request.pending_id, status="skipped")
+    return {"ok": True, "skip_session": True}
+
+
+@router.get("/v2/score-sets/suggest")
+async def suggest_score_sets(
+    q: str = Query(default=""),
+    limit: int = Query(default=8, ge=1, le=20),
+    session_id: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    if user_id:
+        owner = user_id
+    elif session_id:
+        owner = f"guest:{session_id}"
+    else:
+        return {"items": []}
+
+    rows = await supabase_service.list_user_score_sets(owner, keyword=q, limit=limit)
+    items = [{"id": row.get("id"), "name": f"@{row.get('name')}"} for row in rows]
+    return {"items": items}
+
+
+@router.get("/v2/score-set/{name}")
+async def get_score_set(
+    name: str,
+    session_id: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    if user_id:
+        owner = user_id
+    elif session_id:
+        owner = f"guest:{session_id}"
+    else:
+        raise HTTPException(status_code=400, detail="session_id 또는 로그인 정보가 필요합니다.")
+
+    row = await supabase_service.get_user_score_set_by_name(owner, name)
+    if not row:
+        raise HTTPException(status_code=404, detail="성적 세트를 찾을 수 없습니다.")
+    return {"id": row.get("id"), "name": f"@{row.get('name')}", "scores": row.get("scores", {})}
+
+
 @router.post("/reset")
 async def reset_session(
     session_id: str = "default",
@@ -1529,6 +1806,7 @@ async def reset_session(
     cache_key = get_cache_key(user_id, session_id)
     if cache_key in conversation_sessions:
         del conversation_sessions[cache_key]
+    await supabase_service.set_session_skip_score_review(session_id, user_id, False)
     return {"status": "ok", "message": f"세션 {session_id} 초기화 완료"}
 
 

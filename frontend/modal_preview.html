@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local - GPT-Style PRO Modal Demo</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; display: flex; justify-content: center; align-items: center; background: #f7f8fa; font-family: Inter, sans-serif; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+  const App = () => {
+    const plans = [
+      { title: 'Basic', price: 0, badge: '무료', features: ['일일 20회 상담', 'AI 응답', '기본 성적환산', '제한적 프롬프트'] } ,
+      { title: 'PRO',  price: 25900, badge: '추천', features: ['일일 100회 상담', 'Thinking 모드', '생기부 세특 평가', '우선 처리'] } ,
+    ];
+    const [sel, setSel] = React.useState(1);
+    const selected = plans[sel];
+    
+    const handleCardClick = () => {
+      alert('Pro 결제 진입은 서버에서만 동작합니다. 지금 테스트 모드입니다.');
+    };
+
+    const handleBank = () => {
+      alert('무통장입금 안내:
+계좌: 3333 35 4523620
+(입금 확인: 24시간 이내)');
+    };
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+        <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full overflow-hidden border border-gray-200">
+          {/* 헤더 */}
+          <div className="p-6 pb-5 border-b border-gray-100">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-600">
+                  UniRoad PRO
+                </div>
+                <span className="text-xs text-gray-500">대비</span>
+              </div>
+              <button 
+                className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 rounded-full hover:bg-gray-100 transition-colors"
+                onClick={()=>{alert('닫기')}}>
+                ✕
+              </button>
+            </div>
+            <h1 className="mt-3 text-2xl font-semibold text-gray-900">요금제</h1>
+            <p className="mt-1 text-sm text-gray-600">계획에 맞게 선택하세요</p>
+          </div>
+
+          {/* 카드 */}
+          <div className="p-6 grid md:grid-cols-2 gap-5 border-b border-gray-100">
+            {plans.map((p, i) => (
+              <div key={i} onClick={() => setSel(i)} className={`cursor-pointer rounded-2xl border-2 p-6 transition-all ${
+                sel === i ? 'border-indigo-200 bg-indigo-50 shadow-inner' : 'border-gray-200 bg-white'
+              }`}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="text-lg font-semibold text-gray-900">{p.title}</span>
+                    {p.badge==='추천' && <span className="text-xs font-semibold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">{p.badge}</span>}
+                  </div>
+                  <span className={`text-lg font-bold ${p.price===0?'text-emerald-600':'text-gray-900'}`}>
+                    {p.price===0?'무료':p.price.toLocaleString()+'원/월'}
+                  </span>
+                </div>
+                <ul className="space-y-1.5 text-sm text-gray-700">
+                  {p.features.map((f,j)=>(<li key={j} className="flex items-start gap-2"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 mt-1.5"></div>{f}</li>))}
+                </ul>
+              </div>
+            ))}
+          </div>
+
+          {/* 결제 */}
+          <div className="p-6 px-7 space-y-3">
+            {sel===1 && (
+              <>
+                <button onClick={handleCardClick} className="w-full flex items-center justify-center gap-2 py-3 bg-gray-900 text-white rounded-xl font-semibold hover:bg-black transition-colors">
+                  Pro 요금제 시작하기 (카드결제)
+                </button>
+                <button onClick={handleBank} className="w-full flex items-center justify-center gap-2 py-3 border border-gray-200 text-gray-700 rounded-xl font-semibold hover:bg-gray-100 transition-colors">
+                  무통장입금으로 구독하기
+                </button>
+              </>
+            )}
+            {sel===0 && (
+              <button className="w-full py-3 bg-emerald-500 text-white rounded-xl font-semibold cursor-default">
+                ✅ Basic 무료 계속 사용하기
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+  ReactDOM.render(<App />, document.getElementById('root'));
+</script>
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</html>
