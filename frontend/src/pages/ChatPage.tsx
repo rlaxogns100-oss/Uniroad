@@ -143,6 +143,10 @@ export default function ChatPage() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
   const [isPreregisterModalOpen, setIsPreregisterModalOpen] = useState(false)
   const [isProModalOpen, setIsProModalOpen] = useState(false)
+  const [isBankTransferModalOpen, setIsBankTransferModalOpen] = useState(false)
+  const [bankTransferName, setBankTransferName] = useState('')
+  const [bankTransferPhone, setBankTransferPhone] = useState('')
+  const [bankTransferSubmitting, setBankTransferSubmitting] = useState(false)
   const [dailyQuestionCount, setDailyQuestionCount] = useState<number>(() => {
     // localStorage에서 오늘 질문 횟수 불러오기
     const today = new Date().toDateString()
@@ -212,12 +216,73 @@ export default function ChatPage() {
       setIsAuthModalOpen(true)
       return
     }
+    // 관리자 결제 이력용 카드결제 신청 로그 (실패해도 결제는 계속 진행)
+    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/payments/card-checkout/attempt`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(accessToken && { Authorization: `Bearer ${accessToken}` }),
+      },
+      body: JSON.stringify({ amount: 25900, source: 'gumroad' }),
+    }).catch(() => undefined)
+
     const ok = redirectToGumroadCheckout(user.id, user.email)
     if (!ok) {
       alert('결제 페이지 URL이 설정되지 않았습니다. 잠시 후 다시 시도해 주세요.')
       return
     }
     setIsProModalOpen(false)
+  }
+  const subscribeByBankTransfer = () => {
+    setBankTransferName(user?.name || '')
+    setBankTransferPhone('')
+    setIsBankTransferModalOpen(true)
+  }
+
+  const submitBankTransfer = async () => {
+    if (!isAuthenticated || !accessToken) {
+      setIsBankTransferModalOpen(false)
+      setIsAuthModalOpen(true)
+      return
+    }
+    if (!bankTransferName.trim()) {
+      alert('이름을 입력해 주세요.')
+      return
+    }
+    if (!bankTransferPhone.trim()) {
+      alert('전화번호를 입력해 주세요.')
+      return
+    }
+
+    setBankTransferSubmitting(true)
+    try {
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/payments/bank-transfer/submit`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            name: bankTransferName.trim(),
+            phone: bankTransferPhone.trim(),
+          }),
+        }
+      )
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}))
+        throw new Error(err?.detail || '무통장입금 신청에 실패했습니다.')
+      }
+      setIsBankTransferModalOpen(false)
+      setIsProModalOpen(false)
+      alert('신청이 접수되어 Pro가 즉시 적용되었습니다. 관리자가 입금 여부를 확인합니다.')
+      window.location.reload()
+    } catch (e: any) {
+      alert(e?.message || '무통장입금 신청 중 오류가 발생했습니다.')
+    } finally {
+      setBankTransferSubmitting(false)
+    }
   }
 
   // 이미지 업로드 관련
@@ -1497,6 +1562,9 @@ export default function ChatPage() {
                     회원 탈퇴
                   </a>
                 </div>
+                <p className="mt-2 text-center text-[10px] sm:text-xs text-gray-500">
+                  문의: <a href="mailto:ceo@uni2road.com" className="hover:text-blue-500 hover:underline">ceo@uni2road.com</a>
+                </p>
               </div>
             ) : (
               <div>
@@ -1515,6 +1583,9 @@ export default function ChatPage() {
                     회원 탈퇴
                   </a>
                 </div>
+                <p className="mb-3 sm:mb-4 text-center text-[10px] sm:text-xs text-gray-500">
+                  문의: <a href="mailto:ceo@uni2road.com" className="hover:text-blue-500 hover:underline">ceo@uni2road.com</a>
+                </p>
                 <button
                   onClick={() => {
                     trackUserAction('login_modal_open', 'sidebar_login_button')
@@ -2460,80 +2531,127 @@ export default function ChatPage() {
       {/* PRO 구독 모달 (Fake Door Test) */}
       {!isGalaxySession && isProModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden animate-scaleIn">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full overflow-hidden animate-scaleIn border border-gray-200">
             {/* 헤더 */}
-            <div className="bg-gradient-to-r from-blue-600 to-purple-600 p-6 text-white text-center relative">
+            <div className="p-6 sm:p-7 border-b border-gray-100 relative">
               <button
                 onClick={() => setIsProModalOpen(false)}
-                className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center text-white/80 hover:text-white hover:bg-white/20 rounded-full transition-colors"
+                className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
-              <div className="inline-flex items-center gap-2 bg-white/20 rounded-full px-3 py-1 text-sm mb-3">
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                  <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                </svg>
-                PRO
-              </div>
-              <h2 className="text-2xl font-bold mb-2">유니로드 PRO</h2>
-              <p className="text-white/80 text-sm">더 강력한 AI 상담을 경험하세요</p>
+              <h2 className="text-2xl font-bold text-gray-900 mb-1">플랜 업그레이드</h2>
+              <p className="text-sm text-gray-600">유니로드 Pro, 최고의 AI 컨설턴트와 함께하세요.</p>
             </div>
-            
-            {/* 가격 */}
-            <div className="p-6 text-center border-b">
-              <div className="flex items-baseline justify-center gap-1">
-                <span className="text-4xl font-bold text-gray-900">$19</span>
-                <span className="text-gray-500">/월</span>
-              </div>
-            </div>
-            
-            {/* 혜택 */}
-            <div className="p-6 space-y-3">
-              <div className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                  </svg>
+
+            {/* 요금제 비교 카드 */}
+            <div className="p-6 sm:p-7 grid grid-cols-1 md:grid-cols-2 gap-4 border-b border-gray-100">
+              <div className="rounded-2xl border border-gray-200 bg-white p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xl font-semibold text-gray-900">Basic</h3>
+                  <span className="text-lg font-bold text-emerald-600">무료</span>
                 </div>
-                <span className="text-sm text-gray-700">일일 100회 AI 상담</span>
+                <ul className="space-y-2 text-sm text-gray-700">
+                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />일일 20회 AI 상담</li>
+                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />월 3회 생기부 분석</li>
+                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />최신 모집 요강</li>
+                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />성적 분석 및 대학 추천</li>
+                </ul>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                  </svg>
+
+              <div className="rounded-2xl border-2 border-indigo-200 bg-indigo-50/60 p-5">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-xl font-semibold text-gray-900">Pro</h3>
+                    <span className="text-[11px] font-semibold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">추천</span>
+                  </div>
+                  <span className="text-lg font-bold text-gray-900">25,900원/월</span>
                 </div>
-                <span className="text-sm text-gray-700">Thinking 모드 (심층 분석)</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <span className="text-sm text-gray-700">생기부 세특 평가</span>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-3 h-3 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                  </svg>
-                </div>
-                <span className="text-sm text-gray-700">우선 응답 처리</span>
+                <ul className="space-y-2 text-sm text-gray-700">
+                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />일일 100회 AI 상담</li>
+                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />심층 분석을 위한 Thinking 모드</li>
+                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />월 30회 생기부 분석</li>
+                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />최신 기능 우선 적용</li>
+                </ul>
               </div>
             </div>
-            
-            {/* 버튼 */}
-            <div className="p-6 pt-0">
+
+            {/* 결제 버튼 */}
+            <div className="px-6 sm:px-7 pb-6">
               <button
                 onClick={goToGumroadCheckout}
-                className="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all shadow-lg"
+                className="w-full py-3.5 bg-gray-900 text-white rounded-xl font-semibold hover:bg-black transition-colors"
               >
-                구독하기
+                Pro 요금제 시작하기 (카드결제)
               </button>
-              <p className="text-xs text-gray-400 text-center mt-3">언제든지 취소 가능</p>
+              <button
+                onClick={subscribeByBankTransfer}
+                className="w-full mt-3 py-3.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
+              >
+                무통장입금으로 구독하기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 무통장입금 신청 모달 */}
+      {!isGalaxySession && isBankTransferModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-gray-200">
+            <div className="p-5 border-b border-gray-100 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">무통장입금 신청</h3>
+                <p className="text-sm text-gray-600 mt-1">입금 후 결제했습니다 버튼을 눌러주세요.</p>
+              </div>
+              <button
+                onClick={() => setIsBankTransferModalOpen(false)}
+                className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
+                <p className="text-gray-600">가격</p>
+                <p className="text-lg font-bold text-gray-900">25,900원</p>
+                <p className="text-gray-600 mt-3">입금계좌</p>
+                <p className="font-semibold text-gray-900">3333354523620</p>
+                <p className="text-gray-700">카카오뱅크 (김태훈)</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">이름</label>
+                <input
+                  value={bankTransferName}
+                  onChange={(e) => setBankTransferName(e.target.value)}
+                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="입금자명"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">전화번호</label>
+                <input
+                  value={bankTransferPhone}
+                  onChange={(e) => setBankTransferPhone(e.target.value)}
+                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="01012345678"
+                />
+              </div>
+
+              <button
+                onClick={submitBankTransfer}
+                disabled={bankTransferSubmitting}
+                className="w-full py-3 bg-gray-900 text-white rounded-xl font-semibold hover:bg-black transition-colors disabled:opacity-60"
+              >
+                {bankTransferSubmitting ? '처리 중...' : '결제했습니다'}
+              </button>
             </div>
           </div>
         </div>

@@ -10,6 +10,37 @@ interface UploadTask {
   logs: string[]
 }
 
+interface PaymentRequestRow {
+  user_id: string
+  email?: string
+  user_name?: string
+  name?: string
+  phone?: string
+  amount: number
+  source?: string
+  status: string
+  created_at: string
+}
+
+interface UserOverviewRow {
+  id: string
+  email?: string
+  name?: string
+  recent_signup_at: string
+  total_chat_count: number
+  last_active_at: string
+  plan_status: 'Pro' | 'Basic'
+}
+
+interface UsersOverviewResponse {
+  bank_transfer_requests: PaymentRequestRow[]
+  card_checkout_requests: PaymentRequestRow[]
+  premium_users: UserOverviewRow[]
+  basic_users: UserOverviewRow[]
+  total_users: number
+  total_users_users_table?: number
+}
+
 export default function AdminPage() {
   const navigate = useNavigate()
   const [files, setFiles] = useState<File[]>([])
@@ -32,11 +63,21 @@ export default function AdminPage() {
   const [feedbacks, setFeedbacks] = useState<any[]>([])
   const [feedbackLoading, setFeedbackLoading] = useState(false)
   
-  // 사전신청자 관련 state
-  const [showPreregistrations, setShowPreregistrations] = useState(false)
-  const [preregistrations, setPreregistrations] = useState<any[]>([])
-  const [preregistrationsLoading, setPreregistrationsLoading] = useState(false)
-  const [preregistrationsTotal, setPreregistrationsTotal] = useState(0)
+  // 유저 관리 관련 state
+  const [showUsers, setShowUsers] = useState(false)
+  const [usersLoading, setUsersLoading] = useState(false)
+  const [usersOverview, setUsersOverview] = useState<UsersOverviewResponse>({
+    bank_transfer_requests: [],
+    card_checkout_requests: [],
+    premium_users: [],
+    basic_users: [],
+    total_users: 0,
+    total_users_users_table: 0,
+  })
+  const [premiumSearch, setPremiumSearch] = useState('')
+  const [basicSearch, setBasicSearch] = useState('')
+  const [premiumFilter, setPremiumFilter] = useState<'all' | 'chat' | 'no_chat' | 'active' | 'inactive'>('all')
+  const [basicFilter, setBasicFilter] = useState<'all' | 'chat' | 'no_chat' | 'active' | 'inactive'>('all')
   
   // 모든 문서에서 고유 해시태그 추출
   const allHashtags = Array.from(
@@ -61,24 +102,35 @@ export default function AdminPage() {
   }, [showFeedback])
 
   useEffect(() => {
-    if (showPreregistrations && preregistrations.length === 0) {
-      loadPreregistrations()
+    if (showUsers && usersOverview.total_users === 0) {
+      loadUsersOverview()
     }
-  }, [showPreregistrations])
+  }, [showUsers])
 
-  const loadPreregistrations = async () => {
-    setPreregistrationsLoading(true)
+  const loadUsersOverview = async () => {
+    setUsersLoading(true)
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/preregister/list`)
+      const accessToken = localStorage.getItem('access_token')
+      const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/payments/admin/users-overview`, {
+        headers: {
+          ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+        }
+      })
       if (response.ok) {
         const data = await response.json()
-        setPreregistrations(data.data || [])
-        setPreregistrationsTotal(data.total || 0)
+        setUsersOverview({
+          bank_transfer_requests: data.bank_transfer_requests || [],
+          card_checkout_requests: data.card_checkout_requests || [],
+          premium_users: data.premium_users || [],
+          basic_users: data.basic_users || [],
+          total_users: data.total_users || 0,
+          total_users_users_table: data.total_users_users_table || 0,
+        })
       }
     } catch (error) {
-      console.error('사전신청자 로드 오류:', error)
+      console.error('유저 목록 로드 오류:', error)
     } finally {
-      setPreregistrationsLoading(false)
+      setUsersLoading(false)
     }
   }
 
@@ -293,6 +345,60 @@ export default function AdminPage() {
     }
   }
 
+  const applyUserFilter = (
+    list: UserOverviewRow[],
+    search: string,
+    filter: 'all' | 'chat' | 'no_chat' | 'active' | 'inactive'
+  ) => {
+    const q = search.trim().toLowerCase()
+    return list.filter((u) => {
+      const matchSearch =
+        !q ||
+        u.id.toLowerCase().includes(q) ||
+        (u.email || '').toLowerCase().includes(q) ||
+        (u.name || '').toLowerCase().includes(q)
+
+      const hasChat = (u.total_chat_count || 0) > 0
+      const hasActive = !!u.last_active_at
+      const matchFilter =
+        filter === 'all' ||
+        (filter === 'chat' && hasChat) ||
+        (filter === 'no_chat' && !hasChat) ||
+        (filter === 'active' && hasActive) ||
+        (filter === 'inactive' && !hasActive)
+
+      return matchSearch && matchFilter
+    })
+  }
+
+  const filteredPremiumUsers = applyUserFilter(usersOverview.premium_users, premiumSearch, premiumFilter)
+  const filteredBasicUsers = applyUserFilter(usersOverview.basic_users, basicSearch, basicFilter)
+
+  const updatePlanStatus = async (targetUserId: string, isPremium: boolean) => {
+    const accessToken = localStorage.getItem('access_token')
+    if (!accessToken) {
+      alert('관리자 인증 토큰이 없습니다. 다시 로그인해 주세요.')
+      return
+    }
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/payments/admin/user-plan`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ user_id: targetUserId, is_premium: isPremium }),
+      })
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}))
+        throw new Error(e?.detail || '요금제 상태 변경 실패')
+      }
+      await loadUsersOverview()
+    } catch (e: any) {
+      alert(e?.message || '요금제 상태 변경 중 오류가 발생했습니다.')
+    }
+  }
+
   // 로딩 중 표시
   if (isLoading) {
     return (
@@ -392,11 +498,11 @@ export default function AdminPage() {
               <span className="text-sm text-center">의견 보기</span>
             </button>
             <button
-              onClick={() => setShowPreregistrations(!showPreregistrations)}
+              onClick={() => setShowUsers(!showUsers)}
               className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors font-medium border border-blue-200"
             >
-              <span className="text-2xl">🎁</span>
-              <span className="text-sm text-center">사전신청자</span>
+              <span className="text-2xl">👤</span>
+              <span className="text-sm text-center">유저</span>
             </button>
           </div>
         </div>
@@ -465,62 +571,197 @@ export default function AdminPage() {
           </div>
         )}
 
-        {/* 사전신청자 섹션 */}
-        {showPreregistrations && (
+        {/* 유저 섹션 */}
+        {showUsers && (
           <div className="bg-white rounded-2xl shadow-xl p-6 mb-8 border border-gray-100">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-gray-800">🎁 사전신청자 목록</h2>
+              <h2 className="text-lg font-bold text-gray-800">👤 유저</h2>
               <div className="flex items-center gap-3">
-                <span className="text-sm text-gray-600">총 <span className="font-bold text-blue-600">{preregistrationsTotal}</span>명</span>
+                <span className="text-sm text-gray-600">총 <span className="font-bold text-blue-600">{usersOverview.total_users}</span>명</span>
+                <span className="text-xs text-gray-500">(users 테이블: {usersOverview.total_users_users_table || 0}명)</span>
                 <button
-                  onClick={loadPreregistrations}
+                  onClick={loadUsersOverview}
                   className="px-3 py-1.5 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 transition-colors"
                 >
                   새로고침
                 </button>
               </div>
             </div>
-            {preregistrationsLoading ? (
+            {usersLoading ? (
               <div className="text-center py-8">
                 <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
                 <p className="mt-2 text-gray-600">로딩 중...</p>
               </div>
-            ) : preregistrations.length === 0 ? (
-              <p className="text-center py-8 text-gray-500">아직 사전신청자가 없습니다.</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-gray-200 bg-gray-50">
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">#</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">전화번호</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">학년</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">시크릿 코드</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">이름</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-700">신청일시</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {preregistrations.map((reg, index) => (
-                      <tr key={reg.id || index} className="border-b border-gray-100 hover:bg-gray-50 transition-colors">
-                        <td className="py-3 px-4 text-gray-500">{index + 1}</td>
-                        <td className="py-3 px-4 font-mono text-gray-900">
-                          {reg.phone ? `${reg.phone.slice(0, 3)}-${reg.phone.slice(3, 7)}-${reg.phone.slice(7)}` : '-'}
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className="px-2 py-1 bg-purple-100 text-purple-700 rounded-full text-xs font-medium">
-                            {reg.grade || '-'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 font-mono text-blue-600 font-medium">{reg.secret_code || '-'}</td>
-                        <td className="py-3 px-4 text-gray-700">{reg.user_name || '-'}</td>
-                        <td className="py-3 px-4 text-gray-500 text-xs">
-                          {reg.created_at ? new Date(reg.created_at).toLocaleString('ko-KR') : '-'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="space-y-8">
+                {/* 신청 내역 */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+                    <h3 className="font-semibold text-amber-900 mb-3">무통장입금 신청 내역</h3>
+                    {usersOverview.bank_transfer_requests.length === 0 ? (
+                      <p className="text-sm text-amber-800/70">내역이 없습니다.</p>
+                    ) : (
+                      <div className="space-y-2 max-h-56 overflow-y-auto">
+                        {usersOverview.bank_transfer_requests.map((row, idx) => (
+                          <div key={`${row.user_id}-${idx}`} className="text-xs bg-white/70 rounded-lg p-2 border border-amber-200">
+                            <p><span className="font-semibold">날짜:</span> {row.created_at ? new Date(row.created_at).toLocaleString('ko-KR') : '-'}</p>
+                            <p><span className="font-semibold">유저:</span> {row.user_id}</p>
+                            <p><span className="font-semibold">이름/메일:</span> {row.user_name || '-'} / {row.email || '-'}</p>
+                            <p><span className="font-semibold">이름/전화:</span> {row.name || '-'} / {row.phone || '-'}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-blue-200 bg-blue-50 p-4">
+                    <h3 className="font-semibold text-blue-900 mb-3">카드결제 신청 내역</h3>
+                    {usersOverview.card_checkout_requests.length === 0 ? (
+                      <p className="text-sm text-blue-800/70">내역이 없습니다.</p>
+                    ) : (
+                      <div className="space-y-2 max-h-56 overflow-y-auto">
+                        {usersOverview.card_checkout_requests.map((row, idx) => (
+                          <div key={`${row.user_id}-${idx}`} className="text-xs bg-white/70 rounded-lg p-2 border border-blue-200">
+                            <p><span className="font-semibold">날짜:</span> {row.created_at ? new Date(row.created_at).toLocaleString('ko-KR') : '-'}</p>
+                            <p><span className="font-semibold">유저:</span> {row.user_id}</p>
+                            <p><span className="font-semibold">이름/메일:</span> {row.user_name || '-'} / {row.email || '-'}</p>
+                            <p><span className="font-semibold">금액:</span> {(row.amount || 0).toLocaleString()}원</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Pro 유저 */}
+                <div>
+                  <h3 className="font-semibold text-gray-900 mb-3">Pro 유저</h3>
+                  <div className="mb-3 flex flex-col sm:flex-row gap-2">
+                    <input
+                      value={premiumSearch}
+                      onChange={(e) => setPremiumSearch(e.target.value)}
+                      placeholder="Pro 유저 검색 (id/email/name)"
+                      className="w-full sm:w-80 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    />
+                    <select
+                      value={premiumFilter}
+                      onChange={(e) => setPremiumFilter(e.target.value as any)}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    >
+                      <option value="all">전체</option>
+                      <option value="chat">채팅 있음</option>
+                      <option value="no_chat">채팅 없음</option>
+                      <option value="active">최근 접속 있음</option>
+                      <option value="inactive">최근 접속 없음</option>
+                    </select>
+                  </div>
+                  <div className="overflow-x-auto rounded-xl border border-gray-200">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="text-left py-3 px-4">id</th>
+                          <th className="text-left py-3 px-4">이름</th>
+                          <th className="text-left py-3 px-4">메일</th>
+                          <th className="text-left py-3 px-4">최근 가입일</th>
+                          <th className="text-left py-3 px-4">총 채팅 개수</th>
+                          <th className="text-left py-3 px-4">최근 접속일</th>
+                          <th className="text-left py-3 px-4">요금제 상태</th>
+                          <th className="text-left py-3 px-4">변경</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredPremiumUsers.length === 0 ? (
+                          <tr><td colSpan={8} className="py-6 text-center text-gray-500">Pro 유저가 없습니다.</td></tr>
+                        ) : (
+                          filteredPremiumUsers.map((u) => (
+                            <tr key={`pro-${u.id}`} className="border-b border-gray-100 hover:bg-gray-50">
+                              <td className="py-3 px-4 font-mono text-xs">{u.id}</td>
+                              <td className="py-3 px-4">{u.name || '-'}</td>
+                              <td className="py-3 px-4 text-xs">{u.email || '-'}</td>
+                              <td className="py-3 px-4">{u.recent_signup_at ? new Date(u.recent_signup_at).toLocaleString('ko-KR') : '-'}</td>
+                              <td className="py-3 px-4">{u.total_chat_count}</td>
+                              <td className="py-3 px-4">{u.last_active_at ? new Date(u.last_active_at).toLocaleString('ko-KR') : '-'}</td>
+                              <td className="py-3 px-4"><span className="px-2 py-1 rounded-full text-xs bg-indigo-100 text-indigo-700">Pro</span></td>
+                              <td className="py-3 px-4">
+                                <button
+                                  onClick={() => updatePlanStatus(u.id, false)}
+                                  className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-700 hover:bg-gray-200"
+                                >
+                                  Basic로 변경
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Basic 유저 */}
+                <div>
+                  <h3 className="font-semibold text-gray-900 mb-3">Basic 유저</h3>
+                  <div className="mb-3 flex flex-col sm:flex-row gap-2">
+                    <input
+                      value={basicSearch}
+                      onChange={(e) => setBasicSearch(e.target.value)}
+                      placeholder="Basic 유저 검색 (id/email/name)"
+                      className="w-full sm:w-80 px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    />
+                    <select
+                      value={basicFilter}
+                      onChange={(e) => setBasicFilter(e.target.value as any)}
+                      className="px-3 py-2 border border-gray-300 rounded-lg text-sm"
+                    >
+                      <option value="all">전체</option>
+                      <option value="chat">채팅 있음</option>
+                      <option value="no_chat">채팅 없음</option>
+                      <option value="active">최근 접속 있음</option>
+                      <option value="inactive">최근 접속 없음</option>
+                    </select>
+                  </div>
+                  <div className="overflow-x-auto rounded-xl border border-gray-200">
+                    <table className="w-full text-sm">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="text-left py-3 px-4">id</th>
+                          <th className="text-left py-3 px-4">이름</th>
+                          <th className="text-left py-3 px-4">메일</th>
+                          <th className="text-left py-3 px-4">최근 가입일</th>
+                          <th className="text-left py-3 px-4">총 채팅 개수</th>
+                          <th className="text-left py-3 px-4">최근 접속일</th>
+                          <th className="text-left py-3 px-4">요금제 상태</th>
+                          <th className="text-left py-3 px-4">변경</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredBasicUsers.length === 0 ? (
+                          <tr><td colSpan={8} className="py-6 text-center text-gray-500">Basic 유저가 없습니다.</td></tr>
+                        ) : (
+                          filteredBasicUsers.map((u) => (
+                            <tr key={`basic-${u.id}`} className="border-b border-gray-100 hover:bg-gray-50">
+                              <td className="py-3 px-4 font-mono text-xs">{u.id}</td>
+                              <td className="py-3 px-4">{u.name || '-'}</td>
+                              <td className="py-3 px-4 text-xs">{u.email || '-'}</td>
+                              <td className="py-3 px-4">{u.recent_signup_at ? new Date(u.recent_signup_at).toLocaleString('ko-KR') : '-'}</td>
+                              <td className="py-3 px-4">{u.total_chat_count}</td>
+                              <td className="py-3 px-4">{u.last_active_at ? new Date(u.last_active_at).toLocaleString('ko-KR') : '-'}</td>
+                              <td className="py-3 px-4"><span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700">Basic</span></td>
+                              <td className="py-3 px-4">
+                                <button
+                                  onClick={() => updatePlanStatus(u.id, true)}
+                                  className="px-2 py-1 text-xs rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
+                                >
+                                  Pro로 변경
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             )}
           </div>
