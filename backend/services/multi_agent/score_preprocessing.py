@@ -40,9 +40,9 @@ def normalize_scores_from_extracted(extracted_scores: Dict[str, Any]) -> Dict[st
     
     # 디폴트 선택과목 설정
     DEFAULT_KOREAN_ELECTIVE = "화법과작문"  # 국어 디폴트
-    DEFAULT_MATH_ELECTIVE = "확률과통계"    # 수학 디폴트 (인문계 기준)
-    DEFAULT_INQUIRY1 = "생활과윤리"         # 탐구1 디폴트 (사회탐구)
-    DEFAULT_INQUIRY2 = "사회문화"           # 탐구2 디폴트 (사회탐구)
+    DEFAULT_MATH_ELECTIVE = "미적분"       # 수학 디폴트
+    DEFAULT_INQUIRY1 = "생명과학1"          # 탐구1 디폴트 (과학탐구)
+    DEFAULT_INQUIRY2 = "지구과학1"          # 탐구2 디폴트 (과학탐구)
     
     # 등급별 중간 백분위 (등급 기준 범위의 중간값)
     grade_to_mid_percentile = {
@@ -226,8 +226,8 @@ def estimate_missing_subjects(normalized: Dict[str, Any]) -> Dict[str, Any]:
     converter = ScoreConverter()
     
     # 디폴트 선택과목 설정
-    DEFAULT_INQUIRY1 = "생활과윤리"
-    DEFAULT_INQUIRY2 = "사회문화"
+    DEFAULT_INQUIRY1 = "생명과학1"
+    DEFAULT_INQUIRY2 = "지구과학1"
     
     for subject in REQUIRED_SUBJECTS:
         if subject not in subjects:

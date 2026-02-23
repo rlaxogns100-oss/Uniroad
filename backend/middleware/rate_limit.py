@@ -1,6 +1,6 @@
 """
 Rate Limiting 미들웨어
-일일 API 사용량 제한 (로그인 유저 100회, 게스트 2회 무료 + 3회째 마스킹)
+일일 API 사용량 제한 (로그인 유저 100회, 게스트 0회 무료 + 1회째 마스킹)
 """
 from typing import Optional, Tuple
 from datetime import date
@@ -27,7 +27,7 @@ async def check_and_increment_usage(
         - is_allowed: 요청 허용 여부
         - current_count: 현재 사용 횟수
         - limit: 제한 횟수
-        - require_login: 로그인 필요 여부 (비로그인 3회째 질문 시 True)
+        - require_login: 로그인 필요 여부 (비로그인 마스킹 응답 시 True)
     """
     try:
         today = date.today()
@@ -71,10 +71,14 @@ async def check_and_increment_usage(
                     .eq("id", record_id)\
                     .execute()
                 
-                logger.info(f"✅ Rate Limit 허용 ({identifier_field}={identifier_value}): 1/{limit} (리셋됨)")
-                return (True, 1, limit, False)
+                guest_require_login = (not user_id and limit == 0)
+                if guest_require_login:
+                    logger.info(f"🔒 Rate Limit 마스킹 ({identifier_field}={identifier_value}): 1/{limit} (리셋됨, 로그인 필요)")
+                else:
+                    logger.info(f"✅ Rate Limit 허용 ({identifier_field}={identifier_value}): 1/{limit} (리셋됨)")
+                return (True, 1, limit, guest_require_login)
             
-            # 비로그인 사용자: 3회째 질문은 허용하되 require_login=True
+            # 비로그인 사용자: 제한 도달 시 1회 추가 응답을 허용하되 require_login=True(답변 마스킹)
             if not user_id and current_count == limit:
                 # 카운트 증가 (3회째)
                 new_count = current_count + 1
@@ -117,8 +121,12 @@ async def check_and_increment_usage(
                 .insert(insert_data)\
                 .execute()
             
-            logger.info(f"✅ Rate Limit 허용 ({identifier_field}={identifier_value}): 1/{limit} (신규)")
-            return (True, 1, limit, False)
+            guest_require_login = (not user_id and limit == 0)
+            if guest_require_login:
+                logger.info(f"🔒 Rate Limit 마스킹 ({identifier_field}={identifier_value}): 1/{limit} (신규, 로그인 필요)")
+            else:
+                logger.info(f"✅ Rate Limit 허용 ({identifier_field}={identifier_value}): 1/{limit} (신규)")
+            return (True, 1, limit, guest_require_login)
     
     except Exception as e:
         logger.error(f"Rate Limit 체크 오류: {e}")

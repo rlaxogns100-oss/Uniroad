@@ -1,17 +1,6 @@
-import { useState, useRef, useEffect, type KeyboardEvent, type FormEvent, type RefObject } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import {
-  sendMessageStream,
-  sendMessageStreamWithImage,
-  ChatResponse,
-  resetSession,
-  migrateMessages,
-  approveScoreReview,
-  skipScoreReviewSession,
-  suggestScoreSets,
-  getScoreSetByName,
-  ScoreReviewRequiredEvent,
-} from '../api/client'
+import { sendMessageStream, sendMessageStreamWithImage, ChatResponse, resetSession, migrateMessages } from '../api/client'
 import ChatMessage from '../components/ChatMessage'
 import ThinkingProcess from '../components/ThinkingProcess'
 import AgentPanel from '../components/AgentPanel'
@@ -26,6 +15,7 @@ import { getSessionId, trackUserAction } from '../utils/tracking'
 import { FrontendTimingLogger } from '../utils/timingLogger'
 import { API_BASE, isCapacitorApp, isGalaxyAppSession } from '../config'
 import { addLog } from '../utils/adminLogger'
+import { QUICK_EXAMPLE_RESPONSES } from '../data/quickExampleResponses'
 
 interface UsedChunk {
   id: string
@@ -40,7 +30,6 @@ interface Message {
   id: string
   text: string
   isUser: boolean
-  scoreMentions?: string[]
   sources?: string[]
   source_urls?: string[]
   used_chunks?: UsedChunk[]
@@ -56,11 +45,6 @@ interface Message {
     rawAnswer?: string | null
     logs: string[]
   } | null
-  scoreReview?: {
-    pendingId: string
-    titleAuto: string
-    scores: Record<string, any>
-  }
 }
 
 interface AgentData {
@@ -119,6 +103,10 @@ const formatLogMessage = (log: string): string => {
   return log
 }
 
+const getQuickExampleResponse = (question: string): string | undefined => {
+  return QUICK_EXAMPLE_RESPONSES[question.trim()]
+}
+
 // 공지사항 인터페이스
 interface Announcement {
   id: string
@@ -175,7 +163,7 @@ export default function ChatPage() {
     return 0
   })
   const [isQuotaExceeded, setIsQuotaExceeded] = useState(false)
-  const DAILY_QUESTION_LIMIT_BASIC = 20
+  const DAILY_QUESTION_LIMIT_BASIC = 3
   const DAILY_QUESTION_LIMIT_PRO = 100
   const [isProPopupVisible, setIsProPopupVisible] = useState(true)
   const [isProPopupHovered, setIsProPopupHovered] = useState(false)
@@ -203,10 +191,6 @@ export default function ChatPage() {
   const [searchQuery, setSearchQuery] = useState<string>('') // 채팅 검색어
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false) // 검색창 열림 상태
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null) // 카테고리 선택 상태
-  const [scoreSuggestItems, setScoreSuggestItems] = useState<Array<{ id: string; name: string }>>([])
-  const [isScoreSuggestOpen, setIsScoreSuggestOpen] = useState(false)
-  const [activeScoreSuggestIndex, setActiveScoreSuggestIndex] = useState(0)
-  const [scoreModalData, setScoreModalData] = useState<{ name: string; scores: Record<string, any> } | null>(null)
   
   // 관리자 전용 테스트 설정
   const [testRunCount, setTestRunCount] = useState<number>(1) // 시행 횟수
@@ -231,6 +215,14 @@ export default function ChatPage() {
     if (isGalaxySession) return
     setIsProModalOpen(true)
   }
+  const handleSchoolRecordShortcut = () => {
+    if (hasProAccess) {
+      window.location.href = '/school-record'
+    } else {
+      openProModal()
+    }
+    if (window.innerWidth < 640) setIsSideNavOpen(false)
+  }
   const goToGumroadCheckout = () => {
     if (!isAuthenticated || !user?.id) {
       setIsProModalOpen(false)
@@ -244,7 +236,7 @@ export default function ChatPage() {
         'Content-Type': 'application/json',
         ...(accessToken && { Authorization: `Bearer ${accessToken}` }),
       },
-      body: JSON.stringify({ amount: 25900, source: 'gumroad' }),
+      body: JSON.stringify({ amount: 2900, source: 'gumroad' }),
     }).catch(() => undefined)
 
     const ok = redirectToGumroadCheckout(user.id, user.email)
@@ -317,9 +309,6 @@ export default function ChatPage() {
   const searchContainerRef = useRef<HTMLDivElement>(null) // 검색창 외부 클릭 감지용
   const imageInputRef = useRef<HTMLInputElement>(null) // 이미지 파일 input ref
   const uploadMenuRef = useRef<HTMLDivElement>(null) // 업로드 메뉴 ref
-  const desktopInitEditorRef = useRef<HTMLDivElement>(null)
-  const mobileInitEditorRef = useRef<HTMLDivElement>(null)
-  const stickyEditorRef = useRef<HTMLDivElement>(null)
 
   // 모바일 뒤로가기 버튼 처리
   useEffect(() => {
@@ -730,220 +719,9 @@ export default function ChatPage() {
     }, 100)
   }
 
-  const handleScoreReviewRequired = (streamingBotMessageId: string, event: ScoreReviewRequiredEvent) => {
-    setMessages((prev) =>
-      prev.map((msg) =>
-        msg.id === streamingBotMessageId
-          ? {
-              ...msg,
-              isStreaming: false,
-              text: '성적 확인이 필요합니다.',
-              scoreReview: {
-                pendingId: event.pending_id,
-                titleAuto: event.title_auto,
-                scores: event.scores || {},
-              },
-            }
-          : msg
-      )
-    )
-    setIsLoading(false)
-    setCurrentLog('')
-  }
-
-  const handleInputChange = async (nextValue: string) => {
-    setInput(nextValue)
-    const match = nextValue.match(/@([가-힣a-zA-Z0-9_]*)$/)
-    if (!match) {
-      setIsScoreSuggestOpen(false)
-      setScoreSuggestItems([])
-      setActiveScoreSuggestIndex(0)
-      return
-    }
-    const query = match[1] || ''
-    try {
-      const items = await suggestScoreSets(query, currentSessionId || sessionId, accessToken || undefined)
-      setScoreSuggestItems(items)
-      setIsScoreSuggestOpen(items.length > 0)
-      setActiveScoreSuggestIndex(0)
-    } catch {
-      setIsScoreSuggestOpen(false)
-      setActiveScoreSuggestIndex(0)
-    }
-  }
-
-  const applyScoreSuggestion = (name: string) => {
-    setInput((prev) => prev.replace(/@([가-힣a-zA-Z0-9_]*)$/, `${name} `))
-    setIsScoreSuggestOpen(false)
-    setActiveScoreSuggestIndex(0)
-  }
-
-  const handleInputKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    if (isScoreSuggestOpen && scoreSuggestItems.length > 0) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault()
-        setActiveScoreSuggestIndex((prev) => (prev + 1) % scoreSuggestItems.length)
-        return
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault()
-        setActiveScoreSuggestIndex((prev) => (prev - 1 + scoreSuggestItems.length) % scoreSuggestItems.length)
-        return
-      }
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault()
-        const selected = scoreSuggestItems[activeScoreSuggestIndex] || scoreSuggestItems[0]
-        if (selected) applyScoreSuggestion(selected.name)
-        return
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault()
-        setIsScoreSuggestOpen(false)
-        return
-      }
-    }
-
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault()
-      handleSend()
-    }
-  }
-
-  const extractPlainTextFromEditor = (element: HTMLDivElement): string => {
-    return (element.textContent || '').replace(/\u00A0/g, ' ')
-  }
-
-  const escapeHtml = (raw: string): string =>
-    raw
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;')
-
-  const buildInputHtml = (value: string): string => {
-    const safe = escapeHtml(value)
-    return safe.replace(/(@[가-힣a-zA-Z0-9_]{1,10})/g, (_match, mention) => {
-      return `<span class="inline-flex items-center align-baseline bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full px-2 py-0.5 text-xs mx-0.5" contenteditable="false">${mention}</span>&nbsp;`
-    })
-  }
-
-  const getCaretOffset = (container: HTMLElement): number => {
-    const selection = window.getSelection()
-    if (!selection || selection.rangeCount === 0) return 0
-    const range = selection.getRangeAt(0)
-    const preRange = range.cloneRange()
-    preRange.selectNodeContents(container)
-    preRange.setEnd(range.endContainer, range.endOffset)
-    return preRange.toString().length
-  }
-
-  const setCaretOffset = (container: HTMLElement, offset: number) => {
-    const selection = window.getSelection()
-    if (!selection) return
-    const range = document.createRange()
-    let current = 0
-    let placed = false
-    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT)
-    let node: Node | null = walker.nextNode()
-
-    while (node) {
-      const len = node.textContent?.length || 0
-      if (current + len >= offset) {
-        range.setStart(node, Math.max(0, offset - current))
-        range.collapse(true)
-        placed = true
-        break
-      }
-      current += len
-      node = walker.nextNode()
-    }
-
-    if (!placed) {
-      range.selectNodeContents(container)
-      range.collapse(false)
-    }
-    selection.removeAllRanges()
-    selection.addRange(range)
-  }
-
-  const syncEditorValue = (ref: RefObject<HTMLDivElement>, value: string) => {
-    const el = ref.current
-    if (!el) return
-    const nextHtml = buildInputHtml(value)
-    if (el.innerHTML !== nextHtml) {
-      const isFocused = document.activeElement === el
-      const caret = isFocused ? getCaretOffset(el) : 0
-      el.innerHTML = nextHtml
-      if (isFocused) {
-        setCaretOffset(el, Math.min(caret, extractPlainTextFromEditor(el).length))
-      }
-    }
-  }
-
-  useEffect(() => {
-    syncEditorValue(desktopInitEditorRef, input)
-    syncEditorValue(mobileInitEditorRef, input)
-    syncEditorValue(stickyEditorRef, input)
-  }, [input])
-
-  const handleEditorInput = (e: FormEvent<HTMLDivElement>) => {
-    const nextValue = extractPlainTextFromEditor(e.currentTarget)
-    handleInputChange(nextValue)
-  }
-
-  const handleScoreTagClick = async (name: string) => {
-    try {
-      const scoreSet = await getScoreSetByName(name, currentSessionId || sessionId, accessToken || undefined)
-      setScoreModalData({ name: scoreSet.name, scores: scoreSet.scores || {} })
-    } catch (error: any) {
-      alert(error?.response?.data?.detail || '성적 정보를 불러오지 못했습니다.')
-    }
-  }
-
-  const handleApproveScoreReview = async (pendingId: string, title: string, scores: Record<string, any>) => {
-    try {
-      setMessages((prev) => prev.filter((msg) => msg.scoreReview?.pendingId !== pendingId))
-      const result = await approveScoreReview(
-        pendingId,
-        currentSessionId || sessionId,
-        title,
-        scores,
-        accessToken || undefined
-      )
-      const lastUserMessage = [...messages].reverse().find((m) => m.isUser)
-      if (lastUserMessage) {
-        handleSend(lastUserMessage.text.replace(/^\[이미지 첨부\]\s*/, ''), {
-          scoreId: result.score_id,
-          suppressUserMessage: true,
-        })
-      }
-    } catch (error: any) {
-      alert(error?.response?.data?.detail || '성적 승인 중 오류가 발생했습니다.')
-    }
-  }
-
-  const handleSkipScoreReviewSession = async (pendingId: string) => {
-    try {
-      setMessages((prev) => prev.filter((msg) => msg.scoreReview?.pendingId !== pendingId))
-      await skipScoreReviewSession(currentSessionId || sessionId, pendingId, accessToken || undefined)
-      const lastUserMessage = [...messages].reverse().find((m) => m.isUser)
-      if (lastUserMessage) {
-        handleSend(lastUserMessage.text.replace(/^\[이미지 첨부\]\s*/, ''), {
-          suppressUserMessage: true,
-        })
-      }
-    } catch (error: any) {
-      alert(error?.response?.data?.detail || '세션 건너뛰기 설정 중 오류가 발생했습니다.')
-    }
-  }
-
-  const handleSend = async (
-    directMessage?: string,
-    options?: { scoreId?: string; suppressUserMessage?: boolean }
-  ) => {
+  const handleSend = async (directMessage?: string) => {
     const messageToSend = directMessage || input
-    setIsScoreSuggestOpen(false)
+    const trimmedMessage = messageToSend.trim()
     
     // 일일 질문 횟수 체크 (로그인한 유저만)
     const dailyLimit = hasProAccess ? DAILY_QUESTION_LIMIT_PRO : DAILY_QUESTION_LIMIT_BASIC
@@ -954,9 +732,9 @@ export default function ChatPage() {
     
     // 중복 전송 방지 (더블 클릭, 빠른 Enter 연타 방지)
     // 이미지가 있으면 텍스트 없이도 전송 가능
-    if ((!messageToSend.trim() && !selectedImage) || isLoading || sendingRef.current) {
+    if ((!trimmedMessage && !selectedImage) || isLoading || sendingRef.current) {
       console.log('🚫 전송 차단:', { 
-        hasInput: !!messageToSend.trim(), 
+        hasInput: !!trimmedMessage, 
         hasImage: !!selectedImage,
         isLoading, 
         alreadySending: sendingRef.current 
@@ -974,6 +752,42 @@ export default function ChatPage() {
       }))
     }
 
+    // 예시 질문 하드코딩 응답: API 호출 없이 빠르게 반환
+    const quickExampleResponse = !selectedImage ? getQuickExampleResponse(trimmedMessage) : undefined
+    if (quickExampleResponse) {
+      const userInput = trimmedMessage
+      const userMessageId = Date.now().toString()
+      const botMessageId = (Date.now() + 1).toString()
+
+      sendingRef.current = true
+      isStreamingRef.current = true
+      setInput('')
+      setIsLoading(true)
+      setCurrentLog('⚡ 빠른 답변을 준비하는 중...')
+
+      setMessages((prev) => [
+        ...prev,
+        { id: userMessageId, text: userInput, isUser: true },
+        { id: botMessageId, text: '', isUser: false, isStreaming: true },
+      ])
+
+      window.setTimeout(() => {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === botMessageId
+              ? { ...msg, text: quickExampleResponse, isStreaming: false }
+              : msg
+          )
+        )
+        setIsLoading(false)
+        setCurrentLog('')
+        sendingRef.current = false
+        isStreamingRef.current = false
+      }, 600)
+
+      return
+    }
+
     console.log('📤 메시지 전송 시작:', messageToSend)
     sendingRef.current = true
     isStreamingRef.current = true // 스트리밍 시작
@@ -982,17 +796,6 @@ export default function ChatPage() {
     const timingLogger = new FrontendTimingLogger(currentSessionId || 'new', messageToSend)
     
     const userInput = messageToSend
-    const inlineMentions = Array.from(new Set((userInput.match(/@[가-힣a-zA-Z0-9_]{1,10}/g) || [])))
-    const mentionsForThisSend = options?.suppressUserMessage
-      ? []
-      : inlineMentions
-    const cleanedUserInput = options?.suppressUserMessage
-      ? userInput
-      : userInput.replace(/@[가-힣a-zA-Z0-9_]{1,10}/g, ' ').replace(/\s{2,}/g, ' ').trim()
-    const messageForApi =
-      mentionsForThisSend.length > 0
-        ? `${mentionsForThisSend.join(' ')} ${cleanedUserInput}`.trim()
-        : cleanedUserInput
     setInput('')
     setIsLoading(true)
 
@@ -1020,9 +823,8 @@ export default function ChatPage() {
     
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: currentImage ? `[이미지 첨부] ${cleanedUserInput}` : cleanedUserInput,
+      text: currentImage ? `[이미지 첨부] ${userInput}` : userInput,
       isUser: true,
-      scoreMentions: mentionsForThisSend,
       imageUrl: currentImagePreviewUrl || undefined,
     }
 
@@ -1033,11 +835,11 @@ export default function ChatPage() {
     setMessages((prev) => {
       // 중복 방지: 같은 내용의 메시지가 이미 있으면 추가하지 않음
       const isDuplicate = prev.some(
-        (msg) => msg.isUser && msg.text === cleanedUserInput &&
+        (msg) => msg.isUser && msg.text === userInput && 
         Date.now() - parseInt(msg.id) < 1000 // 1초 이내에 같은 메시지가 있으면 중복으로 간주
       )
       if (isDuplicate) {
-        console.log('🚫 중복 메시지 차단:', cleanedUserInput)
+        console.log('🚫 중복 메시지 차단:', userInput)
         return prev
       }
       // 사용자 메시지 + 빈 봇 메시지 (스트리밍 시작)
@@ -1046,9 +848,6 @@ export default function ChatPage() {
         text: '',  // 빈 상태로 시작, 청크가 도착하면 업데이트
         isUser: false,
         isStreaming: true,  // 스트리밍 중
-      }
-      if (options?.suppressUserMessage) {
-        return [...prev, streamingBotMessage]
       }
       return [...prev, userMessage, streamingBotMessage]
     })
@@ -1111,6 +910,7 @@ export default function ChatPage() {
 
           // 비로그인 3회째 질문 시 마스킹 처리
           const shouldMask = response.require_login === true
+
           // 현재 agentData 스냅샷 저장 (메시지에 포함시키기 위해)
           const currentAgentData = {
             routerOutput: response.router_output || null,
@@ -1240,7 +1040,7 @@ export default function ChatPage() {
       // 이미지가 있으면 이미지와 함께 전송, 없으면 일반 전송
       if (currentImage) {
         await sendMessageStreamWithImage(
-          messageForApi,
+          userInput,
           currentSessionIdToUse || sessionId,
           currentImage,
           onLogCallback,
@@ -1248,13 +1048,11 @@ export default function ChatPage() {
           onErrorCallback,
           abortController.signal,
           onChunkCallback,
-          accessToken || undefined,  // 인증 토큰 전달
-          (event) => handleScoreReviewRequired(streamingBotMessageId, event),
-          options?.scoreId
+          accessToken || undefined  // 인증 토큰 전달
         )
       } else {
         await sendMessageStream(
-          messageForApi,
+          userInput,
           currentSessionIdToUse || sessionId,
           onLogCallback,
           onResultCallback,
@@ -1262,9 +1060,7 @@ export default function ChatPage() {
           abortController.signal,
           onChunkCallback,
           accessToken || undefined,  // 인증 토큰 전달
-          thinkingMode,  // Thinking 모드 전달
-          (event) => handleScoreReviewRequired(streamingBotMessageId, event),
-          options?.scoreId
+          thinkingMode  // Thinking 모드 전달
         )
       }
     } catch (error: any) {
@@ -1654,16 +1450,7 @@ export default function ChatPage() {
           {/* 생기부 세특 평가 - PRO 유저는 바로 이동, Basic 유저는 PRO 모달 */}
           <div className="px-4 sm:px-6 pb-2">
             <button
-              onClick={() => {
-                if (hasProAccess) {
-                  // PRO 유저는 생기부 평가 페이지로 이동
-                  window.location.href = '/school-record'
-                } else {
-                  // Basic 유저는 PRO 모달 열기
-                  openProModal()
-                }
-                if (window.innerWidth < 640) setIsSideNavOpen(false)
-              }}
+              onClick={handleSchoolRecordShortcut}
               className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
             >
               <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2090,6 +1877,7 @@ export default function ChatPage() {
                         setShowProfileGuide(true)
                         setIsProfileFormOpen(true)
                       }}
+                      onSchoolRecordClick={handleSchoolRecordShortcut}
                     />
                   </div>
 
@@ -2119,30 +1907,26 @@ export default function ChatPage() {
                   <div className="hidden sm:block w-full max-w-3xl mx-auto px-4">
                     <div className="bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.08)] focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.12)] px-4 py-3 transition-shadow duration-200">
                       {/* 텍스트 입력 영역 */}
-                      <div
-                        ref={desktopInitEditorRef}
-                        contentEditable={!isLoading}
-                        suppressContentEditableWarning
-                        onInput={handleEditorInput}
-                        onKeyDown={handleInputKeyDown}
-                        data-placeholder="유니로드에게 무엇이든 물어보세요"
-                        className={`w-full text-base bg-transparent focus:outline-none min-h-[32px] max-h-[200px] overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400 empty:before:pointer-events-none ${isLoading ? 'bg-gray-100 pointer-events-none' : ''}`}
+                      <textarea
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault()
+                            handleSend()
+                          }
+                        }}
+                        placeholder="유니로드에게 무엇이든 물어보세요"
+                        disabled={isLoading}
+                        rows={1}
+                        className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[32px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                        style={{ height: 'auto' }}
+                        onInput={(e) => {
+                          const target = e.target as HTMLTextAreaElement
+                          target.style.height = 'auto'
+                          target.style.height = Math.min(target.scrollHeight, 200) + 'px'
+                        }}
                       />
-                      {isScoreSuggestOpen && scoreSuggestItems.length > 0 && (
-                        <div className="mt-2 w-28 sm:w-32 bg-white border border-gray-200 rounded-xl shadow-sm max-h-56 overflow-y-auto">
-                          {scoreSuggestItems.map((item, index) => (
-                            <button
-                              key={item.id}
-                              className={`w-full text-left px-3 py-2 text-sm ${
-                                index === activeScoreSuggestIndex ? 'bg-gray-100' : 'hover:bg-gray-50'
-                              }`}
-                              onClick={() => applyScoreSuggestion(item.name)}
-                            >
-                              {item.name}
-                            </button>
-                          ))}
-                        </div>
-                      )}
                       
                       {/* 하단 영역: 버튼들 + 태그 + 전송 버튼 */}
                       <div className="flex items-center justify-between mt-2">
@@ -2276,30 +2060,26 @@ export default function ChatPage() {
                   <div className="w-full">
                     <div className="bg-gray-50 rounded-3xl focus-within:ring-2 focus-within:ring-blue-500 px-3 py-2">
                       {/* 텍스트 입력 영역 */}
-                    <div
-                      ref={mobileInitEditorRef}
-                      contentEditable={!isLoading}
-                      suppressContentEditableWarning
-                      onInput={handleEditorInput}
-                      onKeyDown={handleInputKeyDown}
-                      data-placeholder="유니로드에게 무엇이든 물어보세요"
-                      className={`w-full text-base bg-transparent focus:outline-none min-h-[28px] max-h-[200px] overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400 empty:before:pointer-events-none ${isLoading ? 'bg-gray-100 pointer-events-none' : ''}`}
-                    />
-                      {isScoreSuggestOpen && scoreSuggestItems.length > 0 && (
-                        <div className="mt-2 w-28 bg-white border border-gray-200 rounded-xl shadow-sm max-h-56 overflow-y-auto">
-                          {scoreSuggestItems.map((item, index) => (
-                            <button
-                              key={item.id}
-                              className={`w-full text-left px-3 py-2 text-sm ${
-                                index === activeScoreSuggestIndex ? 'bg-gray-100' : 'hover:bg-gray-50'
-                              }`}
-                              onClick={() => applyScoreSuggestion(item.name)}
-                            >
-                              {item.name}
-                            </button>
-                          ))}
-                        </div>
-                      )}
+                      <textarea
+                        value={input}
+                        onChange={(e) => setInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault()
+                            handleSend()
+                          }
+                        }}
+                        placeholder="유니로드에게 무엇이든 물어보세요"
+                        disabled={isLoading}
+                        rows={1}
+                        className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                        style={{ height: 'auto' }}
+                        onInput={(e) => {
+                          const target = e.target as HTMLTextAreaElement
+                          target.style.height = 'auto'
+                          target.style.height = Math.min(target.scrollHeight, 200) + 'px'
+                        }}
+                      />
                       
                       {/* 하단 영역: 버튼들 + 태그 + 전송 버튼 */}
                       <div className="flex items-center justify-between mt-2">
@@ -2410,12 +2190,10 @@ export default function ChatPage() {
             {messages.map((msg, index) => {
               // AI 답변일 경우 직전 사용자 질문 찾기
               let userQuery: string | undefined
-              let precedingScoreMentions: string[] | undefined
               if (!msg.isUser) {
                 for (let i = index - 1; i >= 0; i--) {
                   if (messages[i].isUser) {
                     userQuery = messages[i].text
-                    precedingScoreMentions = messages[i].scoreMentions
                     break
                   }
                 }
@@ -2431,7 +2209,6 @@ export default function ChatPage() {
                   userQuery={userQuery}
                   isStreaming={msg.isStreaming}
                   imageUrl={msg.imageUrl}
-                  scoreMentions={msg.isUser ? msg.scoreMentions : precedingScoreMentions}
                   onRegenerate={!msg.isUser && userQuery && index === messages.length - 1 ? () => handleRegenerate(msg.id, userQuery) : undefined}
                   showLoginPrompt={msg.showLoginPrompt}
                   onLoginClick={() => {
@@ -2448,10 +2225,6 @@ export default function ChatPage() {
                       setIsAgentPanelOpen(true)
                     }
                   }}
-                  scoreReview={msg.scoreReview}
-                  onScoreReviewApprove={handleApproveScoreReview}
-                  onScoreReviewSkipSession={handleSkipScoreReviewSession}
-                  onScoreTagClick={handleScoreTagClick}
                 />
               )
             })}
@@ -2497,30 +2270,26 @@ export default function ChatPage() {
               <div className="max-w-[800px] mx-auto">
                 <div className="bg-gray-50 rounded-3xl focus-within:ring-2 focus-within:ring-blue-500 px-3 sm:px-4 py-2 sm:py-3">
                   {/* 텍스트 입력 영역 */}
-                  <div
-                    ref={stickyEditorRef}
-                    contentEditable={!isLoading}
-                    suppressContentEditableWarning
-                    onInput={handleEditorInput}
-                    onKeyDown={handleInputKeyDown}
-                    data-placeholder="유니로드에게 무엇이든 물어보세요"
-                    className={`w-full text-base bg-transparent focus:outline-none min-h-[28px] sm:min-h-[32px] max-h-[200px] overflow-y-auto empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400 empty:before:pointer-events-none ${isLoading ? 'bg-gray-100 pointer-events-none' : ''}`}
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSend()
+                      }
+                    }}
+                    placeholder="유니로드에게 무엇이든 물어보세요"
+                    disabled={isLoading}
+                    rows={1}
+                    className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] sm:min-h-[32px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                    style={{ height: 'auto' }}
+                    onInput={(e) => {
+                      const target = e.target as HTMLTextAreaElement
+                      target.style.height = 'auto'
+                      target.style.height = Math.min(target.scrollHeight, 200) + 'px'
+                    }}
                   />
-                  {isScoreSuggestOpen && scoreSuggestItems.length > 0 && (
-                    <div className="mt-2 w-28 sm:w-32 bg-white border border-gray-200 rounded-xl shadow-sm max-h-56 overflow-y-auto">
-                      {scoreSuggestItems.map((item, index) => (
-                        <button
-                          key={item.id}
-                          className={`w-full text-left px-3 py-2 text-sm ${
-                            index === activeScoreSuggestIndex ? 'bg-gray-100' : 'hover:bg-gray-50'
-                          }`}
-                          onClick={() => applyScoreSuggestion(item.name)}
-                        >
-                          {item.name}
-                        </button>
-                      ))}
-                    </div>
-                  )}
                   
                   {/* 하단 영역: 버튼들 + 태그 + 전송 버튼 */}
                   <div className="flex items-center justify-between mt-2">
@@ -2827,8 +2596,7 @@ export default function ChatPage() {
                   <span className="text-lg font-bold text-emerald-600">무료</span>
                 </div>
                 <ul className="space-y-2 text-sm text-gray-700">
-                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />일일 20회 AI 상담</li>
-                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />월 3회 생기부 분석</li>
+                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />일일 {DAILY_QUESTION_LIMIT_BASIC}회 AI 상담</li>
                   <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />최신 모집 요강</li>
                   <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />성적 분석 및 대학 추천</li>
                 </ul>
@@ -2838,14 +2606,17 @@ export default function ChatPage() {
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <h3 className="text-xl font-semibold text-gray-900">Pro</h3>
-                    <span className="text-[11px] font-semibold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">추천</span>
+                    <span className="text-[11px] font-semibold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">새학기 특가 할인!</span>
                   </div>
-                  <span className="text-lg font-bold text-gray-900">25,900원/월</span>
+                  <div className="flex items-end gap-2">
+                    <span className="text-sm text-gray-400 line-through">25,900원</span>
+                    <span className="text-lg font-bold text-gray-900">2,900원/월</span>
+                  </div>
                 </div>
                 <ul className="space-y-2 text-sm text-gray-700">
-                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />일일 100회 AI 상담</li>
+                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />일일 {DAILY_QUESTION_LIMIT_PRO}회 AI 상담</li>
                   <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />심층 분석을 위한 Thinking 모드</li>
-                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />월 30회 생기부 분석</li>
+                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />학교생활기록부 완벽 분석</li>
                   <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />최신 기능 우선 적용</li>
                 </ul>
               </div>
@@ -2892,7 +2663,8 @@ export default function ChatPage() {
             <div className="p-5 space-y-4">
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
                 <p className="text-gray-600">가격</p>
-                <p className="text-lg font-bold text-gray-900">25,900원</p>
+                <p className="text-sm text-gray-400 line-through">25,900원</p>
+                <p className="text-lg font-bold text-gray-900">2,900원</p>
                 <p className="text-gray-600 mt-3">입금계좌</p>
                 <p className="font-semibold text-gray-900">3333354523620</p>
                 <p className="text-gray-700">카카오뱅크 (김태훈)</p>
@@ -3023,109 +2795,6 @@ export default function ChatPage() {
               <p className="mt-4 text-xs text-center text-gray-500">
                 여러분의 소중한 의견으로 유니로드는 더 똑똑해집니다 ✨
               </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {scoreModalData && (
-        <div className="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-3xl rounded-2xl p-4 shadow-xl max-h-[85vh] overflow-y-auto">
-            <div className="flex items-start justify-between gap-2 mb-3">
-              <div className="font-semibold text-gray-900 pt-1">저장된 성적 정보</div>
-              <div className="flex gap-2">
-                <button
-                  className="px-3 py-1.5 rounded-lg bg-gray-100 text-sm text-gray-400 cursor-not-allowed"
-                  disabled
-                >
-                  수정
-                </button>
-                <button
-                  className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm"
-                  onClick={() => setScoreModalData(null)}
-                >
-                  확인
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 mb-3">
-              <div className="text-sm text-gray-600 shrink-0">제목</div>
-              <div className="flex-1 flex items-center rounded-lg border border-gray-300 bg-white">
-                <span className="px-3 text-sm text-gray-500">@</span>
-                <input
-                  className="w-full py-2 pr-3 rounded-r-lg text-sm focus:outline-none bg-gray-50"
-                  value={(scoreModalData.name || '@내성적1').replace(/^@/, '')}
-                  disabled
-                  readOnly
-                />
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="text-left">
-                    <th className="py-1">과목</th>
-                    <th className="py-1">선택과목</th>
-                    <th className="py-1">표준점수</th>
-                    <th className="py-1">백분위</th>
-                    <th className="py-1">등급</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {['한국사', '국어', '수학', '영어', '탐구1', '탐구2', '제2외국어/한문'].map((subject) => {
-                    const row = scoreModalData.scores?.[subject] || {}
-                    return (
-                      <tr key={subject} className="border-t border-gray-100">
-                        <td className="py-1">{subject}</td>
-                        <td className="py-1">
-                          {subject === '한국사' ? (
-                            <span>-</span>
-                          ) : (
-                            <input
-                              className="w-full px-2 py-1 rounded border border-gray-200 bg-gray-50"
-                              value={row['선택과목'] ?? row['과목명'] ?? '미응시'}
-                              disabled
-                              readOnly
-                            />
-                          )}
-                        </td>
-                        <td className="py-1">
-                          <input
-                            className="w-full px-2 py-1 rounded border border-gray-200 bg-gray-50"
-                            value={row['표준점수'] ?? ''}
-                            disabled
-                            readOnly
-                          />
-                        </td>
-                        <td className="py-1">
-                          <input
-                            className="w-full px-2 py-1 rounded border border-gray-200 bg-gray-50"
-                            value={row['백분위'] ?? ''}
-                            disabled
-                            readOnly
-                          />
-                        </td>
-                        <td className="py-1">
-                          <input
-                            className="w-full px-2 py-1 rounded border border-gray-200 bg-gray-50"
-                            value={row['등급'] ?? ''}
-                            disabled
-                            readOnly
-                          />
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex justify-end mt-3">
-              <button
-                className="text-gray-500 hover:text-gray-700 text-sm"
-                onClick={() => setScoreModalData(null)}
-              >
-                닫기
-              </button>
             </div>
           </div>
         </div>
@@ -3288,7 +2957,11 @@ export default function ChatPage() {
         >
           <div 
             className="relative bg-[#1a1a2e] text-white rounded-2xl p-4 shadow-2xl min-w-[260px] cursor-pointer overflow-hidden border border-gray-700/50"
-            onClick={openProModal}
+            onClick={(e) => {
+              const target = e.target as HTMLElement
+              if (target.closest('button')) return
+              openProModal()
+            }}
           >
             {/* 배경 별 효과 */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
@@ -3318,7 +2991,7 @@ export default function ChatPage() {
               {/* 왼쪽: 텍스트 */}
               <div className="flex-1">
                 <h3 className="text-base font-bold">유니로드 PRO</h3>
-                <p className="text-sm text-gray-400">확장된 기능을 만나보세요</p>
+                <p className="text-sm text-gray-400">새학기 기념 90% 할인!</p>
               </div>
               
               {/* 오른쪽: 업그레이드 버튼 */}

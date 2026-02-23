@@ -61,8 +61,11 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
 
 
 ## params 목록: "university", "query", "range", "department", "junhyung", "j_scores", "s_scores"
-### 기본값은 빈 배열(단, Univ 함수의 university는 1개로 고정), 언급된 대학 전부 호출(sky 공대 -> 서울대, 연세대, 고려대, 중경외시 -> 중앙대학교, 연세대학교, 고려대학교, 서울시립대학교), 최대 개수는 8개
+### 기본값은 빈 배열(단, univ 함수의 university는 배열 금지), 언급된 대학 전부 호출(sky 공대 -> 서울대, 연세대, 고려대, 중경외시 -> 중앙대학교, 연세대학교, 고려대학교, 서울시립대학교), 최대 개수는 8개
 - **university:** 대학 정식명칭 (서울대학교, 경희대학교)
+  - `univ` 함수에서는 반드시 **단일 문자열**만 사용 (예: `"university": "서울대학교"`)
+  - `univ`에서 `"university": ["서울대학교"]` 같은 리스트 형태는 절대 금지
+  - 2개 이상 대학이면 `univ` 호출을 대학 수만큼 분리
 - **query:** 검색 쿼리 (연도 + 학교 반드시 명시, 여러 전형이나 학과가 언급되면 모두 포함, 학교는 university와 동일하게 유지)
 - **range:** 분석 범위 리스트 ('안정', '적정', '소신', '도전', '어려움' 중 하나 선택, 없으면 [] = 전체 범위)
 - **department:** 학과/전공 명칭
@@ -119,7 +122,7 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
     {
       "function": "univ",
       "params": {
-        "university": ["서울대학교"],
+        "university": "서울대학교",
         "query": ["2026학년도 서울대학교 정시 모집요강", "2025학년도 서울대학교 정시 전형결과"]
       }
     }
@@ -136,7 +139,7 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
     {
       "function": "univ",
       "params": {
-        "university": ["서울대학교"],
+        "university": "서울대학교",
         "query": ["2026학년도 서울대학교 정시 모집요강", "2025학년도 서울대학교 정시 전형결과"]
       }
     },
@@ -209,7 +212,7 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
     {
       "function": "univ",
       "params": {
-        "university": ["경희대학교"],
+        "university": "경희대학교",
         "query": ["2026학년도 경희대학교 정시 모집요강"]
       }
     }
@@ -230,7 +233,7 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
     {
       "function": "univ",
       "params": {
-        "university": ["연세대학교"],
+        "university": "연세대학교",
         "query": ["2026학년도 연세대학교 학생부교과전형(추천형) 수능 최저학력기준", "2026학년도 연세대학교 학생부교과전형(추천형) 수능 최저학력기준", "2026학년도 연세대학교 논술전형 수능 최저학력기준","2026학년도 연세대학교 특기자전형 수능 최저학력기준"]
       }
     }
@@ -247,16 +250,14 @@ ROUTER_SYSTEM_PROMPT = """당신은 대학 입시 상담 시스템의 **Router A
     {
       "function": "univ",
       "params": {
-        "university": ["연세대학교"],
+        "university": "연세대학교",
         "query": ["2026학년도 연세대학교 정시 모집요강", "2025학년도 연세대학교 정시 전형결과"]
       }
-    }
-  ]
-  "function_calls": [
+    },
     {
       "function": "univ",
       "params": {
-        "university": ["고려대학교"],
+        "university": "고려대학교",
         "query": ["2026학년도 고려대학교 정시 모집요강", "2025학년도 고려대학교 정시 전형결과"]
       }
     }
@@ -369,8 +370,8 @@ class RouterAgent:
             
             if "function_calls" not in parsed:
                 parsed["function_calls"] = []
-            
-            return parsed
+
+            return self._normalize_function_calls(parsed)
             
         except json.JSONDecodeError as e:
             # 복구 시도 1: 잘못된 params 구조 수정 (key 없는 값 제거)
@@ -387,7 +388,7 @@ class RouterAgent:
                     if "function_calls" not in parsed:
                         parsed["function_calls"] = []
                     parsed["_recovered"] = True
-                    return parsed
+                    return self._normalize_function_calls(parsed)
             except:
                 pass
             
@@ -420,6 +421,70 @@ class RouterAgent:
                 "parse_error": str(e),
                 "raw_text": original_text[:500]
             }
+
+    def _normalize_function_calls(self, parsed: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Router 출력 정규화:
+        - univ.university는 항상 단일 문자열로 강제
+        - univ.university가 리스트로 오면 대학별 독립 함수 호출로 분해
+        """
+        calls = parsed.get("function_calls", [])
+        if not isinstance(calls, list):
+            parsed["function_calls"] = []
+            return parsed
+
+        normalized_calls: List[Dict[str, Any]] = []
+
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+
+            func_name = call.get("function")
+            params = call.get("params", {})
+            if not isinstance(params, dict):
+                params = {}
+
+            if func_name != "univ":
+                normalized_calls.append({
+                    "function": func_name,
+                    "params": params,
+                })
+                continue
+
+            university_param = params.get("university", "")
+            query_param = params.get("query", "")
+
+            # query는 문자열로 통일 (리스트면 공백으로 결합)
+            if isinstance(query_param, list):
+                query_value = " ".join([str(q).strip() for q in query_param if str(q).strip()])
+            elif query_param is None:
+                query_value = ""
+            else:
+                query_value = str(query_param).strip()
+
+            # university가 리스트면 대학별로 univ 호출 분해
+            universities: List[str] = []
+            if isinstance(university_param, list):
+                universities = [str(u).strip() for u in university_param if str(u).strip()]
+            elif university_param is None:
+                universities = [""]
+            else:
+                universities = [str(university_param).strip()]
+
+            if not universities:
+                universities = [""]
+
+            for university_value in universities:
+                normalized_calls.append({
+                    "function": "univ",
+                    "params": {
+                        "university": university_value,  # 단일 문자열 고정
+                        "query": query_value,
+                    },
+                })
+
+        parsed["function_calls"] = normalized_calls
+        return parsed
 
 
 # 싱글톤

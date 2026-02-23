@@ -33,16 +33,16 @@ def normalize_scores_from_extracted(extracted_scores: Dict[str, Any]) -> Dict[st
     """
     LLM의 Function Calling 결과(scores)를 받아 ScoreConverter를 통해 완전한 데이터로 변환.
     
-    탐구 과목명 미입력 시 디폴트는 사탐(사회탐구): 탐구1=생활과윤리, 탐구2=사회문화.
+    탐구 과목명 미입력 시 디폴트는 과탐: 탐구1=생명과학1, 탐구2=지구과학1.
     """
     converter = ScoreConverter()
     normalized = {"과목별_성적": {}, "선택과목": {}}
     
     defaults = {
         "국어": "화법과작문",
-        "수학": "확률과통계",
-        "탐구1": "생활과윤리",
-        "탐구2": "사회문화",
+        "수학": "미적분",
+        "탐구1": "생명과학1",
+        "탐구2": "지구과학1",
     }
 
     for key, info in extracted_scores.items():
