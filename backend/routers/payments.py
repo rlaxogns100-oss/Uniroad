@@ -57,6 +57,50 @@ def _safe_iso(value: Any) -> str:
     return s
 
 
+def _extract_auth_user_name(auth_user: Any) -> str:
+    metadata = getattr(auth_user, "user_metadata", None) or {}
+    if isinstance(metadata, dict):
+        name = _to_str(metadata.get("name")) or _to_str(metadata.get("full_name"))
+        if name:
+            return name
+    email = _to_str(getattr(auth_user, "email", None))
+    return email.split("@")[0] if "@" in email else ""
+
+
+def _load_auth_users(client) -> List[Dict[str, Any]]:
+    """
+    관리자 유저 목록은 auth.users 기반으로 조회한다.
+    (public.users는 is_premium 보조 정보로만 사용)
+    """
+    users: List[Dict[str, Any]] = []
+    page = 1
+    per_page = 1000
+
+    while True:
+        batch = client.auth.admin.list_users(page=page, per_page=per_page) or []
+        if not batch:
+            break
+
+        for auth_user in batch:
+            uid = _to_str(getattr(auth_user, "id", None))
+            if not uid:
+                continue
+            users.append(
+                {
+                    "id": uid,
+                    "email": _to_str(getattr(auth_user, "email", None)),
+                    "name": _extract_auth_user_name(auth_user),
+                    "created_at": _safe_iso(getattr(auth_user, "created_at", None)),
+                }
+            )
+
+        if len(batch) < per_page:
+            break
+        page += 1
+
+    return users
+
+
 def _append_payment_metadata(user_id: str, key: str, item: dict) -> bool:
     client = SupabaseService.get_admin_client()
     try:
@@ -275,23 +319,32 @@ async def get_admin_users_overview(user: dict = Depends(get_current_user)):
 
     client = supabase_service.get_admin_client()
     try:
-        # users 스키마마다 name 컬럼 존재 여부가 다를 수 있어 fallback 처리
+        # 이름/메일은 auth.users를 기준으로 조회
+        try:
+            auth_users = _load_auth_users(client)
+        except Exception as e:
+            logger.warning("auth.users 조회 실패(users 테이블 fallback): %s", e)
+            auth_users = []
+        auth_total_users = len(auth_users)
+
+        # public.users는 요금제 상태(is_premium) 보조 정보
         try:
             users_resp = (
                 client.table("users")
-                .select("id, email, name, is_premium, created_at")
-                .order("created_at", desc=True)
+                .select("id, is_premium, created_at, email, name")
                 .execute()
             )
         except Exception:
             users_resp = (
                 client.table("users")
-                .select("id, email, is_premium, created_at")
-                .order("created_at", desc=True)
+                .select("id, is_premium, created_at")
                 .execute()
             )
         users = users_resp.data or []
-        auth_total_users = len(users)
+        auth_by_user = {_to_str(u.get("id")): u for u in auth_users if _to_str(u.get("id"))}
+        public_by_user = {_to_str(u.get("id")): u for u in users if _to_str(u.get("id"))}
+        merged_user_ids = list(auth_by_user.keys())
+        merged_user_ids.extend([uid for uid in public_by_user.keys() if uid not in auth_by_user])
         try:
             count_resp = client.rpc("get_auth_user_count").execute()
             data = count_resp.data
@@ -300,7 +353,7 @@ async def get_admin_users_overview(user: dict = Depends(get_current_user)):
                 if isinstance(first, int):
                     auth_total_users = first
                 elif isinstance(first, dict):
-                    auth_total_users = int(first.get("get_auth_user_count", len(users)))
+                    auth_total_users = int(first.get("get_auth_user_count", len(auth_users)))
                 else:
                     auth_total_users = int(first)
             elif isinstance(data, int):
@@ -351,8 +404,13 @@ async def get_admin_users_overview(user: dict = Depends(get_current_user)):
             if _to_str(r.get("user_id"))
         }
 
-        email_by_user = {_to_str(u.get("id")): _to_str(u.get("email")) for u in users}
-        name_by_user = {_to_str(u.get("id")): _to_str(u.get("name")) for u in users}
+        email_by_user: Dict[str, str] = {}
+        name_by_user: Dict[str, str] = {}
+        for uid in merged_user_ids:
+            auth_row = auth_by_user.get(uid, {})
+            public_row = public_by_user.get(uid, {})
+            email_by_user[uid] = _to_str(auth_row.get("email")) or _to_str(public_row.get("email"))
+            name_by_user[uid] = _to_str(auth_row.get("name")) or _to_str(public_row.get("name"))
 
         bank_requests: List[dict] = []
         card_requests: List[dict] = []
@@ -400,15 +458,16 @@ async def get_admin_users_overview(user: dict = Depends(get_current_user)):
 
         premium_users: List[dict] = []
         basic_users: List[dict] = []
-        for u in users:
-            uid = _to_str(u.get("id"))
-            is_premium = bool(u.get("is_premium"))
+        for uid in merged_user_ids:
+            auth_row = auth_by_user.get(uid, {})
+            public_row = public_by_user.get(uid, {})
+            is_premium = bool(public_row.get("is_premium"))
             stat = stats_by_user.get(uid, {})
             row = {
                 "id": uid,
-                "email": _to_str(u.get("email")),
-                "name": _to_str(u.get("name")),
-                "recent_signup_at": _safe_iso(u.get("created_at")),
+                "email": _to_str(auth_row.get("email")) or _to_str(public_row.get("email")),
+                "name": _to_str(auth_row.get("name")) or _to_str(public_row.get("name")),
+                "recent_signup_at": _safe_iso(auth_row.get("created_at")) or _safe_iso(public_row.get("created_at")),
                 "total_chat_count": int(stat.get("total_chat_count") or 0),
                 "last_active_at": _safe_iso(stat.get("last_active_at")),
                 "plan_status": "Pro" if is_premium else "Basic",
@@ -417,6 +476,9 @@ async def get_admin_users_overview(user: dict = Depends(get_current_user)):
                 premium_users.append(row)
             else:
                 basic_users.append(row)
+
+        premium_users.sort(key=lambda x: x.get("recent_signup_at", ""), reverse=True)
+        basic_users.sort(key=lambda x: x.get("recent_signup_at", ""), reverse=True)
 
         return {
             "bank_transfer_requests": bank_requests,
