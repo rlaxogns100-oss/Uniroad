@@ -1,6 +1,18 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { sendMessageStream, sendMessageStreamWithImage, ChatResponse, resetSession, migrateMessages } from '../api/client'
+import {
+  sendMessageStream,
+  sendMessageStreamWithImage,
+  ChatResponse,
+  ScoreReviewRequiredEvent,
+  ScoreSetSuggestItem,
+  approveScoreReview,
+  suggestScoreSets,
+  getScoreSetByName,
+  skipScoreReviewSession,
+  resetSession,
+  migrateMessages,
+} from '../api/client'
 import ChatMessage from '../components/ChatMessage'
 import ThinkingProcess from '../components/ThinkingProcess'
 import AgentPanel from '../components/AgentPanel'
@@ -30,6 +42,12 @@ interface Message {
   id: string
   text: string
   isUser: boolean
+  scoreMentions?: string[]
+  scoreReview?: {
+    pendingId: string
+    titleAuto: string
+    scores: Record<string, any>
+  }
   sources?: string[]
   source_urls?: string[]
   used_chunks?: UsedChunk[]
@@ -107,6 +125,23 @@ const getQuickExampleResponse = (question: string): string | undefined => {
   return QUICK_EXAMPLE_RESPONSES[question.trim()]
 }
 
+const extractScoreMentions = (text: string): string[] => {
+  const mentions = text.match(/@[가-힣a-zA-Z0-9_]{1,10}/g) || []
+  return Array.from(new Set(mentions))
+}
+
+const getMentionContext = (
+  value: string,
+  caretPos: number
+): { start: number; end: number; query: string } | null => {
+  const left = value.slice(0, caretPos)
+  const match = left.match(/(^|\s)@([가-힣a-zA-Z0-9_]*)$/)
+  if (!match) return null
+  const atIndex = left.lastIndexOf('@')
+  if (atIndex < 0) return null
+  return { start: atIndex, end: caretPos, query: match[2] || '' }
+}
+
 // 공지사항 인터페이스
 interface Announcement {
   id: string
@@ -174,6 +209,12 @@ export default function ChatPage() {
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false)
   const [isProfileFormOpen, setIsProfileFormOpen] = useState(false)
   const [showProfileGuide, setShowProfileGuide] = useState(false)
+  const [activeScoreId, setActiveScoreId] = useState<string | undefined>(undefined)
+  const [scoreSuggestItems, setScoreSuggestItems] = useState<ScoreSetSuggestItem[]>([])
+  const [scoreSuggestIndex, setScoreSuggestIndex] = useState(0)
+  const [isScoreSuggestOpen, setIsScoreSuggestOpen] = useState(false)
+  const [inputCaretPos, setInputCaretPos] = useState(0)
+  const [scorePreview, setScorePreview] = useState<{ name: string; scores: Record<string, any> } | null>(null)
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -304,6 +345,7 @@ export default function ChatPage() {
   const [isUploadMenuOpen, setIsUploadMenuOpen] = useState(false) // 업로드 메뉴 열림 상태
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputTextareaRef = useRef<HTMLTextAreaElement>(null)
   const sendingRef = useRef(false) // 중복 전송 방지
   const abortControllerRef = useRef<AbortController | null>(null) // 스트리밍 취소용
   const searchContainerRef = useRef<HTMLDivElement>(null) // 검색창 외부 클릭 감지용
@@ -612,6 +654,8 @@ export default function ChatPage() {
     // 이미지 상태 초기화
     setSelectedImage(null)
     setImagePreviewUrl(null)
+    
+    setActiveScoreId(undefined)
   }
 
   // 이미지 선택 핸들러
@@ -653,11 +697,141 @@ export default function ChatPage() {
   // 세션 선택 시 메시지 불러오기
   const prevSessionIdRef = useRef<string | null>(null)
   const isStreamingRef = useRef(false) // 스트리밍 중인지 추적
+
+  useEffect(() => {
+    const mentionCtx = getMentionContext(input, inputCaretPos)
+    if (!mentionCtx) {
+      setIsScoreSuggestOpen(false)
+      setScoreSuggestItems([])
+      return
+    }
+
+    const debounce = setTimeout(async () => {
+      try {
+        const items = await suggestScoreSets(mentionCtx.query, sessionId, accessToken || undefined)
+        setScoreSuggestItems(items || [])
+        setScoreSuggestIndex(0)
+        setIsScoreSuggestOpen((items || []).length > 0)
+      } catch {
+        setIsScoreSuggestOpen(false)
+        setScoreSuggestItems([])
+      }
+    }, 120)
+
+    return () => clearTimeout(debounce)
+  }, [input, inputCaretPos, sessionId, accessToken])
+
+  const applyScoreSuggestion = (item: ScoreSetSuggestItem) => {
+    const textarea = inputTextareaRef.current
+    const caretPos = textarea?.selectionStart ?? inputCaretPos
+    const mentionCtx = getMentionContext(input, caretPos)
+    if (!mentionCtx) return
+
+    const safeName = item.name.startsWith('@') ? item.name.slice(1) : item.name
+    const replacement = `@${safeName} `
+    const nextInput = `${input.slice(0, mentionCtx.start)}${replacement}${input.slice(mentionCtx.end)}`
+    const nextCaret = mentionCtx.start + replacement.length
+
+    setInput(nextInput)
+    setInputCaretPos(nextCaret)
+    setIsScoreSuggestOpen(false)
+    setScoreSuggestItems([])
+    setActiveScoreId(item.id)
+
+    requestAnimationFrame(() => {
+      if (!textarea) return
+      textarea.focus()
+      textarea.setSelectionRange(nextCaret, nextCaret)
+    })
+  }
+
+  const handleInputChange = (value: string, caretPos: number) => {
+    setInput(value)
+    setInputCaretPos(caretPos)
+  }
+
+  const renderInputOverlay = (text: string) => {
+    if (!text) return <>{'\u00A0'}</>
+    const mentionRegex = /(@[가-힣a-zA-Z0-9_]{1,10})/g
+    const parts = text.split(mentionRegex)
+    if (parts.length <= 1) return <>{text}</>
+    return (
+      <>
+        {parts.map((part, idx) => {
+          if (mentionRegex.test(part)) {
+            mentionRegex.lastIndex = 0
+            return (
+              <span key={idx} style={{ backgroundColor: '#eef2ff', color: '#4338ca', borderRadius: '9999px', boxShadow: '-4px 0 0 #eef2ff, 4px 0 0 #eef2ff, 0 0 0 1px #e0e7ff' }}>{part}</span>
+            )
+          }
+          return <span key={idx}>{part}</span>
+        })}
+      </>
+    )
+  }
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isScoreSuggestOpen && scoreSuggestItems.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setScoreSuggestIndex((prev) => (prev + 1) % scoreSuggestItems.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setScoreSuggestIndex((prev) => (prev - 1 + scoreSuggestItems.length) % scoreSuggestItems.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        applyScoreSuggestion(scoreSuggestItems[scoreSuggestIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        setIsScoreSuggestOpen(false)
+        return
+      }
+    }
+
+    if (e.key === 'Backspace') {
+      const ta = e.currentTarget
+      const pos = ta.selectionStart
+      const selEnd = ta.selectionEnd
+      if (pos === selEnd && pos > 0) {
+        const mentionRegex = /@[가-힣a-zA-Z0-9_]{1,10}/g
+        let match: RegExpExecArray | null
+        while ((match = mentionRegex.exec(input)) !== null) {
+          const start = match.index
+          const end = start + match[0].length
+          if (pos > start && pos <= end) {
+            e.preventDefault()
+            const newVal = input.slice(0, start) + input.slice(end)
+            setInput(newVal)
+            setInputCaretPos(start)
+            requestAnimationFrame(() => {
+              if (inputTextareaRef.current) {
+                inputTextareaRef.current.selectionStart = start
+                inputTextareaRef.current.selectionEnd = start
+              }
+            })
+            return
+          }
+        }
+      }
+    }
+
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
   
   useEffect(() => {
     // 세션이 변경되었을 때
     if (currentSessionId !== prevSessionIdRef.current) {
       prevSessionIdRef.current = currentSessionId
+      setActiveScoreId(undefined)
       
       if (currentSessionId && isAuthenticated) {
         // API 호출용 sessionId 업데이트
@@ -767,7 +941,7 @@ export default function ChatPage() {
 
       setMessages((prev) => [
         ...prev,
-        { id: userMessageId, text: userInput, isUser: true },
+        { id: userMessageId, text: userInput, isUser: true, scoreMentions: extractScoreMentions(userInput) },
         { id: botMessageId, text: '', isUser: false, isStreaming: true },
       ])
 
@@ -825,6 +999,7 @@ export default function ChatPage() {
       id: Date.now().toString(),
       text: currentImage ? `[이미지 첨부] ${userInput}` : userInput,
       isUser: true,
+      scoreMentions: extractScoreMentions(userInput),
       imageUrl: currentImagePreviewUrl || undefined,
     }
 
@@ -910,12 +1085,14 @@ export default function ChatPage() {
 
           // 비로그인 3회째 질문 시 마스킹 처리
           const shouldMask = response.require_login === true
+          const hasFinalResponse = !!response.response?.trim()
+          const finalRenderedResponse = hasFinalResponse ? response.response : ''
 
           // 현재 agentData 스냅샷 저장 (메시지에 포함시키기 위해)
           const currentAgentData = {
             routerOutput: response.router_output || null,
             functionResults: response.function_results || null,
-            mainAgentOutput: response.response,
+            mainAgentOutput: finalRenderedResponse || response.response,
             rawAnswer: response.raw_answer || null,
             logs: [...agentData.logs]  // 현재까지의 로그 복사
           }
@@ -925,7 +1102,7 @@ export default function ChatPage() {
             msg.id === streamingBotMessageId
               ? {
                   ...msg,
-                  text: response.response || msg.text,  // 최종 응답으로 교체 (또는 스트리밍된 텍스트 유지)
+                  text: finalRenderedResponse || msg.text,  // 최종 응답으로 교체 (또는 스트리밍된 텍스트 유지)
                   sources: response.sources,
                   source_urls: response.source_urls,
                   used_chunks: response.used_chunks,
@@ -957,7 +1134,7 @@ export default function ChatPage() {
             ...prev,
             routerOutput: response.router_output || null,
             functionResults: response.function_results || null,
-            mainAgentOutput: response.response,
+            mainAgentOutput: finalRenderedResponse || response.response,
             rawAnswer: response.raw_answer || null
           }))
           
@@ -1036,8 +1213,34 @@ export default function ChatPage() {
           // 자동 스크롤
           scrollToBottom()
         }
+
+      const onScoreReviewRequiredCallback = (payload: ScoreReviewRequiredEvent) => {
+          if (abortController.signal.aborted) return
+
+          console.log('🟢 score_review_required 수신:', payload)
+
+          setMessages((prev) => prev.map(msg =>
+            msg.id === streamingBotMessageId
+              ? {
+                  ...msg,
+                  text: '',
+                  isStreaming: false,
+                  scoreReview: {
+                    pendingId: payload.pending_id,
+                    titleAuto: payload.title_auto,
+                    scores: payload.scores || {},
+                  },
+                }
+              : msg
+          ))
+
+          setCurrentLog('')
+          setIsLoading(false)
+        }
       
-      // 이미지가 있으면 이미지와 함께 전송, 없으면 일반 전송
+      const hasScoreMention = /@[가-힣a-zA-Z0-9_]{1,10}/.test(userInput)
+      const scoreIdForRequest = hasScoreMention ? activeScoreId : undefined
+
       if (currentImage) {
         await sendMessageStreamWithImage(
           userInput,
@@ -1048,7 +1251,9 @@ export default function ChatPage() {
           onErrorCallback,
           abortController.signal,
           onChunkCallback,
-          accessToken || undefined  // 인증 토큰 전달
+          accessToken || undefined,
+          onScoreReviewRequiredCallback,
+          scoreIdForRequest
         )
       } else {
         await sendMessageStream(
@@ -1059,8 +1264,10 @@ export default function ChatPage() {
           onErrorCallback,
           abortController.signal,
           onChunkCallback,
-          accessToken || undefined,  // 인증 토큰 전달
-          thinkingMode  // Thinking 모드 전달
+          accessToken || undefined,
+          thinkingMode,
+          onScoreReviewRequiredCallback,
+          scoreIdForRequest
         )
       }
     } catch (error: any) {
@@ -1906,27 +2113,51 @@ export default function ChatPage() {
                   {/* 데스크톱: 채팅창 (모바일에서 숨김) */}
                   <div className="hidden sm:block w-full max-w-3xl mx-auto px-4">
                     <div className="bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.08)] focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.12)] px-4 py-3 transition-shadow duration-200">
-                      {/* 텍스트 입력 영역 */}
-                      <textarea
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault()
-                            handleSend()
-                          }
-                        }}
-                        placeholder="유니로드에게 무엇이든 물어보세요"
-                        disabled={isLoading}
-                        rows={1}
-                        className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[32px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
-                        style={{ height: 'auto' }}
-                        onInput={(e) => {
-                          const target = e.target as HTMLTextAreaElement
-                          target.style.height = 'auto'
-                          target.style.height = Math.min(target.scrollHeight, 200) + 'px'
-                        }}
-                      />
+                      {/* 텍스트 입력 영역 (오버레이 + textarea) */}
+                      <div className="relative">
+                        <div
+                          aria-hidden
+                          className="absolute inset-0 pointer-events-none whitespace-pre-wrap break-words overflow-hidden"
+                          style={{ font: 'inherit', lineHeight: 'inherit', padding: '1px 2px' }}
+                        >
+                          {renderInputOverlay(input)}
+                        </div>
+                        <textarea
+                          ref={inputTextareaRef}
+                          value={input}
+                          onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
+                          onClick={(e) => setInputCaretPos((e.target as HTMLTextAreaElement).selectionStart)}
+                          onKeyUp={(e) => setInputCaretPos((e.currentTarget as HTMLTextAreaElement).selectionStart)}
+                          onKeyDown={handleInputKeyDown}
+                          placeholder="유니로드에게 무엇이든 물어보세요"
+                          disabled={isLoading}
+                          rows={1}
+                          className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[32px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400 relative z-10"
+                          style={{ height: 'auto', color: 'transparent', caretColor: 'black' }}
+                          onInput={(e) => {
+                            const target = e.target as HTMLTextAreaElement
+                            target.style.height = 'auto'
+                            target.style.height = Math.min(target.scrollHeight, 200) + 'px'
+                          }}
+                        />
+                      </div>
+                      {isScoreSuggestOpen && scoreSuggestItems.length > 0 && (
+                        <div className="mt-2 bg-white border border-gray-200 rounded-xl shadow-lg py-1 max-h-48 overflow-y-auto w-48">
+                          {scoreSuggestItems.map((item, idx) => (
+                            <button
+                              key={`${item.id}-${item.name}`}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => applyScoreSuggestion(item)}
+                              className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                                idx === scoreSuggestIndex ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50 text-gray-700'
+                              }`}
+                            >
+                              {item.name.startsWith('@') ? item.name : `@${item.name}`}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       
                       {/* 하단 영역: 버튼들 + 태그 + 전송 버튼 */}
                       <div className="flex items-center justify-between mt-2">
@@ -2059,27 +2290,51 @@ export default function ChatPage() {
                   
                   <div className="w-full">
                     <div className="bg-gray-50 rounded-3xl focus-within:ring-2 focus-within:ring-blue-500 px-3 py-2">
-                      {/* 텍스트 입력 영역 */}
-                      <textarea
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault()
-                            handleSend()
-                          }
-                        }}
-                        placeholder="유니로드에게 무엇이든 물어보세요"
-                        disabled={isLoading}
-                        rows={1}
-                        className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
-                        style={{ height: 'auto' }}
-                        onInput={(e) => {
-                          const target = e.target as HTMLTextAreaElement
-                          target.style.height = 'auto'
-                          target.style.height = Math.min(target.scrollHeight, 200) + 'px'
-                        }}
-                      />
+                      {/* 텍스트 입력 영역 (오버레이 + textarea) */}
+                      <div className="relative">
+                        <div
+                          aria-hidden
+                          className="absolute inset-0 pointer-events-none whitespace-pre-wrap break-words overflow-hidden"
+                          style={{ font: 'inherit', lineHeight: 'inherit', padding: '1px 2px' }}
+                        >
+                          {renderInputOverlay(input)}
+                        </div>
+                        <textarea
+                          ref={inputTextareaRef}
+                          value={input}
+                          onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
+                          onClick={(e) => setInputCaretPos((e.target as HTMLTextAreaElement).selectionStart)}
+                          onKeyUp={(e) => setInputCaretPos((e.currentTarget as HTMLTextAreaElement).selectionStart)}
+                          onKeyDown={handleInputKeyDown}
+                          placeholder="유니로드에게 무엇이든 물어보세요"
+                          disabled={isLoading}
+                          rows={1}
+                          className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400 relative z-10"
+                          style={{ height: 'auto', color: 'transparent', caretColor: 'black' }}
+                          onInput={(e) => {
+                            const target = e.target as HTMLTextAreaElement
+                            target.style.height = 'auto'
+                            target.style.height = Math.min(target.scrollHeight, 200) + 'px'
+                          }}
+                        />
+                      </div>
+                      {isScoreSuggestOpen && scoreSuggestItems.length > 0 && (
+                        <div className="mt-2 bg-white border border-gray-200 rounded-xl shadow-lg py-1 max-h-48 overflow-y-auto w-48">
+                          {scoreSuggestItems.map((item, idx) => (
+                            <button
+                              key={`${item.id}-${item.name}`}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => applyScoreSuggestion(item)}
+                              className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                                idx === scoreSuggestIndex ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50 text-gray-700'
+                              }`}
+                            >
+                              {item.name.startsWith('@') ? item.name : `@${item.name}`}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       
                       {/* 하단 영역: 버튼들 + 태그 + 전송 버튼 */}
                       <div className="flex items-center justify-between mt-2">
@@ -2204,6 +2459,8 @@ export default function ChatPage() {
                   key={msg.id}
                   message={msg.text}
                   isUser={msg.isUser}
+                  scoreMentions={msg.scoreMentions}
+                  scoreReview={msg.scoreReview}
                   sources={msg.sources}
                   source_urls={msg.source_urls}
                   userQuery={userQuery}
@@ -2223,6 +2480,134 @@ export default function ChatPage() {
                     if (msg.agentData) {
                       setSelectedAgentData(msg.agentData)
                       setIsAgentPanelOpen(true)
+                    }
+                  }}
+                  onScoreReviewApprove={async (pendingId, title, scores) => {
+                    try {
+                      const approved = await approveScoreReview(
+                        pendingId,
+                        sessionId,
+                        title,
+                        scores,
+                        accessToken || undefined
+                      )
+                      const approvedScoreId = approved.score_id
+
+                      let originalQuestion = ''
+                      for (let i = index - 1; i >= 0; i--) {
+                        if (messages[i].isUser) {
+                          originalQuestion = messages[i].text
+                          break
+                        }
+                      }
+
+                      setActiveScoreId(approvedScoreId)
+                      setMessages((prev) => prev.map((m) =>
+                        m.id === msg.id
+                          ? { ...m, text: '', scoreReview: undefined, isStreaming: true }
+                          : m
+                      ))
+                      setIsLoading(true)
+
+                      if (originalQuestion) {
+                        const abortController = new AbortController()
+                        abortControllerRef.current = abortController
+                        const botMsgId = msg.id
+
+                        await sendMessageStream(
+                          originalQuestion,
+                          sessionId,
+                          (log) => setCurrentLog(log),
+                          (response) => {
+                            const finalText = response.response || ''
+                            setMessages((prev) => prev.map((m) =>
+                              m.id === botMsgId
+                                ? {
+                                    ...m,
+                                    text: finalText,
+                                    isStreaming: false,
+                                    sources: response.sources,
+                                    source_urls: response.source_urls,
+                                    agentData: {
+                                      routerOutput: response.router_output || null,
+                                      functionResults: response.function_results || null,
+                                      mainAgentOutput: finalText,
+                                      rawAnswer: response.raw_answer || null,
+                                      logs: [],
+                                    },
+                                  }
+                                : m
+                            ))
+                            setIsLoading(false)
+                            setCurrentLog('')
+                          },
+                          (error) => {
+                            setMessages((prev) => prev.map((m) =>
+                              m.id === botMsgId
+                                ? { ...m, text: error, isStreaming: false }
+                                : m
+                            ))
+                            setIsLoading(false)
+                            setCurrentLog('')
+                          },
+                          abortController.signal,
+                          (chunk) => {
+                            setMessages((prev) => prev.map((m) =>
+                              m.id === botMsgId
+                                ? { ...m, text: m.text + chunk }
+                                : m
+                            ))
+                            scrollToBottom()
+                          },
+                          accessToken || undefined,
+                          thinkingMode,
+                          undefined,
+                          approvedScoreId,
+                        )
+                      }
+                    } catch (e) {
+                      console.error('성적 검토 승인 실패:', e)
+                      setMessages((prev) => prev.map((m) =>
+                        m.id === msg.id
+                          ? {
+                              ...m,
+                              text: '성적 저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.',
+                              scoreReview: undefined,
+                              isStreaming: false,
+                            }
+                          : m
+                      ))
+                      setIsLoading(false)
+                    }
+                  }}
+                  onScoreReviewSkipSession={async (pendingId) => {
+                    try {
+                      await skipScoreReviewSession(sessionId, pendingId, accessToken || undefined)
+                      setMessages((prev) => prev.map((m) =>
+                        m.id === msg.id
+                          ? {
+                              ...m,
+                              text: '이번 세션에서는 성적 확인을 다시 묻지 않아요. 질문을 계속해 주세요.',
+                              scoreReview: undefined,
+                            }
+                          : m
+                      ))
+                    } catch (e) {
+                      console.error('성적 검토 스킵 실패:', e)
+                    }
+                  }}
+                  onScoreTagClick={async (name) => {
+                    try {
+                      const data = await getScoreSetByName(name, sessionId, accessToken || undefined)
+                      setActiveScoreId(data.id)
+                      const normalizedName = data.name.startsWith('@') ? data.name : `@${data.name}`
+                      setScorePreview({
+                        name: normalizedName,
+                        scores: data.scores || {},
+                      })
+                    } catch (e) {
+                      console.error('성적표 조회 실패:', e)
+                      alert('성적표를 불러오지 못했습니다.')
                     }
                   }}
                 />
@@ -2269,27 +2654,51 @@ export default function ChatPage() {
             <div className="px-4 sm:px-6 py-2">
               <div className="max-w-[800px] mx-auto">
                 <div className="bg-gray-50 rounded-3xl focus-within:ring-2 focus-within:ring-blue-500 px-3 sm:px-4 py-2 sm:py-3">
-                  {/* 텍스트 입력 영역 */}
-                  <textarea
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        handleSend()
-                      }
-                    }}
-                    placeholder="유니로드에게 무엇이든 물어보세요"
-                    disabled={isLoading}
-                    rows={1}
-                    className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] sm:min-h-[32px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
-                    style={{ height: 'auto' }}
-                    onInput={(e) => {
-                      const target = e.target as HTMLTextAreaElement
-                      target.style.height = 'auto'
-                      target.style.height = Math.min(target.scrollHeight, 200) + 'px'
-                    }}
-                  />
+                  {/* 텍스트 입력 영역 (오버레이 + textarea) */}
+                  <div className="relative">
+                    <div
+                      aria-hidden
+                      className="absolute inset-0 pointer-events-none whitespace-pre-wrap break-words overflow-hidden"
+                      style={{ font: 'inherit', lineHeight: 'inherit', padding: '1px 2px' }}
+                    >
+                      {renderInputOverlay(input)}
+                    </div>
+                    <textarea
+                      ref={inputTextareaRef}
+                      value={input}
+                      onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
+                      onClick={(e) => setInputCaretPos((e.target as HTMLTextAreaElement).selectionStart)}
+                      onKeyUp={(e) => setInputCaretPos((e.currentTarget as HTMLTextAreaElement).selectionStart)}
+                      onKeyDown={handleInputKeyDown}
+                      placeholder="유니로드에게 무엇이든 물어보세요"
+                      disabled={isLoading}
+                      rows={1}
+                      className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] sm:min-h-[32px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400 relative z-10"
+                      style={{ height: 'auto', color: 'transparent', caretColor: 'black' }}
+                      onInput={(e) => {
+                        const target = e.target as HTMLTextAreaElement
+                        target.style.height = 'auto'
+                        target.style.height = Math.min(target.scrollHeight, 200) + 'px'
+                      }}
+                    />
+                  </div>
+                  {isScoreSuggestOpen && scoreSuggestItems.length > 0 && (
+                    <div className="mt-2 bg-white border border-gray-200 rounded-xl shadow-lg py-1 max-h-48 overflow-y-auto w-48">
+                      {scoreSuggestItems.map((item, idx) => (
+                        <button
+                          key={`${item.id}-${item.name}`}
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => applyScoreSuggestion(item)}
+                          className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                            idx === scoreSuggestIndex ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50 text-gray-700'
+                          }`}
+                        >
+                          {item.name.startsWith('@') ? item.name : `@${item.name}`}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   
                   {/* 하단 영역: 버튼들 + 태그 + 전송 버튼 */}
                   <div className="flex items-center justify-between mt-2">
@@ -2947,6 +3356,49 @@ export default function ChatPage() {
         }}
         showGuide={showProfileGuide}
       />
+
+      {scorePreview && (
+        <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4" onClick={() => setScorePreview(null)}>
+          <div className="bg-white w-full max-w-3xl rounded-xl shadow-xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white border-b px-4 py-3 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-900">{scorePreview.name} 성적표</h3>
+              <button className="text-gray-500 hover:text-gray-700 text-2xl" onClick={() => setScorePreview(null)}>
+                ×
+              </button>
+            </div>
+            <div className="p-4">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="text-left">
+                      <th className="py-2 border-b">과목</th>
+                      <th className="py-2 border-b">선택과목</th>
+                      <th className="py-2 border-b">표준점수</th>
+                      <th className="py-2 border-b">백분위</th>
+                      <th className="py-2 border-b">등급</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(scorePreview.scores || {}).map(([subject, row]) => {
+                      const scoreRow = row as Record<string, any>
+                      return (
+                        <tr key={subject} className="border-b border-gray-100">
+                          <td className="py-2">{subject}</td>
+                          <td className="py-2">{scoreRow['선택과목'] ?? scoreRow['과목명'] ?? '-'}</td>
+                          <td className="py-2">{scoreRow['표준점수'] ?? '-'}</td>
+                          <td className="py-2">{scoreRow['백분위'] ?? '-'}</td>
+                          <td className="py-2">{scoreRow['등급'] ?? '-'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-3 text-xs text-gray-500">읽기 전용 보기입니다.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PRO 업그레이드 팝업 - 웹 + 로그인한 Basic 유저에게만 표시 (PRO 유저는 숨김) */}
       {isProPopupVisible && !isGalaxySession && !isCapacitorApp() && isAuthenticated && user?.id && !user?.is_premium && (

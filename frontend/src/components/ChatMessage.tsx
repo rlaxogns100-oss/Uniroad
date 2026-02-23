@@ -685,16 +685,7 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
             </div>
           )}
           <div className="rounded-2xl px-4 py-3 text-gray-800" style={{ backgroundColor: '#F1F5FB' }}>
-            {!!scoreMentions?.length && (
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {scoreMentions.map((tag) => (
-                  <span key={tag} className="inline-flex items-center bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full px-2 py-0.5 text-xs">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            )}
-            <div className="whitespace-pre-wrap">{getDisplayMessage()}</div>
+            <div className="whitespace-pre-wrap">{renderInlineScoreMentions(getDisplayMessage())}</div>
           </div>
         </div>
       ) : (
