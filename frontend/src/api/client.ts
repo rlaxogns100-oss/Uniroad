@@ -9,6 +9,61 @@ const getEffectiveApiBaseUrl = (): string => {
   return base ? `${base}/api` : '/api'
 }
 
+const AUTH_REQUIRED_ERROR = '__AUTH_REQUIRED__'
+
+const refreshAccessToken = async (apiUrl: string): Promise<string | null> => {
+  const refreshToken = localStorage.getItem('refresh_token')
+  if (!refreshToken) return null
+
+  try {
+    const response = await fetch(`${apiUrl}/auth/refresh?refresh_token=${encodeURIComponent(refreshToken)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    if (!response.ok) return null
+
+    const data = await response.json()
+    const newAccessToken = data?.access_token
+    const newRefreshToken = data?.refresh_token
+    if (!newAccessToken) return null
+
+    localStorage.setItem('access_token', newAccessToken)
+    if (newRefreshToken) {
+      localStorage.setItem('refresh_token', newRefreshToken)
+    }
+    return newAccessToken
+  } catch {
+    return null
+  }
+}
+
+const withBearerHeader = (headers: Record<string, string>, token?: string): Record<string, string> => {
+  if (!token) return headers
+  return { ...headers, Authorization: `Bearer ${token}` }
+}
+
+const fetchWithAuthRetry = async (
+  url: string,
+  init: RequestInit,
+  apiUrl: string,
+  token?: string
+): Promise<Response> => {
+  const initialToken = token || localStorage.getItem('access_token') || undefined
+  let response = await fetch(url, { ...init, headers: withBearerHeader((init.headers || {}) as Record<string, string>, initialToken) })
+
+  if (response.status !== 401 || !initialToken) {
+    return response
+  }
+
+  const refreshed = await refreshAccessToken(apiUrl)
+  if (!refreshed) {
+    return response
+  }
+
+  response = await fetch(url, { ...init, headers: withBearerHeader((init.headers || {}) as Record<string, string>, refreshed) })
+  return response
+}
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -149,11 +204,8 @@ const sendMessageNonStream = async (
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     }
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    }
     
-    const response = await fetch(`${apiUrl}/chat/`, {
+    const response = await fetchWithAuthRetry(`${apiUrl}/chat/`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -161,11 +213,16 @@ const sendMessageNonStream = async (
         session_id: sessionId,
       }),
       signal: abortSignal,
-    })
+    }, apiUrl, token)
 
     if (!response.ok) {
       const errorText = await response.text()
       console.error('API 에러:', response.status, errorText)
+
+      if (response.status === 401) {
+        onError?.(AUTH_REQUIRED_ERROR)
+        return
+      }
       
       if (response.status === 429) {
         if (errorText.includes('로그인을 통해')) {
@@ -254,12 +311,9 @@ export const sendMessageStream = async (
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     }
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    }
     
     // 실시간 스트리밍 엔드포인트 사용
-    const response = await fetch(`${API_BASE_URL}/chat/v2/stream`, {
+    const response = await fetchWithAuthRetry(`${API_BASE_URL}/chat/v2/stream`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -268,11 +322,16 @@ export const sendMessageStream = async (
         thinking: thinking || false,
       }),
       signal: abortSignal,
-    })
+    }, API_BASE_URL, token)
 
     if (!response.ok) {
       const errorText = await response.text()
       console.error('API 에러:', response.status, errorText)
+
+      if (response.status === 401) {
+        onError?.(AUTH_REQUIRED_ERROR)
+        return
+      }
       
       // 429 에러 (Rate Limit)
       if (response.status === 429) {
@@ -413,22 +472,24 @@ const sendMessageNonStreamWithImage = async (
     formData.append('image', image)
     
     const headers: Record<string, string> = {}
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    }
     
     const apiUrl = getEffectiveApiBaseUrl()
     // 스트리밍 엔드포인트를 사용하되, 전체 응답을 한번에 받음
-    const response = await fetch(`${apiUrl}/chat/v2/stream/with-image`, {
+    const response = await fetchWithAuthRetry(`${apiUrl}/chat/v2/stream/with-image`, {
       method: 'POST',
       headers,
       body: formData,
       signal: abortSignal,
-    })
+    }, apiUrl, token)
 
     if (!response.ok) {
       const errorText = await response.text()
       console.error('API 에러:', response.status, errorText)
+
+      if (response.status === 401) {
+        onError?.(AUTH_REQUIRED_ERROR)
+        return
+      }
       
       // 413 에러 (파일 크기 초과)
       if (response.status === 413) {
@@ -533,20 +594,22 @@ export const sendMessageStreamWithImage = async (
     
     // 헤더 구성
     const headers: Record<string, string> = {}
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    }
     
-    const response = await fetch(`${API_BASE_URL}/chat/v2/stream/with-image`, {
+    const response = await fetchWithAuthRetry(`${API_BASE_URL}/chat/v2/stream/with-image`, {
       method: 'POST',
       headers,
       body: formData,
       signal: abortSignal,
-    })
+    }, API_BASE_URL, token)
 
     if (!response.ok) {
       const errorText = await response.text()
       console.error('API 에러:', response.status, errorText)
+
+      if (response.status === 401) {
+        onError?.(AUTH_REQUIRED_ERROR)
+        return
+      }
       
       // 413 에러 (파일 크기 초과)
       if (response.status === 413) {

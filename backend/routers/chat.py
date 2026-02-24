@@ -21,12 +21,14 @@ from services.multi_agent import (
 )
 from utils.timing_logger import TimingLogger
 from utils.admin_filter import should_skip_logging
-from middleware.auth import optional_auth
+from middleware.auth import optional_auth, optional_auth_with_state
 from middleware.rate_limit import check_and_increment_usage, get_client_ip
 import uuid
 from datetime import datetime
 
 router = APIRouter()
+
+AUTH_EXPIRED_DETAIL = "세션이 만료되었거나 유효하지 않습니다. 다시 로그인해 주세요."
 
 
 def _record_question_sent(session_id: str, user_id: Optional[str]) -> None:
@@ -186,7 +188,10 @@ async def chat(
         client_ip = get_client_ip(http_request)
         
         # 2. 선택적 인증
-        user = await optional_auth(authorization)
+        auth_header = authorization or (http_request.headers.get("authorization") if http_request else None)
+        user, auth_failed = await optional_auth_with_state(auth_header)
+        if auth_failed or (auth_header and auth_header.startswith("Bearer ") and user is None):
+            raise HTTPException(status_code=401, detail=AUTH_EXPIRED_DETAIL)
         user_id = user["user_id"] if user else None
         
         # 3. Rate Limit 체크 및 증가
@@ -490,6 +495,8 @@ async def chat(
             metadata=final_result.get("metadata", {})
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"\n{'='*80}")
         print(f"❌ 채팅 오류: {e}")
@@ -538,7 +545,10 @@ async def chat_stream_v2_with_image(
     # Rate Limiting 체크
     # ========================================
     client_ip = get_client_ip(http_request)
-    user = await optional_auth(authorization)
+    auth_header = authorization or (http_request.headers.get("authorization") if http_request else None)
+    user, auth_failed = await optional_auth_with_state(auth_header)
+    if auth_failed or (auth_header and auth_header.startswith("Bearer ") and user is None):
+        raise HTTPException(status_code=401, detail=AUTH_EXPIRED_DETAIL)
     user_id = user["user_id"] if user else None
     
     is_allowed, current_count, limit, require_login = await check_and_increment_usage(user_id, client_ip)
@@ -749,7 +759,10 @@ async def chat_stream_v2(
     # Rate Limiting 체크 (generator 외부에서 실행)
     # ========================================
     client_ip = get_client_ip(http_request)
-    user = await optional_auth(authorization)
+    auth_header = authorization or (http_request.headers.get("authorization") if http_request else None)
+    user, auth_failed = await optional_auth_with_state(auth_header)
+    if auth_failed or (auth_header and auth_header.startswith("Bearer ") and user is None):
+        raise HTTPException(status_code=401, detail=AUTH_EXPIRED_DETAIL)
     user_id = user["user_id"] if user else None
     
     is_allowed, current_count, limit, require_login = await check_and_increment_usage(user_id, client_ip)
@@ -1062,7 +1075,10 @@ async def chat_stream(
     # Rate Limiting 체크 (generator 외부에서 실행)
     # ========================================
     client_ip = get_client_ip(http_request)
-    user = await optional_auth(authorization)
+    auth_header = authorization or (http_request.headers.get("authorization") if http_request else None)
+    user, auth_failed = await optional_auth_with_state(auth_header)
+    if auth_failed or (auth_header and auth_header.startswith("Bearer ") and user is None):
+        raise HTTPException(status_code=401, detail=AUTH_EXPIRED_DETAIL)
     user_id = user["user_id"] if user else None
     
     is_allowed, current_count, limit, require_login = await check_and_increment_usage(user_id, client_ip)

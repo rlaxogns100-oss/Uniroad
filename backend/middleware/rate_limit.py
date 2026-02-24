@@ -1,6 +1,6 @@
 """
 Rate Limiting 미들웨어
-일일 API 사용량 제한 (로그인 유저 100회, 게스트 0회 무료 + 1회째 마스킹)
+일일 API 사용량 제한 (로그인 유저 제한 적용, 게스트는 응답 마스킹 플래그만 반환)
 """
 from typing import Optional, Tuple
 from datetime import date
@@ -71,26 +71,26 @@ async def check_and_increment_usage(
                     .eq("id", record_id)\
                     .execute()
                 
-                guest_require_login = (not user_id and limit == 0)
+                guest_require_login = not user_id
                 if guest_require_login:
                     logger.info(f"🔒 Rate Limit 마스킹 ({identifier_field}={identifier_value}): 1/{limit} (리셋됨, 로그인 필요)")
                 else:
                     logger.info(f"✅ Rate Limit 허용 ({identifier_field}={identifier_value}): 1/{limit} (리셋됨)")
                 return (True, 1, limit, guest_require_login)
             
-            # 비로그인 사용자: 제한 도달 시 1회 추가 응답을 허용하되 require_login=True(답변 마스킹)
-            if not user_id and current_count == limit:
-                # 카운트 증가 (3회째)
+            # 비로그인 사용자: 차단하지 않고 항상 require_login=True를 반환
+            if not user_id:
+                # 카운트 증가
                 new_count = current_count + 1
                 supabase_service.client.table("usage_tracking")\
                     .update({"chat_count": new_count})\
                     .eq("id", record_id)\
                     .execute()
                 
-                logger.info(f"🔒 Rate Limit 마스킹 ({identifier_field}={identifier_value}): {new_count}/{limit} (로그인 필요)")
+                logger.info(f"🔒 Guest 응답 마스킹 ({identifier_field}={identifier_value}): {new_count}/{limit}")
                 return (True, new_count, limit, True)  # require_login=True
             
-            # 제한 체크 (비로그인 4회 이상, 로그인 사용자 제한 초과)
+            # 제한 체크 (로그인 사용자 제한 초과)
             if current_count > limit:
                 logger.warning(f"❌ Rate Limit 초과 ({identifier_field}={identifier_value}): {current_count}/{limit}")
                 return (False, current_count, limit, False)
@@ -121,7 +121,7 @@ async def check_and_increment_usage(
                 .insert(insert_data)\
                 .execute()
             
-            guest_require_login = (not user_id and limit == 0)
+            guest_require_login = not user_id
             if guest_require_login:
                 logger.info(f"🔒 Rate Limit 마스킹 ({identifier_field}={identifier_value}): 1/{limit} (신규, 로그인 필요)")
             else:

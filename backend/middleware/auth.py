@@ -4,15 +4,17 @@ Supabase Auth JWT 토큰 검증
 """
 from fastapi import HTTPException, Security, Depends
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from typing import Optional
+from typing import Optional, Tuple
 import jwt
 import os
 from dotenv import load_dotenv
 from services.supabase_client import supabase_service
+from config.logging_config import setup_logger
 
 load_dotenv()
 
 security = HTTPBearer()
+logger = setup_logger("auth_middleware")
 
 SUPABASE_JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET")
 if not SUPABASE_JWT_SECRET:
@@ -105,14 +107,17 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Security(securi
     return verify_token(credentials)
 
 
-async def optional_auth(authorization: Optional[str] = None) -> Optional[dict]:
+async def optional_auth_with_state(authorization: Optional[str] = None) -> Tuple[Optional[dict], bool]:
     """
     선택적 인증 (로그인 안 해도 됨)
     
-    로그인한 경우 사용자 정보 반환, 아니면 None
+    Returns:
+        (user, auth_failed)
+        - user: 로그인 사용자 정보, 비로그인/실패 시 None
+        - auth_failed: Authorization 헤더가 있었지만 검증 실패한 경우 True
     """
     if not authorization or not authorization.startswith("Bearer "):
-        return None
+        return None, False
     
     try:
         token = authorization.split(" ")[1]
@@ -132,22 +137,30 @@ async def optional_auth(authorization: Optional[str] = None) -> Optional[dict]:
                     "name": response.user.user_metadata.get("name") if response.user.user_metadata else None,
                     "role": response.user.app_metadata.get("role", "authenticated"),
                     "created_at": response.user.created_at,
-                }
-        except:
+                }, False
+        except Exception as supabase_error:
             # Supabase 클라이언트 실패 시 JWT 직접 검증 시도
-            pass
+            logger.warning(f"[optional_auth] supabase get_user 실패, jwt fallback 시도: {supabase_error}")
         
         # JWT 직접 검증 (fallback)
-        payload = jwt.decode(
-            token,
-            SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-            audience="authenticated"
-        )
+        try:
+            payload = jwt.decode(
+                token,
+                SUPABASE_JWT_SECRET,
+                algorithms=["HS256"],
+                audience="authenticated"
+            )
+        except jwt.ExpiredSignatureError:
+            logger.info("[optional_auth] access token 만료")
+            return None, True
+        except jwt.InvalidTokenError as jwt_error:
+            logger.warning(f"[optional_auth] JWT 유효성 검증 실패: {jwt_error}")
+            return None, True
         
         user_id = payload.get("sub")
         if not user_id:
-            return None
+            logger.warning("[optional_auth] JWT payload에 sub(user_id) 없음")
+            return None, True
         
         return {
             "user_id": user_id,
@@ -155,7 +168,17 @@ async def optional_auth(authorization: Optional[str] = None) -> Optional[dict]:
             "name": payload.get("user_metadata", {}).get("name") if payload.get("user_metadata") else None,
             "role": payload.get("role"),
             "created_at": payload.get("created_at"),
-        }
-    except:
-        return None
+        }, False
+    except Exception as e:
+        logger.warning(f"[optional_auth] 인증 처리 중 예외 발생: {e}")
+        return None, True
+
+
+async def optional_auth(authorization: Optional[str] = None) -> Optional[dict]:
+    """
+    하위 호환용 선택적 인증.
+    기존 호출부에서는 user(dict | None)만 필요하므로 상태 플래그는 숨긴다.
+    """
+    user, _ = await optional_auth_with_state(authorization)
+    return user
 

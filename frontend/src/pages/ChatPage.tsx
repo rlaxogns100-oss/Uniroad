@@ -35,7 +35,6 @@ interface Message {
   used_chunks?: UsedChunk[]
   isStreaming?: boolean  // 스트리밍 중인지 여부
   imageUrl?: string  // 이미지 첨부 시 미리보기 URL
-  showLoginPrompt?: boolean  // 로그인 유도 메시지 표시 여부
   isMasked?: boolean  // 마스킹 여부 (비로그인 3회째 질문)
   // Agent 디버그 데이터 (관리자용)
   agentData?: {
@@ -166,7 +165,6 @@ export default function ChatPage() {
   const DAILY_QUESTION_LIMIT_BASIC = 3
   const DAILY_QUESTION_LIMIT_PRO = 100
   const [isProPopupVisible, setIsProPopupVisible] = useState(true)
-  const [isProPopupHovered, setIsProPopupHovered] = useState(false)
   const [authModalMessage, setAuthModalMessage] = useState<{ title: string; description: string } | undefined>(undefined)
   const [isFeedbackModalOpen, setIsFeedbackModalOpen] = useState(false)
   const [feedbackText, setFeedbackText] = useState('')
@@ -199,8 +197,15 @@ export default function ChatPage() {
   const [thinkingMode, setThinkingMode] = useState<boolean>(false) // Thinking 모드 (기본값 Auto)
   const [isThinkingModeModalOpen, setIsThinkingModeModalOpen] = useState(false) // Auto/Thinking 선택 모달
   const [thinkingModeModalAnchor, setThinkingModeModalAnchor] = useState<{ top: number; left: number; width: number } | null>(null) // 모달이 뜰 기준 위치 (Auto 버튼)
+  const [sessionLockedByMasking, setSessionLockedByMasking] = useState(false)
+  const [lockReason, setLockReason] = useState<'guest_masked' | 'auth_expired' | null>(null)
   const isGalaxySession = isGalaxyAppSession()
   const hasProAccess = !!user?.is_premium || isGalaxySession
+  const isInputLocked = sessionLockedByMasking && !isAuthenticated
+  const getRequestToken = (): string | undefined => {
+    if (accessToken) return accessToken
+    return localStorage.getItem('access_token') || undefined
+  }
 
   const openThinkingModeModal = (e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -229,12 +234,13 @@ export default function ChatPage() {
       setIsAuthModalOpen(true)
       return
     }
+    const requestToken = getRequestToken()
     // 관리자 결제 이력용 카드결제 신청 로그 (실패해도 결제는 계속 진행)
     fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/payments/card-checkout/attempt`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...(accessToken && { Authorization: `Bearer ${accessToken}` }),
+        ...(requestToken && { Authorization: `Bearer ${requestToken}` }),
       },
       body: JSON.stringify({ amount: 2900, source: 'gumroad' }),
     }).catch(() => undefined)
@@ -597,6 +603,8 @@ export default function ChatPage() {
     setInput('')
     setIsLoading(false)
     setCurrentLog('')
+    setSessionLockedByMasking(false)
+    setLockReason(null)
     setAgentData({
       routerOutput: null,
       functionResults: null,
@@ -722,6 +730,7 @@ export default function ChatPage() {
   const handleSend = async (directMessage?: string) => {
     const messageToSend = directMessage || input
     const trimmedMessage = messageToSend.trim()
+    const quickExampleResponse = !selectedImage ? getQuickExampleResponse(trimmedMessage) : undefined
     
     // 일일 질문 횟수 체크 (로그인한 유저만)
     const dailyLimit = hasProAccess ? DAILY_QUESTION_LIMIT_PRO : DAILY_QUESTION_LIMIT_BASIC
@@ -732,28 +741,18 @@ export default function ChatPage() {
     
     // 중복 전송 방지 (더블 클릭, 빠른 Enter 연타 방지)
     // 이미지가 있으면 텍스트 없이도 전송 가능
-    if ((!trimmedMessage && !selectedImage) || isLoading || sendingRef.current) {
+    if ((!trimmedMessage && !selectedImage) || isLoading || sendingRef.current || isInputLocked) {
       console.log('🚫 전송 차단:', { 
         hasInput: !!trimmedMessage, 
         hasImage: !!selectedImage,
         isLoading, 
-        alreadySending: sendingRef.current 
+        alreadySending: sendingRef.current,
+        isInputLocked,
       })
       return
     }
 
-    // 일일 질문 횟수 증가 (로그인한 유저만)
-    if (isAuthenticated) {
-      const newCount = dailyQuestionCount + 1
-      setDailyQuestionCount(newCount)
-      localStorage.setItem('uniroad_daily_questions', JSON.stringify({
-        date: new Date().toDateString(),
-        count: newCount
-      }))
-    }
-
     // 예시 질문 하드코딩 응답: API 호출 없이 빠르게 반환
-    const quickExampleResponse = !selectedImage ? getQuickExampleResponse(trimmedMessage) : undefined
     if (quickExampleResponse) {
       const userInput = trimmedMessage
       const userMessageId = Date.now().toString()
@@ -783,9 +782,19 @@ export default function ChatPage() {
         setCurrentLog('')
         sendingRef.current = false
         isStreamingRef.current = false
-      }, 600)
+      }, 1000)
 
       return
+    }
+
+    // 일일 질문 횟수 증가 (로그인한 유저만)
+    if (isAuthenticated) {
+      const newCount = dailyQuestionCount + 1
+      setDailyQuestionCount(newCount)
+      localStorage.setItem('uniroad_daily_questions', JSON.stringify({
+        date: new Date().toDateString(),
+        count: newCount
+      }))
     }
 
     console.log('📤 메시지 전송 시작:', messageToSend)
@@ -908,8 +917,15 @@ export default function ChatPage() {
           // 타이밍: 파싱 완료
           timingLogger.mark('parse_complete')
 
-          // 비로그인 3회째 질문 시 마스킹 처리
+          // 비로그인 체험 응답은 마스킹 처리 + 현재 세션 입력 잠금
           const shouldMask = response.require_login === true
+          if (shouldMask) {
+            setLockReason('guest_masked')
+            setSessionLockedByMasking(true)
+          } else if (!isAuthenticated) {
+            setLockReason(null)
+            setSessionLockedByMasking(false)
+          }
 
           // 현재 agentData 스냅샷 저장 (메시지에 포함시키기 위해)
           const currentAgentData = {
@@ -993,14 +1009,32 @@ export default function ChatPage() {
       const onErrorCallback = (error: string) => {
           // 취소된 경우 에러 메시지 표시 안 함
           if (abortController.signal.aborted) return
+
+          // 인증 토큰 만료/검증 실패 - 로그인 모달 즉시 표시
+          if (error === '__AUTH_REQUIRED__') {
+            setMessages((prev) => prev.filter(msg => msg.id !== userMessage.id && msg.id !== streamingBotMessageId))
+            setLockReason('auth_expired')
+            setSessionLockedByMasking(false)
+            setAuthModalMessage({
+              title: '다시 로그인이 필요해요',
+              description: '세션이 만료되어 인증이 해제되었습니다. 다시 로그인하면 이어서 사용할 수 있어요.',
+            })
+            setIsAuthModalOpen(true)
+            setIsLoading(false)
+            setCurrentLog('')
+            return
+          }
           
           // 비로그인 사용자 Rate Limit 초과 - 로그인 유도
           if (error === '__RATE_LIMIT_GUEST__') {
-            setMessages((prev) => prev.map(msg => 
-              msg.id === streamingBotMessageId
-                ? { ...msg, text: '로그인을 통해 더 많은 입시 정보와 개인별로 갈 수 있는 대학을 확인해보세요!!', showLoginPrompt: true }
-                : msg
-            ))
+            setMessages((prev) => prev.filter(msg => msg.id !== streamingBotMessageId))
+            setLockReason('guest_masked')
+            setSessionLockedByMasking(true)
+            setAuthModalMessage({
+              title: '로그인이 필요해요',
+              description: '비로그인 체험이 완료되었습니다. 로그인하면 계속 이어서 사용할 수 있어요.',
+            })
+            setIsAuthModalOpen(true)
             setIsLoading(false)
             setCurrentLog('')
             return
@@ -1038,6 +1072,7 @@ export default function ChatPage() {
         }
       
       // 이미지가 있으면 이미지와 함께 전송, 없으면 일반 전송
+      const requestToken = getRequestToken()
       if (currentImage) {
         await sendMessageStreamWithImage(
           userInput,
@@ -1048,7 +1083,7 @@ export default function ChatPage() {
           onErrorCallback,
           abortController.signal,
           onChunkCallback,
-          accessToken || undefined  // 인증 토큰 전달
+          requestToken  // 인증 토큰 전달
         )
       } else {
         await sendMessageStream(
@@ -1059,7 +1094,7 @@ export default function ChatPage() {
           onErrorCallback,
           abortController.signal,
           onChunkCallback,
-          accessToken || undefined,  // 인증 토큰 전달
+          requestToken,  // 인증 토큰 전달
           thinkingMode  // Thinking 모드 전달
         )
       }
@@ -1917,7 +1952,7 @@ export default function ChatPage() {
                           }
                         }}
                         placeholder="유니로드에게 무엇이든 물어보세요"
-                        disabled={isLoading}
+                        disabled={isLoading || isInputLocked}
                         rows={1}
                         className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[32px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
                         style={{ height: 'auto' }}
@@ -1935,7 +1970,7 @@ export default function ChatPage() {
                           <div className="relative" ref={uploadMenuRef}>
                             <button
                               onClick={() => setIsUploadMenuOpen(!isUploadMenuOpen)}
-                              disabled={isLoading}
+                              disabled={isLoading || isInputLocked}
                               className="w-8 h-8 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                               title="성적 입력"
                             >
@@ -2003,7 +2038,7 @@ export default function ChatPage() {
                         <div className="flex items-center gap-2">
                           <button
                             onClick={(e) => openThinkingModeModal(e)}
-                            disabled={isLoading}
+                            disabled={isLoading || isInputLocked}
                             className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-2 ${
                               'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
                             } disabled:opacity-50`}
@@ -2019,7 +2054,7 @@ export default function ChatPage() {
                           </button>
                           <button
                             onClick={() => handleSend()}
-                            disabled={isLoading || (!input.trim() && !selectedImage)}
+                            disabled={isLoading || isInputLocked || (!input.trim() && !selectedImage)}
                             className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                           >
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2070,7 +2105,7 @@ export default function ChatPage() {
                           }
                         }}
                         placeholder="유니로드에게 무엇이든 물어보세요"
-                        disabled={isLoading}
+                        disabled={isLoading || isInputLocked}
                         rows={1}
                         className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
                         style={{ height: 'auto' }}
@@ -2088,7 +2123,7 @@ export default function ChatPage() {
                           <div className="relative">
                             <button
                               onClick={() => setIsUploadMenuOpen(!isUploadMenuOpen)}
-                              disabled={isLoading}
+                              disabled={isLoading || isInputLocked}
                               className="w-8 h-8 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                               title="성적 입력"
                             >
@@ -2156,7 +2191,7 @@ export default function ChatPage() {
                         <div className="flex items-center gap-2">
                           <button
                             onClick={(e) => openThinkingModeModal(e)}
-                            disabled={isLoading}
+                            disabled={isLoading || isInputLocked}
                             className={`px-2 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1 ${
                               'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
                             } disabled:opacity-50`}
@@ -2172,7 +2207,7 @@ export default function ChatPage() {
                           </button>
                           <button
                             onClick={() => handleSend()}
-                            disabled={isLoading || (!input.trim() && !selectedImage)}
+                            disabled={isLoading || isInputLocked || (!input.trim() && !selectedImage)}
                             className="w-9 h-9 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2210,7 +2245,6 @@ export default function ChatPage() {
                   isStreaming={msg.isStreaming}
                   imageUrl={msg.imageUrl}
                   onRegenerate={!msg.isUser && userQuery && index === messages.length - 1 ? () => handleRegenerate(msg.id, userQuery) : undefined}
-                  showLoginPrompt={msg.showLoginPrompt}
                   onLoginClick={() => {
                     trackUserAction('login_modal_open', 'rate_limit_prompt')
                     sessionStorage.setItem('uniroad_login_modal_source', 'rate_limit_prompt')
@@ -2269,6 +2303,11 @@ export default function ChatPage() {
             <div className="px-4 sm:px-6 py-2">
               <div className="max-w-[800px] mx-auto">
                 <div className="bg-gray-50 rounded-3xl focus-within:ring-2 focus-within:ring-blue-500 px-3 sm:px-4 py-2 sm:py-3">
+                  {isInputLocked && lockReason === 'guest_masked' && (
+                    <div className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs sm:text-sm text-amber-700">
+                      로그인하면 계속 이어서 사용할 수 있어요.
+                    </div>
+                  )}
                   {/* 텍스트 입력 영역 */}
                   <textarea
                     value={input}
@@ -2280,7 +2319,7 @@ export default function ChatPage() {
                       }
                     }}
                     placeholder="유니로드에게 무엇이든 물어보세요"
-                    disabled={isLoading}
+                    disabled={isLoading || isInputLocked}
                     rows={1}
                     className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] sm:min-h-[32px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
                     style={{ height: 'auto' }}
@@ -2298,7 +2337,7 @@ export default function ChatPage() {
                       <div className="relative">
                         <button
                           onClick={() => setIsUploadMenuOpen(!isUploadMenuOpen)}
-                          disabled={isLoading}
+                          disabled={isLoading || isInputLocked}
                           className="w-8 h-8 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                           title="성적 입력"
                         >
@@ -2366,7 +2405,7 @@ export default function ChatPage() {
                     <div className="flex items-center gap-2">
                       <button
                         onClick={(e) => openThinkingModeModal(e)}
-                        disabled={isLoading}
+                        disabled={isLoading || isInputLocked}
                         className={`px-2.5 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1 ${
                           'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
                         } disabled:opacity-50`}
@@ -2382,7 +2421,7 @@ export default function ChatPage() {
                       </button>
                       <button
                         onClick={() => handleSend()}
-                        disabled={isLoading || (!input.trim() && !selectedImage)}
+                        disabled={isLoading || isInputLocked || (!input.trim() && !selectedImage)}
                         className="w-9 h-9 sm:w-10 sm:h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                       >
                         <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2517,10 +2556,14 @@ export default function ChatPage() {
             }
           }
           
-          // 마스킹 해제
+          // 마스킹/잠금 해제
           setMessages(prev => prev.map(msg => 
-            msg.isMasked ? { ...msg, isMasked: false } : msg
+            msg.isMasked
+              ? { ...msg, isMasked: false }
+              : msg
           ))
+          setSessionLockedByMasking(false)
+          setLockReason(null)
         }}
       />
 
@@ -2950,11 +2993,7 @@ export default function ChatPage() {
 
       {/* PRO 업그레이드 팝업 - 웹 + 로그인한 Basic 유저에게만 표시 (PRO 유저는 숨김) */}
       {isProPopupVisible && !isGalaxySession && !isCapacitorApp() && isAuthenticated && user?.id && !user?.is_premium && (
-        <div 
-          className="fixed bottom-4 right-4 z-40 group"
-          onMouseEnter={() => setIsProPopupHovered(true)}
-          onMouseLeave={() => setIsProPopupHovered(false)}
-        >
+        <div className="fixed bottom-4 right-4 z-40 group">
           <div 
             className="relative bg-[#1a1a2e] text-white rounded-2xl p-4 shadow-2xl min-w-[260px] cursor-pointer overflow-hidden border border-gray-700/50"
             onClick={(e) => {
@@ -2972,18 +3011,17 @@ export default function ChatPage() {
               <div className="absolute w-0.5 h-0.5 bg-white/70 rounded-full bottom-10 right-6 animate-pulse" style={{ animationDelay: '0.7s' }}></div>
             </div>
             
-            {/* X 버튼 - 모바일에서는 항상 표시, 데스크톱에서는 hover 시 표시 */}
+            {/* X 버튼 - 항상 크게 표시하고 터치 영역 확대 */}
             <button
               onClick={(e) => {
                 e.stopPropagation()
                 setIsProPopupVisible(false)
               }}
-              className={`absolute top-2 right-2 w-6 h-6 flex items-center justify-center text-gray-400 hover:text-white transition-all rounded-full hover:bg-white/10 ${
-                isProPopupHovered ? 'opacity-100' : 'opacity-0'
-              } max-sm:opacity-100`}
+              aria-label="업그레이드 팝업 닫기"
+              className="absolute top-1.5 right-1.5 z-20 w-10 h-10 flex items-center justify-center text-gray-200 hover:text-white active:text-white transition-colors rounded-full bg-white/5 hover:bg-white/15 active:bg-white/20"
             >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.4} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
             
