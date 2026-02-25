@@ -19,6 +19,8 @@ import PolicyPage from './pages/PolicyPage'
 import SharedChatPage from './pages/SharedChatPage'
 import OAuthCallbackPage from './pages/OAuthCallbackPage'
 import SchoolRecordEvalPage from './pages/SchoolRecordEvalPage'
+import SchoolRecordDeepAnalysisPage from './pages/SchoolRecordDeepAnalysisPage'
+import SchoolGradeInputPage from './pages/SchoolGradeInputPage'
 import { useEffect } from 'react'
 import { initializeTracking, trackPageView } from './utils/tracking'
 
@@ -102,7 +104,7 @@ function App() {
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/oauth-callback" element={<OAuthCallbackPage />} />
             <Route path="/policy" element={<PolicyPage />} />
-            <Route path="/" element={<Navigate to="/chat" replace />} />
+            <Route path="/" element={<LandingPage />} />
             
             {/* 로그인 후 채팅 페이지 */}
             <Route
@@ -135,6 +137,8 @@ function App() {
             
             {/* 생기부 세특 평가 */}
             <Route path="/school-record" element={<SchoolRecordEvalPage />} />
+            <Route path="/school-record-deep" element={<SchoolRecordDeepAnalysisPage />} />
+            <Route path="/school-grade-input" element={<SchoolGradeInputPage />} />
             
             {/* 공유된 채팅 페이지 */}
             <Route path="/s/:shareId" element={<SharedChatPage />} />

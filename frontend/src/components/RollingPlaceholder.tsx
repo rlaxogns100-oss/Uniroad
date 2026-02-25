@@ -87,6 +87,8 @@ const styles = {
 interface RollingPlaceholderProps {
   onQuestionClick?: (question: string) => void
   onCategorySelect?: (category: string | null) => void
+  /** 카드 확장 시 채팅창에 첫 번째 질문을 넣을 때 호출 */
+  onCategoryExpand?: (firstQuestion: string) => void
   selectedCategory?: string | null
   isAuthenticated?: boolean
   hasProfile?: boolean  // 성적 입력 여부
@@ -95,7 +97,7 @@ interface RollingPlaceholderProps {
   onSchoolRecordClick?: () => void
 }
 
-export default function RollingPlaceholder({ onQuestionClick, onCategorySelect, selectedCategory, onSchoolRecordClick }: RollingPlaceholderProps) {
+export default function RollingPlaceholder({ onQuestionClick, onCategorySelect, onCategoryExpand, selectedCategory, onSchoolRecordClick }: RollingPlaceholderProps) {
   const [selectedQuestionIndex, setSelectedQuestionIndex] = useState<number | null>(null)
 
   // 선택된 카테고리에 해당하는 인덱스 찾기
@@ -124,6 +126,10 @@ export default function RollingPlaceholder({ onQuestionClick, onCategorySelect, 
       // 새 카드 선택
       onCategorySelect?.(card.title)
       setSelectedQuestionIndex(null)
+      // 해당 카드의 첫 번째 질문을 채팅창에 넣기
+      if (card.questions.length > 0) {
+        onCategoryExpand?.(card.questions[0])
+      }
     }
   }
 
@@ -136,12 +142,41 @@ export default function RollingPlaceholder({ onQuestionClick, onCategorySelect, 
 
   const selectedCard = actualExpandedIndex !== null ? suggestionList[actualExpandedIndex] : null
 
-  // 카테고리가 선택되면 질문 목록만 표시
+  // 하단 4개 버튼: 둥근 사각, 아이콘 왼쪽 + 텍스트 오른쪽 (이미지 레이아웃)
+  const fourButtons = (
+    <div className="flex flex-wrap justify-center gap-2 sm:gap-3">
+      {suggestionList.map((item, index) => (
+        <button
+          key={index}
+          type="button"
+          onClick={() => handleCardClick(index)}
+          className={`
+            flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 py-1.5 sm:px-3 sm:py-2
+            cursor-pointer transition-all duration-200
+            hover:border-gray-300 hover:bg-gray-50
+            active:scale-[0.98]
+            ${actualExpandedIndex === index ? 'ring-2 ring-blue-300 border-blue-200 bg-blue-50/50' : ''}
+            ${actualExpandedIndex !== null && actualExpandedIndex !== index ? 'opacity-50' : ''}
+            ${item.isPremium ? 'border-emerald-200' : ''}
+          `}
+        >
+          <span className={`w-2.5 h-2.5 sm:w-3 sm:h-3 rounded ${item.iconBgColor} flex items-center justify-center shrink-0 [&>svg]:w-1.5 [&>svg]:h-1.5 sm:[&>svg]:w-2 sm:[&>svg]:h-2`}>
+            {item.icon}
+          </span>
+          <span className="text-xs font-medium text-gray-800 whitespace-nowrap">
+            {item.title}
+          </span>
+        </button>
+      ))}
+    </div>
+  )
+
+  // 카테고리가 선택되면 버튼 + 질문 목록 표시
   if (selectedCategory && selectedCard) {
     return (
-      <div className="w-full max-w-3xl animate-fade-in">
-        {/* 질문 목록 */}
-        <div className="space-y-4">
+      <div className="w-full max-w-xl animate-fade-in">
+        <div className="mb-3">{fourButtons}</div>
+        <div className="space-y-1.5">
           {selectedCard.questions.map((question, qIndex) => (
             <div 
               key={qIndex}
@@ -151,7 +186,7 @@ export default function RollingPlaceholder({ onQuestionClick, onCategorySelect, 
               <span
                 onClick={() => handleQuestionClick(question, qIndex)}
                 className={`
-                  inline-block text-base font-semibold px-4 py-2.5 rounded-full cursor-pointer transition-all duration-200
+                  inline-block text-xs font-semibold px-2.5 py-1.5 rounded-full cursor-pointer transition-all duration-200
                   ${selectedQuestionIndex === qIndex 
                     ? 'bg-gray-200 text-gray-800' 
                     : 'text-gray-700 hover:bg-gray-100'
@@ -167,60 +202,10 @@ export default function RollingPlaceholder({ onQuestionClick, onCategorySelect, 
     )
   }
 
-  // 카테고리 미선택 시 카드 그리드 표시
+  // 카테고리 미선택 시 4개 버튼만 표시 (상위에서 제목·입력 카드와 함께 레이아웃)
   return (
-    <div className="w-full max-w-3xl mx-auto px-4">
-      {/* 2x2 그리드 */}
-      <div className="grid grid-cols-2 gap-4 sm:gap-5">
-        {suggestionList.map((item, index) => {
-          return (
-            <div
-              key={index}
-              onClick={() => handleCardClick(index)}
-              className={`
-                relative
-                bg-white 
-                rounded-3xl 
-                p-5 sm:p-6
-                min-h-[140px] sm:min-h-[160px]
-                flex flex-col
-                cursor-pointer 
-                transition-all 
-                duration-300
-                shadow-[0_2px_12px_rgba(0,0,0,0.06)]
-                hover:shadow-[0_8px_30px_rgba(0,0,0,0.12)]
-                hover:-translate-y-1
-                active:scale-[0.98]
-                ${item.isPremium ? 'ring-2 ring-emerald-200 bg-gradient-to-br from-white to-emerald-50/30' : ''}
-                ${actualExpandedIndex === index ? styles.selected : ''}
-                ${actualExpandedIndex !== null && actualExpandedIndex !== index ? 'opacity-50' : ''}
-              `}
-            >
-              {/* 뱃지 */}
-              {item.badge && (
-                <div className="absolute top-3 right-3 px-2 py-0.5 bg-gradient-to-r from-emerald-500 to-cyan-500 text-white text-[10px] sm:text-xs font-bold rounded-full">
-                  {item.badge}
-                </div>
-              )}
-              
-              {/* 아이콘 - 원형 */}
-              <div className={`w-11 h-11 sm:w-12 sm:h-12 rounded-full ${item.iconBgColor} flex items-center justify-center mb-4 ${item.isPremium ? 'shadow-lg' : ''}`}>
-                {item.icon}
-              </div>
-              
-              {/* 제목 */}
-              <h3 className={`text-base sm:text-lg font-bold mb-1.5 ${item.isPremium ? 'text-emerald-700' : 'text-gray-900'}`}>
-                {item.title}
-              </h3>
-              
-              {/* 설명 */}
-              <p className="text-xs sm:text-sm text-gray-400 leading-relaxed">
-                {item.representative}
-              </p>
-            </div>
-          )
-        })}
-      </div>
+    <div className="w-full max-w-3xl mx-auto">
+      {fourButtons}
     </div>
   )
 }

@@ -30,6 +30,8 @@ app.add_middleware(
         "http://localhost:5175",
         "http://localhost:8147",
         "http://localhost:8148",
+        "http://localhost:8150",
+        "http://localhost:8151",
         "http://localhost:8152",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
@@ -37,6 +39,8 @@ app.add_middleware(
         "http://127.0.0.1:8147",
         "http://127.0.0.1:8148",
         "http://127.0.0.1:8149",
+        "http://127.0.0.1:8150",
+        "http://127.0.0.1:8151",
         "http://127.0.0.1:8152",
         "http://localhost:3000",  # Next.js 호환
         "http://3.107.178.26",  # 프로덕션 서버

@@ -76,6 +76,8 @@ export interface ChatRequest {
   message: string
   session_id?: string
   thinking?: boolean  // Thinking 모드 활성화 여부
+  score_id?: string
+  use_school_record?: boolean  // 생기부 컨텍스트 사용 여부
 }
 
 // 멀티에이전트 응답 타입
@@ -149,6 +151,31 @@ export interface ChatResponse {
   sub_agent_results?: Record<string, SubAgentResult>
   metadata?: Record<string, any>
   require_login?: boolean  // 비로그인 3회째 질문 시 마스킹 필요
+  score_id?: string
+}
+
+export interface StreamChatRequest extends ChatRequest {
+  score_id?: string
+}
+
+export interface ScoreReviewRequiredEvent {
+  pending_id: string
+  title_auto: string
+  scores: Record<string, any>
+  constraints: Record<string, any>
+  actions: string[]
+}
+
+export interface ScoreSetSuggestItem {
+  id: string
+  name: string
+}
+
+export interface ScoreSetItem {
+  id: string
+  name: string
+  scores: Record<string, any>
+  updated_at?: string
 }
 
 export interface UploadResponse {
@@ -192,7 +219,8 @@ const sendMessageNonStream = async (
   onResult: (result: ChatResponse) => void,
   onError?: (error: string) => void,
   abortSignal?: AbortSignal,
-  token?: string
+  token?: string,
+  useSchoolRecord?: boolean
 ): Promise<void> => {
   const apiUrl = getEffectiveApiBaseUrl()
   console.log('[sendMessageNonStream] Starting non-streaming request')
@@ -211,6 +239,7 @@ const sendMessageNonStream = async (
       body: JSON.stringify({
         message,
         session_id: sessionId,
+        use_school_record: useSchoolRecord || false,
       }),
       signal: abortSignal,
     }, apiUrl, token)
@@ -291,7 +320,10 @@ export const sendMessageStream = async (
   abortSignal?: AbortSignal,
   onChunk?: (chunk: string) => void,  // 실시간 텍스트 청크 콜백
   token?: string,  // 인증 토큰
-  thinking?: boolean  // Thinking 모드
+  thinking?: boolean,  // Thinking 모드
+  onScoreReviewRequired?: (payload: ScoreReviewRequiredEvent) => void,
+  scoreId?: string,
+  useSchoolRecord?: boolean
 ): Promise<void> => {
   const IS_CAPACITOR_APP = isCapacitorApp()
   console.log('[sendMessageStream] IS_CAPACITOR_APP:', IS_CAPACITOR_APP)
@@ -299,7 +331,7 @@ export const sendMessageStream = async (
   // iOS WebView에서 SSE ReadableStream이 제대로 동작하지 않아 비스트리밍 API 사용
   if (IS_CAPACITOR_APP) {
     console.log('[sendMessageStream] Using non-streaming API for iOS')
-    return sendMessageNonStream(message, sessionId, onLog, onResult, onError, abortSignal, token)
+    return sendMessageNonStream(message, sessionId, onLog, onResult, onError, abortSignal, token, useSchoolRecord)
   }
   
   console.log('[sendMessageStream] Using streaming API for web')
@@ -320,6 +352,8 @@ export const sendMessageStream = async (
         message,
         session_id: sessionId,
         thinking: thinking || false,
+        score_id: scoreId || null,
+        use_school_record: useSchoolRecord || false,
       }),
       signal: abortSignal,
     }, API_BASE_URL, token)
@@ -406,6 +440,9 @@ export const sendMessageStream = async (
             const chunkText = event.text || ''
             fullResponse += chunkText
             onChunk?.(chunkText)
+          } else if (event.type === 'score_review_required') {
+            onScoreReviewRequired?.(event as ScoreReviewRequiredEvent)
+            return
           } else if (event.type === 'done') {
             // 완료
             finalData = event
@@ -435,7 +472,8 @@ export const sendMessageStream = async (
         timing: finalData?.timing,
         pipeline_time: finalData?.pipeline_time
       },
-      require_login: finalData?.require_login || false  // 비로그인 3회째 질문 시 마스킹
+      require_login: finalData?.require_login || false,  // 비로그인 3회째 질문 시 마스킹
+      score_id: finalData?.score_id
     }
     
     onResult(chatResponse)
@@ -461,7 +499,8 @@ const sendMessageNonStreamWithImage = async (
   onResult: (result: ChatResponse) => void,
   onError?: (error: string) => void,
   abortSignal?: AbortSignal,
-  token?: string
+  token?: string,
+  useSchoolRecord?: boolean
 ): Promise<void> => {
   try {
     onLog('🖼️ 이미지를 분석하는 중...')
@@ -470,6 +509,7 @@ const sendMessageNonStreamWithImage = async (
     formData.append('message', message)
     formData.append('session_id', sessionId)
     formData.append('image', image)
+    formData.append('use_school_record', useSchoolRecord ? 'true' : 'false')
     
     const headers: Record<string, string> = {}
     
@@ -574,13 +614,16 @@ export const sendMessageStreamWithImage = async (
   onError?: (error: string) => void,
   abortSignal?: AbortSignal,
   onChunk?: (chunk: string) => void,
-  token?: string  // 인증 토큰
+  token?: string,  // 인증 토큰
+  onScoreReviewRequired?: (payload: ScoreReviewRequiredEvent) => void,
+  scoreId?: string,
+  useSchoolRecord?: boolean
 ): Promise<void> => {
   const IS_CAPACITOR_APP = isCapacitorApp()
   
   // iOS WebView에서 SSE ReadableStream이 제대로 동작하지 않아 비스트리밍 API 사용
   if (IS_CAPACITOR_APP) {
-    return sendMessageNonStreamWithImage(message, sessionId, image, onLog, onResult, onError, abortSignal, token)
+    return sendMessageNonStreamWithImage(message, sessionId, image, onLog, onResult, onError, abortSignal, token, useSchoolRecord)
   }
   
   try {
@@ -591,6 +634,10 @@ export const sendMessageStreamWithImage = async (
     formData.append('message', message)
     formData.append('session_id', sessionId)
     formData.append('image', image)
+    formData.append('use_school_record', useSchoolRecord ? 'true' : 'false')
+    if (scoreId) {
+      formData.append('score_id', scoreId)
+    }
     
     // 헤더 구성
     const headers: Record<string, string> = {}
@@ -677,6 +724,9 @@ export const sendMessageStreamWithImage = async (
             const chunkText = event.text || ''
             fullResponse += chunkText
             onChunk?.(chunkText)
+          } else if (event.type === 'score_review_required') {
+            onScoreReviewRequired?.(event as ScoreReviewRequiredEvent)
+            return
           } else if (event.type === 'done') {
             finalData = event
             onLog('✨ 이미지 분석 완료!')
@@ -705,7 +755,8 @@ export const sendMessageStreamWithImage = async (
         image_analysis: finalData?.image_analysis,
         pipeline_time: finalData?.pipeline_time
       },
-      require_login: finalData?.require_login || false  // 비로그인 3회째 질문 시 마스킹
+      require_login: finalData?.require_login || false,  // 비로그인 3회째 질문 시 마스킹
+      score_id: finalData?.score_id
     }
     
     onResult(chatResponse)
@@ -890,4 +941,123 @@ export const migrateMessages = async (
     { headers: { Authorization: `Bearer ${token}` } }
   )
   return response.data
+}
+
+// ============================================================
+// Score Review / Score Sets API
+// ============================================================
+
+export const approveScoreReview = async (
+  pendingId: string,
+  sessionId: string,
+  title: string,
+  scores: Record<string, any>,
+  token?: string
+): Promise<{ pending_id: string; score_id: string; score_name: string }> => {
+  const response = await api.post(
+    '/chat/v2/score-review/approve',
+    {
+      pending_id: pendingId,
+      session_id: sessionId,
+      title,
+      scores,
+    },
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    }
+  )
+  return response.data
+}
+
+export const skipScoreReviewSession = async (
+  sessionId: string,
+  pendingId?: string,
+  token?: string
+): Promise<void> => {
+  await api.post(
+    '/chat/v2/score-review/skip-session',
+    {
+      session_id: sessionId,
+      pending_id: pendingId || null,
+    },
+    {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    }
+  )
+}
+
+export const suggestScoreSets = async (
+  query: string,
+  sessionId: string,
+  token?: string
+): Promise<ScoreSetSuggestItem[]> => {
+  const response = await api.get('/chat/v2/score-sets/suggest', {
+    params: { q: query, session_id: sessionId },
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  })
+  return response.data?.items || []
+}
+
+export const getScoreSetByName = async (
+  name: string,
+  sessionId: string,
+  token?: string
+): Promise<{ id: string; name: string; scores: Record<string, any> }> => {
+  const encoded = encodeURIComponent(name.startsWith('@') ? name.slice(1) : name)
+  const response = await api.get(`/chat/v2/score-set/${encoded}`, {
+    params: { session_id: sessionId },
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  })
+  return response.data
+}
+
+export const listScoreSets = async (
+  sessionId: string,
+  token?: string
+): Promise<ScoreSetItem[]> => {
+  const response = await api.get('/chat/v2/score-sets', {
+    params: { session_id: sessionId },
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  })
+  return response.data?.items || []
+}
+
+export const createScoreSet = async (
+  sessionId: string,
+  name: string,
+  scores: Record<string, any>,
+  token?: string
+): Promise<ScoreSetItem> => {
+  const response = await api.post(
+    '/chat/v2/score-sets',
+    { session_id: sessionId, name, scores },
+    { headers: token ? { Authorization: `Bearer ${token}` } : undefined }
+  )
+  return response.data
+}
+
+export const updateScoreSet = async (
+  scoreSetId: string,
+  sessionId: string,
+  name: string,
+  scores: Record<string, any>,
+  token?: string
+): Promise<ScoreSetItem> => {
+  const response = await api.put(
+    `/chat/v2/score-sets/${scoreSetId}`,
+    { session_id: sessionId, name, scores },
+    { headers: token ? { Authorization: `Bearer ${token}` } : undefined }
+  )
+  return response.data
+}
+
+export const deleteScoreSet = async (
+  scoreSetId: string,
+  sessionId: string,
+  token?: string
+): Promise<void> => {
+  await api.delete(`/chat/v2/score-sets/${scoreSetId}`, {
+    params: { session_id: sessionId },
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  })
 }

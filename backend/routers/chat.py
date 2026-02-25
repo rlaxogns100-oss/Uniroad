@@ -2,7 +2,7 @@
 채팅 API 라우터 (멀티에이전트 기반)
 전체 파이프라인: Orchestration Agent → Sub Agents → Final Agent → 최종 답변
 """
-from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Request, Header
+from fastapi import APIRouter, HTTPException, File, UploadFile, Form, Request, Header, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -18,6 +18,17 @@ from services.multi_agent import (
     execute_sub_agents,
     generate_final_answer,
     AVAILABLE_AGENTS
+)
+from services.multi_agent.router_agent import route_query
+from services.score_review import (
+    run_router_and_profile_parallel,
+    resolve_score_id_from_message,
+)
+from utils.school_record_context import build_school_record_context_text
+from school_record_eval.report_context import build_school_record_report_context_text
+from school_record_eval.report_agent import (
+    generate_school_record_report,
+    generate_school_record_report_stream,
 )
 from utils.timing_logger import TimingLogger
 from utils.admin_filter import should_skip_logging
@@ -147,6 +158,8 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = "default"
     thinking: Optional[bool] = False  # Thinking 모드 활성화 여부
+    score_id: Optional[str] = None
+    use_school_record: Optional[bool] = False  # 생기부 컨텍스트 사용 여부
 
 
 class ChatResponse(BaseModel):
@@ -162,6 +175,104 @@ class ChatResponse(BaseModel):
     sub_agent_results: Optional[Dict[str, Any]] = None
     metadata: Optional[Dict[str, Any]] = None
     logs: List[str] = []
+
+
+class ScoreReviewApproveRequest(BaseModel):
+    pending_id: str
+    session_id: str
+    title: str
+    scores: Dict[str, Any]
+
+
+class ScoreReviewSkipSessionRequest(BaseModel):
+    pending_id: Optional[str] = None
+    session_id: str
+
+
+class ScoreSetCreateRequest(BaseModel):
+    name: str
+    scores: Dict[str, Any]
+    session_id: Optional[str] = None
+
+
+class ScoreSetUpdateRequest(BaseModel):
+    name: str
+    scores: Dict[str, Any]
+    session_id: Optional[str] = None
+
+
+def _resolve_score_owner(user_id: Optional[str], session_id: Optional[str]) -> str:
+    if user_id:
+        return user_id
+    if session_id:
+        return f"guest:{session_id}"
+    raise HTTPException(status_code=400, detail="session_id 또는 로그인 정보가 필요합니다.")
+
+
+async def _prepare_score_review_gate(
+    message: str,
+    history: List[Dict[str, Any]],
+    user_id: Optional[str],
+    session_id: str,
+    score_id_override: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Run router/profile in parallel and decide review gate."""
+    if score_id_override:
+        return {"mode": "pass", "score_id": score_id_override}
+
+    score_id_from_token = await resolve_score_id_from_message(user_id, message)
+    if score_id_from_token:
+        return {"mode": "pass", "score_id": score_id_from_token}
+
+    skip_session = await supabase_service.get_session_skip_score_review(session_id, user_id)
+    score_owner = user_id or f"guest:{session_id}"
+    existing = await supabase_service.list_user_score_sets(score_owner, limit=20)
+
+    router_coro = route_query(message, history, user_id=user_id)
+    router_output, candidate = await run_router_and_profile_parallel(
+        router_coro=router_coro,
+        message=message,
+        existing_score_sets=existing,
+    )
+
+    if not candidate.has_candidate:
+        return {"mode": "pass", "score_id": None, "router_output": router_output}
+
+    title_auto = candidate.title_auto
+    title_without_at = title_auto[1:] if title_auto.startswith("@") else title_auto
+
+    if skip_session:
+        saved = await supabase_service.upsert_user_score_set(
+            user_id=score_owner,
+            name=title_without_at,
+            scores=candidate.completed_scores,
+            source_message=message,
+            title_auto_generated=True,
+        )
+        return {
+            "mode": "auto",
+            "score_id": saved.get("id") if saved else None,
+            "score_name": f"@{saved.get('name')}" if saved else title_auto,
+            "router_output": router_output,
+        }
+
+    pending = await supabase_service.create_chat_score_pending(
+        user_id=user_id,
+        session_id=session_id,
+        raw_message=message,
+        router_output=router_output,
+        candidate_scores=candidate.completed_scores,
+        title_auto=title_without_at,
+    )
+    if not pending:
+        return {"mode": "pass", "score_id": None, "router_output": router_output}
+
+    return {
+        "mode": "review",
+        "pending_id": pending.get("id"),
+        "title_auto": title_auto,
+        "scores": candidate.completed_scores,
+    }
 
 
 @router.post("/", response_model=ChatResponse)
@@ -250,6 +361,108 @@ async def chat(
         # user_id는 optional_auth에서 이미 설정됨 (프로필 점수 활용용)
 
         # ========================================
+        # (Optional) 생기부 컨텍스트 로드
+        # ========================================
+        school_record_context = None
+        school_record_report_context = None
+        if request.use_school_record:
+            if not user_id:
+                return ChatResponse(
+                    response="생기부 분석 기능은 로그인 후 사용할 수 있습니다.",
+                    raw_answer="생기부 분석 기능은 로그인 후 사용할 수 있습니다.",
+                    sources=[],
+                    source_urls=[],
+                    used_chunks=[],
+                    metadata={"agent_mode": "school_record_dedicated_agent", "reason": "auth_required"},
+                )
+            try:
+                school_loaded = await supabase_service.get_user_profile_school_record(user_id)
+                school_profile = dict(school_loaded or {})
+                school_record_context = build_school_record_context_text(school_profile)
+                school_record_report_context = build_school_record_report_context_text(school_profile)
+                if school_record_context:
+                    log_and_emit(f"   📎 생기부 컨텍스트 적용: {len(school_record_context)}자")
+                else:
+                    log_and_emit("   ℹ️  생기부 컨텍스트 없음(미연동 또는 빈 데이터)")
+            except Exception as e:
+                log_and_emit(f"⚠️ 생기부 컨텍스트 로드 실패(무시): {e}")
+                school_record_context = None
+                school_record_report_context = None
+
+        # A안: 생기부 모드일 때는 score review를 우회하고 전용 리포트로 진입
+        if request.use_school_record:
+            if not school_record_report_context:
+                return ChatResponse(
+                    response="연동된 생기부 데이터가 없습니다. 먼저 생활기록부를 연동해 주세요.",
+                    raw_answer="연동된 생기부 데이터가 없습니다. 먼저 생활기록부를 연동해 주세요.",
+                    sources=[],
+                    source_urls=[],
+                    used_chunks=[],
+                    metadata={"agent_mode": "school_record_dedicated_agent", "reason": "missing_school_record"},
+                )
+
+            log_and_emit("")
+            log_and_emit("=" * 80)
+            log_and_emit("📘 생기부 전용 에이전트 실행")
+            log_and_emit("=" * 80)
+
+            report_result = await generate_school_record_report(
+                message=message,
+                history=history,
+                school_record_context=school_record_report_context,
+            )
+
+            final_answer = report_result.get("response", "생기부 분석 보고서를 생성하지 못했습니다.")
+            sources = report_result.get("sources", []) or []
+            source_urls = report_result.get("source_urls", []) or []
+            used_chunks = report_result.get("used_chunks", []) or []
+
+            history.append({"role": "user", "content": message})
+            history.append({"role": "assistant", "content": final_answer})
+            conversation_sessions[cache_key] = history[-20:]
+
+            await supabase_service.insert_chat_log(
+                message,
+                final_answer,
+                is_fact_mode=len(sources) > 0
+            )
+
+            try:
+                if not should_skip_logging(user_id=user_id):
+                    _record_question_sent(session_id, user_id)
+                    _save_messages_to_session_chat(
+                        user_session=session_id,
+                        user_id=user_id,
+                        user_content=message,
+                        assistant_content=final_answer,
+                        sources=sources,
+                        source_urls=source_urls,
+                    )
+                    print(f"💾 메시지 저장 완료: {session_id}")
+            except Exception as save_error:
+                print(f"⚠️ 메시지 저장 실패 (계속 진행): {save_error}")
+
+            return ChatResponse(
+                response=final_answer,
+                raw_answer=final_answer,
+                sources=sources,
+                source_urls=source_urls,
+                used_chunks=used_chunks,
+                router_output=report_result.get("router_output"),
+                function_results=report_result.get("function_results"),
+                orchestration_result={
+                    "mode": "school_record_dedicated_agent",
+                    "execution_plan": [],
+                    "answer_structure": [],
+                },
+                sub_agent_results=None,
+                metadata={
+                    "agent_mode": "school_record_dedicated_agent",
+                    "timing": report_result.get("timing", {}),
+                },
+            )
+
+        # ========================================
         # 1단계: Orchestration Agent
         # ========================================
         log_and_emit("")
@@ -266,7 +479,9 @@ async def chat(
         final_agent.set_log_callback(log_and_emit)
         
         orch_start = time.time()
-        orchestration_result = await run_orchestration_agent(message, history, user_id=user_id)
+        orchestration_result = await run_orchestration_agent(
+            message, history, user_id=user_id, school_record_context=school_record_context
+        )
         orch_time = time.time() - orch_start
 
         if "error" in orchestration_result:
@@ -495,8 +710,6 @@ async def chat(
             metadata=final_result.get("metadata", {})
         )
 
-    except HTTPException:
-        raise
     except Exception as e:
         print(f"\n{'='*80}")
         print(f"❌ 채팅 오류: {e}")
@@ -521,6 +734,8 @@ MAX_IMAGE_SIZE_BYTES = MAX_IMAGE_SIZE_MB * 1024 * 1024
 async def chat_stream_v2_with_image(
     message: str = Form(...),
     session_id: str = Form(default="default"),
+    score_id: Optional[str] = Form(default=None),
+    use_school_record: bool = Form(default=False),
     image: UploadFile = File(...),
     http_request: Request = None,
     authorization: Optional[str] = Header(None)
@@ -567,6 +782,20 @@ async def chat_stream_v2_with_image(
             )
     
     print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip}, require_login={require_login})")
+
+    # (Optional) 생기부 컨텍스트 로드 (이미지 분석 전에 1회만)
+    school_record_context = None
+    school_record_report_context = None
+    if use_school_record and user_id:
+        try:
+            school_loaded = await supabase_service.get_user_profile_school_record(user_id)
+            school_profile = dict(school_loaded or {})
+            school_record_context = build_school_record_context_text(school_profile) or None
+            school_record_report_context = build_school_record_report_context_text(school_profile) or None
+        except Exception as e:
+            print(f"⚠️ 생기부 컨텍스트 로드 실패(무시): {e}")
+            school_record_context = None
+            school_record_report_context = None
     
     # ========================================
     # 이미지 검증
@@ -603,8 +832,16 @@ async def chat_stream_v2_with_image(
         sources = []
         source_urls = []
         used_chunks = []
+        active_score_id = score_id
         
         try:
+            if use_school_record and not user_id:
+                yield f"data: {json.dumps({'type': 'error', 'message': '생기부 분석 기능은 로그인 후 사용할 수 있습니다.'}, ensure_ascii=False)}\n\n"
+                return
+            if use_school_record and not school_record_report_context:
+                yield f"data: {json.dumps({'type': 'error', 'message': '연동된 생기부 데이터가 없습니다. 먼저 생활기록부를 연동해 주세요.'}, ensure_ascii=False)}\n\n"
+                return
+
             # 1단계: 이미지 분석 시작 상태 전송
             yield f"data: {json.dumps({'type': 'status', 'step': 'image_analysis', 'message': '이미지를 분석하는 중...'}, ensure_ascii=False)}\n\n"
             
@@ -646,11 +883,61 @@ async def chat_stream_v2_with_image(
 사용자 질문: {message}
 
 위 이미지 분석 결과를 참고하여 사용자의 질문에 답변해주세요."""
-            
+
             yield f"data: {json.dumps({'type': 'status', 'step': 'agent_start', 'message': '답변을 생성하는 중...'}, ensure_ascii=False)}\n\n"
             
-            # 4단계: 기존 멀티에이전트 파이프라인 실행
-            for event in run_orchestration_agent_stream(enhanced_message, history):
+            if not use_school_record:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    gate = loop.run_until_complete(
+                        _prepare_score_review_gate(
+                            message=enhanced_message,
+                            history=history,
+                            user_id=user_id,
+                            session_id=session_id,
+                            score_id_override=active_score_id,
+                        )
+                    )
+                finally:
+                    loop.close()
+
+                gate_mode = gate.get("mode")
+                if gate_mode == "review":
+                    review_event = {
+                        "type": "score_review_required",
+                        "pending_id": gate.get("pending_id"),
+                        "title_auto": gate.get("title_auto"),
+                        "scores": gate.get("scores", {}),
+                        "constraints": {
+                            "title_max_length": 10,
+                            "standard_score": {"min": 0, "max": 200},
+                            "percentile": {"min": 0, "max": 100},
+                            "grade": {"min": 1, "max": 9},
+                        },
+                        "actions": ["edit", "approve", "skip_session"],
+                    }
+                    yield f"data: {json.dumps(review_event, ensure_ascii=False)}\n\n"
+                    return
+                if gate_mode in {"auto", "pass"}:
+                    active_score_id = gate.get("score_id") or active_score_id
+
+            # 4단계: 멀티에이전트 or 생기부 전용 에이전트 실행
+            event_iter = (
+                generate_school_record_report_stream(
+                    message=enhanced_message,
+                    history=history,
+                    school_record_context=school_record_report_context,
+                )
+                if use_school_record
+                else run_orchestration_agent_stream(
+                    enhanced_message,
+                    history,
+                    user_id=user_id,
+                    score_id=active_score_id,
+                )
+            )
+            for event in event_iter:
                 event_type = event.get("type")
                 
                 if event_type == "status":
@@ -709,7 +996,8 @@ async def chat_stream_v2_with_image(
                 "sources": sources,
                 "source_urls": source_urls,
                 "used_chunks": used_chunks,
-                "require_login": require_login  # 비로그인 3회째 질문 시 True
+                "require_login": require_login,  # 비로그인 3회째 질문 시 True
+                "score_id": active_score_id,
             }
             yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
             
@@ -784,6 +1072,21 @@ async def chat_stream_v2(
     
     # Thinking 모드 체크
     thinking_mode = request.thinking
+    use_school_record = request.use_school_record is True
+
+    # (Optional) 생기부 컨텍스트 로드 (스트리밍 시작 전에 1회만)
+    school_record_context = None
+    school_record_report_context = None
+    if use_school_record and user_id:
+        try:
+            school_loaded = await supabase_service.get_user_profile_school_record(user_id)
+            school_profile = dict(school_loaded or {})
+            school_record_context = build_school_record_context_text(school_profile) or None
+            school_record_report_context = build_school_record_report_context_text(school_profile) or None
+        except Exception as e:
+            print(f"⚠️ 생기부 컨텍스트 로드 실패(무시): {e}")
+            school_record_context = None
+            school_record_report_context = None
     
     def generate():
         nonlocal require_login  # 클로저에서 사용
@@ -791,7 +1094,10 @@ async def chat_stream_v2(
         message = request.message
         
         pipeline_start = time.time()
-        mode_label = "THINKING" if thinking_mode else "NORMAL"
+        if use_school_record:
+            mode_label = "SCHOOL_RECORD"
+        else:
+            mode_label = "THINKING" if thinking_mode else "NORMAL"
         print(f"\n🔵 [STREAM_V2_START] [{mode_label}] {session_id}:{message[:30]}")
         
         # 세션별 히스토리 로드 (동기 generator이므로 메모리에서만 확인)
@@ -809,9 +1115,80 @@ async def chat_stream_v2(
         sources = []
         source_urls = []
         used_chunks = []
+        active_score_id = request.score_id
         
         try:
-            if thinking_mode:
+            if use_school_record:
+                if not user_id:
+                    yield f"data: {json.dumps({'type': 'error', 'message': '생기부 분석 기능은 로그인 후 사용할 수 있습니다.'}, ensure_ascii=False)}\n\n"
+                    return
+                if not school_record_report_context:
+                    yield f"data: {json.dumps({'type': 'error', 'message': '연동된 생기부 데이터가 없습니다. 먼저 생활기록부를 연동해 주세요.'}, ensure_ascii=False)}\n\n"
+                    return
+
+                for event in generate_school_record_report_stream(
+                    message=message,
+                    history=history,
+                    school_record_context=school_record_report_context,
+                ):
+                    event_type = event.get("type")
+
+                    if event_type == "status":
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    elif event_type == "chunk":
+                        full_response += event.get("text", "")
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    elif event_type == "done":
+                        timing = event.get("timing", {})
+                        function_results = event.get("function_results", {})
+                        router_output = event.get("router_output", {})
+                        full_response = event.get("response", full_response)
+                        sources = event.get("sources", [])
+                        source_urls = event.get("source_urls", [])
+                        used_chunks = event.get("used_chunks", [])
+                    elif event_type == "error":
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                        return
+
+            else:
+                # 성적 리뷰 게이트 (Router/Profile 동시 실행)
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                try:
+                    gate = loop.run_until_complete(
+                        _prepare_score_review_gate(
+                            message=message,
+                            history=history,
+                            user_id=user_id,
+                            session_id=session_id,
+                            score_id_override=active_score_id,
+                        )
+                    )
+                finally:
+                    loop.close()
+
+                gate_mode = gate.get("mode")
+                if gate_mode == "review":
+                    review_event = {
+                        "type": "score_review_required",
+                        "pending_id": gate.get("pending_id"),
+                        "title_auto": gate.get("title_auto"),
+                        "scores": gate.get("scores", {}),
+                        "constraints": {
+                            "title_max_length": 10,
+                            "standard_score": {"min": 0, "max": 200},
+                            "percentile": {"min": 0, "max": 100},
+                            "grade": {"min": 1, "max": 9},
+                        },
+                        "actions": ["edit", "approve", "skip_session"],
+                    }
+                    yield f"data: {json.dumps(review_event, ensure_ascii=False)}\n\n"
+                    return
+
+                if gate_mode in {"auto", "pass"}:
+                    active_score_id = gate.get("score_id") or active_score_id
+
+            if not use_school_record and thinking_mode:
                 # ========================================
                 # Thinking 모드: MainAgentThinking 사용
                 # main_agent와 동일한 로그 형식 사용
@@ -832,6 +1209,12 @@ async def chat_stream_v2(
                     router_output = router_result
                     
                     function_calls = router_result.get("function_calls", [])
+                    for call in function_calls:
+                        if call.get("function") == "consult_jungsi":
+                            params = call.setdefault("params", {})
+                            params.pop("j_scores", None)
+                            if active_score_id:
+                                params["score_id"] = active_score_id
                     
                     # Router 완료 시 검색 쿼리 상세 정보 포함 (main_agent와 동일)
                     queries_detail = []
@@ -869,7 +1252,9 @@ async def chat_stream_v2(
                                 target_univ = params.get('target_univ', [])
                                 yield f"data: {json.dumps({'type': 'status', 'step': 'search_start', 'message': '📊 성적 분석 중...', 'detail': {'index': idx, 'type': 'consult', 'target_univ': target_univ}}, ensure_ascii=False)}\n\n"
                         
-                        initial_results = loop.run_until_complete(execute_function_calls(function_calls))
+                        initial_results = loop.run_until_complete(
+                            execute_function_calls(function_calls, user_id=user_id)
+                        )
                         function_results = initial_results
                         
                         # 검색 완료 상세 정보 추출 (찾은 문서 목록)
@@ -969,11 +1354,16 @@ async def chat_stream_v2(
                 finally:
                     loop.close()
             
-            else:
+            elif not use_school_record:
                 # ========================================
                 # 기본 모드: 기존 파이프라인 사용
                 # ========================================
-                for event in run_orchestration_agent_stream(message, history, user_id=user_id):
+                for event in run_orchestration_agent_stream(
+                    message,
+                    history,
+                    user_id=user_id,
+                    score_id=active_score_id,
+                ):
                     event_type = event.get("type")
                     
                     if event_type == "status":
@@ -1034,7 +1424,8 @@ async def chat_stream_v2(
                 "source_urls": source_urls,
                 "used_chunks": used_chunks,
                 "thinking_mode": thinking_mode,
-                "require_login": require_login  # 비로그인 3회째 질문 시 True
+                "require_login": require_login,  # 비로그인 3회째 질문 시 True
+                "score_id": active_score_id,
             }
             yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
             
@@ -1531,6 +1922,227 @@ def emit_log(session_id: str, message: str):
             pass
 
 
+@router.post("/v2/score-review/approve")
+async def approve_score_review(
+    request: ScoreReviewApproveRequest,
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    pending = await supabase_service.get_chat_score_pending(
+        request.pending_id, session_id=request.session_id
+    )
+    if not pending:
+        raise HTTPException(status_code=404, detail="pending review를 찾을 수 없습니다.")
+    if pending.get("status") != "review_required":
+        raise HTTPException(status_code=400, detail="이미 처리된 pending review입니다.")
+
+    owner = user_id or f"guest:{request.session_id}"
+    title = (request.title or pending.get("title_auto") or "내성적1").strip()
+    if title.startswith("@"):
+        title = title[1:]
+    if len(title) > 10:
+        raise HTTPException(status_code=400, detail="성적 제목은 최대 10자입니다.")
+
+    saved = await supabase_service.upsert_user_score_set(
+        user_id=owner,
+        name=title,
+        scores=request.scores or {},
+        source_message=pending.get("raw_message") or "",
+        title_auto_generated=False,
+    )
+    if not saved:
+        raise HTTPException(status_code=500, detail="성적 저장에 실패했습니다.")
+
+    await supabase_service.resolve_chat_score_pending(
+        request.pending_id, status="approved", score_set_id=str(saved["id"])
+    )
+    return {
+        "pending_id": request.pending_id,
+        "score_id": saved["id"],
+        "score_name": f"@{saved['name']}",
+    }
+
+
+@router.post("/v2/score-review/skip-session")
+async def skip_score_review_for_session(
+    request: ScoreReviewSkipSessionRequest,
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    await supabase_service.set_session_skip_score_review(
+        session_id=request.session_id,
+        user_id=user_id,
+        skip=True,
+    )
+    if request.pending_id:
+        await supabase_service.resolve_chat_score_pending(request.pending_id, status="skipped")
+    return {"ok": True, "skip_session": True}
+
+
+@router.get("/v2/score-sets/suggest")
+async def suggest_score_sets(
+    q: str = Query(default=""),
+    limit: int = Query(default=8, ge=1, le=20),
+    session_id: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    if user_id:
+        owner = user_id
+    elif session_id:
+        owner = f"guest:{session_id}"
+    else:
+        return {"items": []}
+
+    rows = await supabase_service.list_user_score_sets(owner, keyword=q, limit=limit)
+    items = [{"id": row.get("id"), "name": f"@{row.get('name')}"} for row in rows]
+    return {"items": items}
+
+
+@router.get("/v2/score-set/{name}")
+async def get_score_set(
+    name: str,
+    session_id: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    if user_id:
+        owner = user_id
+    elif session_id:
+        owner = f"guest:{session_id}"
+    else:
+        raise HTTPException(status_code=400, detail="session_id 또는 로그인 정보가 필요합니다.")
+
+    row = await supabase_service.get_user_score_set_by_name(owner, name)
+    if not row:
+        raise HTTPException(status_code=404, detail="성적 세트를 찾을 수 없습니다.")
+    return {"id": row.get("id"), "name": f"@{row.get('name')}", "scores": row.get("scores", {})}
+
+
+@router.get("/v2/score-sets")
+async def list_score_sets(
+    session_id: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    owner = _resolve_score_owner(user_id, session_id)
+    rows = await supabase_service.list_user_score_sets(owner, limit=100, include_scores=True)
+    items = [
+        {
+            "id": row.get("id"),
+            "name": f"@{row.get('name')}",
+            "scores": row.get("scores", {}),
+            "updated_at": row.get("updated_at"),
+        }
+        for row in rows
+    ]
+    return {"items": items}
+
+
+@router.post("/v2/score-sets")
+async def create_score_set(
+    request: ScoreSetCreateRequest,
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    owner = _resolve_score_owner(user_id, request.session_id)
+
+    raw_name = (request.name or "").strip()
+    if not raw_name:
+        raise HTTPException(status_code=400, detail="성적 이름은 필수입니다.")
+    name = raw_name[1:] if raw_name.startswith("@") else raw_name
+    if len(name) > 10:
+        raise HTTPException(status_code=400, detail="성적 제목은 최대 10자입니다.")
+
+    existing = await supabase_service.get_user_score_set_by_name(owner, name)
+    if existing:
+        raise HTTPException(status_code=409, detail="이미 같은 이름의 성적이 있습니다.")
+
+    saved = await supabase_service.upsert_user_score_set(
+        user_id=owner,
+        name=name,
+        scores=request.scores or {},
+        source_message=None,
+        title_auto_generated=False,
+    )
+    if not saved:
+        raise HTTPException(status_code=500, detail="성적 생성에 실패했습니다.")
+    return {
+        "id": saved.get("id"),
+        "name": f"@{saved.get('name')}",
+        "scores": saved.get("scores", {}),
+        "updated_at": saved.get("updated_at"),
+    }
+
+
+@router.put("/v2/score-sets/{score_set_id}")
+async def update_score_set(
+    score_set_id: str,
+    request: ScoreSetUpdateRequest,
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    owner = _resolve_score_owner(user_id, request.session_id)
+
+    target = await supabase_service.get_user_score_set_by_id(score_set_id, user_id=owner)
+    if not target:
+        raise HTTPException(status_code=404, detail="성적 세트를 찾을 수 없습니다.")
+
+    raw_name = (request.name or "").strip()
+    if not raw_name:
+        raise HTTPException(status_code=400, detail="성적 이름은 필수입니다.")
+    name = raw_name[1:] if raw_name.startswith("@") else raw_name
+    if len(name) > 10:
+        raise HTTPException(status_code=400, detail="성적 제목은 최대 10자입니다.")
+
+    same_name = await supabase_service.get_user_score_set_by_name(owner, name)
+    if same_name and str(same_name.get("id")) != str(score_set_id):
+        raise HTTPException(status_code=409, detail="이미 같은 이름의 성적이 있습니다.")
+
+    updated = await supabase_service.update_user_score_set_by_id(
+        user_id=owner,
+        score_set_id=score_set_id,
+        name=name,
+        scores=request.scores or {},
+    )
+    if not updated:
+        raise HTTPException(status_code=500, detail="성적 수정에 실패했습니다.")
+
+    return {
+        "id": updated.get("id"),
+        "name": f"@{updated.get('name')}",
+        "scores": updated.get("scores", {}),
+        "updated_at": updated.get("updated_at"),
+    }
+
+
+@router.delete("/v2/score-sets/{score_set_id}")
+async def delete_score_set(
+    score_set_id: str,
+    session_id: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    owner = _resolve_score_owner(user_id, session_id)
+
+    target = await supabase_service.get_user_score_set_by_id(score_set_id, user_id=owner)
+    if not target:
+        raise HTTPException(status_code=404, detail="성적 세트를 찾을 수 없습니다.")
+
+    ok = await supabase_service.delete_user_score_set_by_id(owner, score_set_id)
+    if not ok:
+        raise HTTPException(status_code=500, detail="성적 삭제에 실패했습니다.")
+    return {"ok": True}
+
+
 @router.post("/reset")
 async def reset_session(
     session_id: str = "default",
@@ -1545,6 +2157,7 @@ async def reset_session(
     cache_key = get_cache_key(user_id, session_id)
     if cache_key in conversation_sessions:
         del conversation_sessions[cache_key]
+    await supabase_service.set_session_skip_score_review(session_id, user_id, False)
     return {"status": "ok", "message": f"세션 {session_id} 초기화 완료"}
 
 

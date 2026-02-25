@@ -107,20 +107,19 @@ function SchoolFolderCard({
         {files.length > 3 && ` 외 ${files.length - 3}개`}
       </div>
       <div className="text-xs text-blue-600 mt-2 pl-2">
-        💡 학교명을 클릭하여 정확한 학교명으로 수정해주세요 (예: 연세대학교)
+        💡 학교명을 클릭하여 입력·수정 (예: 연세대학교). 미지정은 반드시 수정해주세요.
       </div>
     </div>
   )
 }
 
-// 폴더 내 파일 → 학교별 그룹 (파일의 상위 폴더명 = 학교명)
+// 폴더 내 파일 → 학교별 그룹 (파일의 상위 폴더명 = 학교명). 폴더 선택 시에만 사용.
 function groupFilesBySchool(files: File[]): Record<string, File[]> {
   const grouped: Record<string, File[]> = {}
   for (const file of files) {
     const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || ''
     const parts = path.split('/').filter(Boolean)
-    // "고려대/파일.pdf" → 고려대, "Parent/고려대/파일.pdf" → 고려대 (직접 상위 폴더)
-    const school = parts.length > 1 ? parts[parts.length - 2] : '기타'
+    const school = parts.length > 1 ? parts[parts.length - 2] : '미지정'
     if (!grouped[school]) grouped[school] = []
     grouped[school].push(file)
   }
@@ -146,6 +145,10 @@ export default function AdminUploadPage() {
   
   // 탭
   const [activeTab, setActiveTab] = useState<'upload' | 'documents'>('upload')
+
+  // 파일 선택 후 학교명 입력 (단일/다중 파일 업로드용)
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [pendingSchoolName, setPendingSchoolName] = useState('')
 
   // 학교 이름 추출 함수
   const extractSchoolName = (doc: Document): string => {
@@ -240,7 +243,7 @@ export default function AdminUploadPage() {
             const relPath = prefix ? `${prefix}/${entry.name}` : entry.name
             ;(file as File & { webkitRelativePath?: string }).webkitRelativePath = relPath
             const parts = relPath.split('/').filter(Boolean)
-            const school = parts.length > 1 ? parts[parts.length - 2] : prefix || '기타'
+            const school = parts.length > 1 ? parts[parts.length - 2] : '미지정'
             if (!pathToFiles[school]) pathToFiles[school] = []
             pathToFiles[school].push(file)
           }
@@ -255,14 +258,14 @@ export default function AdminUploadPage() {
       } else if (entry?.isFile) {
         const file = items[i].getAsFile()
         if (file?.type === 'application/pdf') {
-          if (!pathToFiles['기타']) pathToFiles['기타'] = []
-          pathToFiles['기타'].push(file)
+          if (!pathToFiles['미지정']) pathToFiles['미지정'] = []
+          pathToFiles['미지정'].push(file)
         }
       }
     }
     const files = Object.values(pathToFiles).flat()
     if (files.length === 0) {
-      alert('PDF 파일이 포함된 폴더를 선택해주세요.')
+      alert('PDF 파일 또는 PDF가 포함된 폴더를 선택해주세요.')
       return
     }
     setSchoolFiles((prev) => {
@@ -285,6 +288,40 @@ export default function AdminUploadPage() {
     const grouped = groupFilesBySchool(files)
     setSchoolFiles((prev) => ({ ...prev, ...grouped }))
     e.target.value = ''
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selected = e.target.files
+    if (!selected || selected.length === 0) return
+    const files = Array.from(selected).filter((f) => f.type === 'application/pdf')
+    if (files.length === 0) {
+      alert('PDF 파일만 선택할 수 있습니다.')
+      e.target.value = ''
+      return
+    }
+    setPendingFiles(files)
+    setPendingSchoolName('')
+    e.target.value = ''
+  }
+
+  const addPendingFilesToSchool = () => {
+    const school = pendingSchoolName.trim()
+    if (!school) {
+      alert('학교명을 입력해주세요.')
+      return
+    }
+    if (pendingFiles.length === 0) return
+    setSchoolFiles((prev) => ({
+      ...prev,
+      [school]: [...(prev[school] || []), ...pendingFiles]
+    }))
+    setPendingFiles([])
+    setPendingSchoolName('')
+  }
+
+  const cancelPendingFiles = () => {
+    setPendingFiles([])
+    setPendingSchoolName('')
   }
 
   const updateSchoolName = (oldName: string, newName: string) => {
@@ -311,7 +348,11 @@ export default function AdminUploadPage() {
 
   const handleUpload = async () => {
     if (totalFiles === 0) {
-      alert('폴더를 선택해주세요.')
+      alert('파일 또는 폴더를 선택해주세요.')
+      return
+    }
+    if (schoolFiles['미지정']?.length) {
+      alert('학교명이 "미지정"인 항목이 있습니다. 카드에서 학교명을 입력·수정한 뒤 업로드해주세요.')
       return
     }
 
@@ -491,8 +532,9 @@ export default function AdminUploadPage() {
             💡 <strong>사용 방법</strong>
           </p>
           <ol className="text-sm text-blue-700 mt-2 space-y-1 list-decimal list-inside">
-            <li>폴더 선택 또는 드래그 (폴더명 = 학교명)</li>
-            <li>하위 폴더 구조: 학교폴더/파일.pdf</li>
+            <li><strong>파일 선택</strong>: PDF 선택 후 학교명 직접 입력</li>
+            <li><strong>폴더 선택</strong>: 학교폴더/파일.pdf (폴더명=학교명)</li>
+            <li>드래그도 가능 (파일 → 미지정, 폴더 → 폴더명=학교명)</li>
             <li>학교명 수정 후 업로드</li>
           </ol>
         </div>
@@ -594,11 +636,41 @@ export default function AdminUploadPage() {
 
         {activeTab === 'upload' ? (
           <div className="space-y-6">
+            {/* 선택한 파일 → 학교명 입력 */}
+            {pendingFiles.length > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-5">
+                <h3 className="text-sm font-semibold text-amber-800 mb-3">📄 선택한 파일에 학교명 입력</h3>
+                <p className="text-xs text-amber-700 mb-3">{pendingFiles.length}개 PDF: {pendingFiles.map(f => f.name).join(', ').slice(0, 60)}{pendingFiles.length > 1 ? '…' : ''}</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    type="text"
+                    value={pendingSchoolName}
+                    onChange={(e) => setPendingSchoolName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addPendingFilesToSchool()}
+                    placeholder="예: 연세대학교, 고려대학교"
+                    className="px-3 py-2 border border-amber-300 rounded-lg text-sm w-56"
+                    autoFocus
+                  />
+                  <button
+                    onClick={addPendingFilesToSchool}
+                    className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700"
+                  >
+                    추가
+                  </button>
+                  <button
+                    onClick={cancelPendingFiles}
+                    className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm hover:bg-gray-300"
+                  >
+                    취소
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* 업로드 영역 */}
             <div className="bg-white rounded-2xl shadow-xl p-8 border border-gray-100">
-              <h2 className="text-xl font-bold text-gray-900 mb-6">📁 폴더 선택 (폴더명 = 학교명)</h2>
+              <h2 className="text-xl font-bold text-gray-900 mb-6">📤 파일 또는 폴더 업로드 (학교명 직접 입력 가능)</h2>
 
-              {/* 폴더 드래그 앤 드롭 */}
               <div
                 onDragOver={handleDragOver}
                 onDragLeave={handleDragLeave}
@@ -617,36 +689,60 @@ export default function AdminUploadPage() {
                     <p className="text-lg font-semibold text-green-700 mb-3">
                       {Object.keys(schoolFiles).length}개 학교, {totalFiles}개 파일
                     </p>
-                    <label className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition-colors mr-2">
-                      + 폴더 추가
-                      <input
-                        type="file"
-                        {...({ webkitdirectory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
-                        multiple
-                        onChange={handleFolderChange}
-                        className="hidden"
-                      />
-                    </label>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      <label className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition-colors">
+                        + 파일 추가
+                        <input
+                          type="file"
+                          accept=".pdf,application/pdf"
+                          multiple
+                          onChange={handleFileChange}
+                          className="hidden"
+                        />
+                      </label>
+                      <label className="inline-block px-4 py-2 bg-indigo-600 text-white rounded-lg cursor-pointer hover:bg-indigo-700 transition-colors">
+                        + 폴더 추가
+                        <input
+                          type="file"
+                          {...({ webkitdirectory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
+                          multiple
+                          onChange={handleFolderChange}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
                   </div>
                 ) : (
                   <div>
-                    <div className="text-6xl mb-2">📁</div>
+                    <div className="text-6xl mb-2">📤</div>
                     <p className="text-lg font-semibold text-gray-700 mb-2">
-                      폴더를 드래그하거나 클릭하여 선택
+                      파일 또는 폴더를 드래그하거나 아래에서 선택
                     </p>
                     <p className="text-sm text-gray-500 mb-4">
-                      하위 구조: 학교폴더/파일.pdf (폴더명이 학교명으로 사용됨)
+                      파일 선택 시 학교명을 직접 입력하고, 폴더 선택 시 폴더명이 학교명으로 사용됩니다.
                     </p>
-                    <label className="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition-colors">
-                      폴더 선택
-                      <input
-                        type="file"
-                        {...({ webkitdirectory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
-                        multiple
-                        onChange={handleFolderChange}
-                        className="hidden"
-                      />
-                    </label>
+                    <div className="flex flex-wrap justify-center gap-3">
+                      <label className="inline-block px-5 py-2.5 bg-blue-600 text-white rounded-lg cursor-pointer hover:bg-blue-700 transition-colors font-medium">
+                        📄 파일 선택
+                        <input
+                          type="file"
+                          accept=".pdf,application/pdf"
+                          multiple
+                          onChange={handleFileChange}
+                          className="hidden"
+                        />
+                      </label>
+                      <label className="inline-block px-5 py-2.5 bg-indigo-600 text-white rounded-lg cursor-pointer hover:bg-indigo-700 transition-colors font-medium">
+                        📁 폴더 선택
+                        <input
+                          type="file"
+                          {...({ webkitdirectory: '' } as React.InputHTMLAttributes<HTMLInputElement>)}
+                          multiple
+                          onChange={handleFolderChange}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
                   </div>
                 )}
               </div>

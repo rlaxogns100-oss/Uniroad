@@ -259,6 +259,19 @@ class MainAgent:
                         })
         
         return citations
+
+    def _extract_loaded_score_names(self, function_results: Dict[str, Any]) -> List[str]:
+        """functions 결과에서 실제 로드된 성적 세트명(@이름) 추출"""
+        names: List[str] = []
+        for _, result in (function_results or {}).items():
+            if not isinstance(result, dict):
+                continue
+            loaded_name = (result.get("loaded_score_name") or "").strip()
+            if loaded_name:
+                names.append(loaded_name if loaded_name.startswith("@") else f"@{loaded_name}")
+        # 순서 보존 중복 제거
+        unique_names = list(dict.fromkeys(names))
+        return unique_names
     
     def _format_document_summaries(self, function_results: Dict[str, Any]) -> str:
         """
@@ -366,6 +379,16 @@ class MainAgent:
         results_text = self._format_function_results(function_results or {})
         citations = self._extract_citations(function_results or {})
         document_summary = self._format_document_summaries(function_results or {})
+        loaded_score_names = self._extract_loaded_score_names(function_results or {})
+        loaded_score_hint = ", ".join(loaded_score_names) if loaded_score_names else "없음"
+        score_name_rule = ""
+        if loaded_score_names:
+            score_name_rule = (
+                "\n[성적 세트명 사용 규칙]\n"
+                f"- 아래 [로드된 성적 데이터명]은 백엔드에서 실제로 로드된 값입니다: {loaded_score_hint}\n"
+                f"- empathy 섹션 첫 문장을 반드시 \"{loaded_score_names[0]} 를 기반으로 분석해 드릴게요.\"로 시작하세요.\n"
+                "- 위 문구의 성적명은 임의 생성/변형하지 말고 전달된 값을 그대로 사용하세요.\n"
+            )
         
         # 최종 프롬프트 구성
         final_prompt = f"""
@@ -380,6 +403,10 @@ class MainAgent:
 
 [참고 문헌 목록]
 {json.dumps(citations, ensure_ascii=False, indent=2)[:2000]}
+
+[로드된 성적 데이터명]
+{loaded_score_hint}
+{score_name_rule}
 
 위 자료를 바탕으로 사용자에게 최적의 답변을 생성해주세요.
 """
@@ -458,6 +485,16 @@ class MainAgent:
         results_text = self._format_function_results(function_results or {})
         document_summary = self._format_document_summaries(function_results or {})
         citations = self._extract_citations(function_results or {})
+        loaded_score_names = self._extract_loaded_score_names(function_results or {})
+        loaded_score_hint = ", ".join(loaded_score_names) if loaded_score_names else "없음"
+        score_name_rule = ""
+        if loaded_score_names:
+            score_name_rule = (
+                "\n[성적 세트명 사용 규칙]\n"
+                f"- 아래 [로드된 성적 데이터명]은 백엔드에서 실제로 로드된 값입니다: {loaded_score_hint}\n"
+                f"- empathy 섹션 첫 문장을 반드시 \"{loaded_score_names[0]} 를 기반으로 분석해 드릴게요.\"로 시작하세요.\n"
+                "- 위 문구의 성적명은 임의 생성/변형하지 말고 전달된 값을 그대로 사용하세요.\n"
+            )
         
         # 최종 프롬프트 구성
         final_prompt = f"""
@@ -472,6 +509,10 @@ class MainAgent:
 
 [참고 문헌 목록]
 {json.dumps(citations, ensure_ascii=False, indent=2)[:2000]}
+
+[로드된 성적 데이터명]
+{loaded_score_hint}
+{score_name_rule}
 
 위 자료를 바탕으로 사용자에게 최적의 답변을 생성해주세요.
 """

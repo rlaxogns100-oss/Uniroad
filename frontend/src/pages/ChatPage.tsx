@@ -1,6 +1,19 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { sendMessageStream, sendMessageStreamWithImage, ChatResponse, resetSession, migrateMessages } from '../api/client'
+import {
+  sendMessageStream,
+  sendMessageStreamWithImage,
+  ChatResponse,
+  ScoreReviewRequiredEvent,
+  ScoreSetSuggestItem,
+  approveScoreReview,
+  suggestScoreSets,
+  getScoreSetByName,
+  skipScoreReviewSession,
+  resetSession,
+  migrateMessages,
+  listScoreSets,
+} from '../api/client'
 import ChatMessage from '../components/ChatMessage'
 import ThinkingProcess from '../components/ThinkingProcess'
 import AgentPanel from '../components/AgentPanel'
@@ -8,6 +21,11 @@ import AuthModal from '../components/AuthModal'
 import PreregisterModal from '../components/PreregisterModal'
 import RollingPlaceholder from '../components/RollingPlaceholder'
 import ProfileForm from '../components/ProfileForm'
+import ScoreSetManagerModal from '../components/ScoreSetManagerModal'
+import SchoolRecordToolStartModal from '../components/SchoolRecordToolStartModal'
+import SchoolGradeInputModal from '../components/SchoolGradeInputModal'
+import SchoolRecordResearchProgress from '../components/SchoolRecordResearchProgress'
+import SchoolRecordDeepAnalysisPage from './SchoolRecordDeepAnalysisPage'
 import { redirectToGumroadCheckout } from '../utils/gumroad'
 import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
@@ -30,6 +48,12 @@ interface Message {
   id: string
   text: string
   isUser: boolean
+  scoreMentions?: string[]
+  scoreReview?: {
+    pendingId: string
+    titleAuto: string
+    scores: Record<string, any>
+  }
   sources?: string[]
   source_urls?: string[]
   used_chunks?: UsedChunk[]
@@ -52,6 +76,16 @@ interface AgentData {
   mainAgentOutput: string | null  // Main Agent 최종 답변
   rawAnswer?: string | null   // 원본 답변 (섹션 마커 포함)
   logs: string[]
+}
+
+interface SavedSchoolRecordReport {
+  id: string
+  sessionId: string
+  messageId: string
+  title: string
+  description: string
+  question: string
+  createdAt: string
 }
 
 // 로그 메시지를 사용자 친화적으로 변환
@@ -102,6 +136,23 @@ const formatLogMessage = (log: string): string => {
   return log
 }
 
+const extractScoreMentions = (text: string): string[] => {
+  const mentions = text.match(/@[가-힣a-zA-Z0-9_]{1,10}/g) || []
+  return Array.from(new Set(mentions))
+}
+
+const getMentionContext = (
+  value: string,
+  caretPos: number
+): { start: number; end: number; query: string } | null => {
+  const left = value.slice(0, caretPos)
+  const match = left.match(/(^|\s)@([가-힣a-zA-Z0-9_]*)$/)
+  if (!match) return null
+  const atIndex = left.lastIndexOf('@')
+  if (atIndex < 0) return null
+  return { start: atIndex, end: caretPos, query: match[2] || '' }
+}
+
 const getQuickExampleResponse = (question: string): string | undefined => {
   return QUICK_EXAMPLE_RESPONSES[question.trim()]
 }
@@ -141,8 +192,6 @@ export default function ChatPage() {
     // 데스크톱에서는 기본적으로 열림, 모바일에서는 닫힘
     return window.innerWidth >= 640
   })
-  const [isRecordDropdownOpen, setIsRecordDropdownOpen] = useState(false)
-  const [isAnnouncementDropdownOpen, setIsAnnouncementDropdownOpen] = useState(false)
   const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false)
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
   const [isPreregisterModalOpen, setIsPreregisterModalOpen] = useState(false)
@@ -172,6 +221,13 @@ export default function ChatPage() {
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false)
   const [isProfileFormOpen, setIsProfileFormOpen] = useState(false)
   const [showProfileGuide, setShowProfileGuide] = useState(false)
+  const [isScoreSetManagerOpen, setIsScoreSetManagerOpen] = useState(false)
+  const [activeScoreId, setActiveScoreId] = useState<string | undefined>(undefined)
+  const [scoreSuggestItems, setScoreSuggestItems] = useState<ScoreSetSuggestItem[]>([])
+  const [scoreSuggestIndex, setScoreSuggestIndex] = useState(0)
+  const [isScoreSuggestOpen, setIsScoreSuggestOpen] = useState(false)
+  const [inputCaretPos, setInputCaretPos] = useState(0)
+  const [scorePreview, setScorePreview] = useState<{ name: string; scores: Record<string, any> } | null>(null)
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -199,6 +255,37 @@ export default function ChatPage() {
   const [thinkingModeModalAnchor, setThinkingModeModalAnchor] = useState<{ top: number; left: number; width: number } | null>(null) // 모달이 뜰 기준 위치 (Auto 버튼)
   const [sessionLockedByMasking, setSessionLockedByMasking] = useState(false)
   const [lockReason, setLockReason] = useState<'guest_masked' | 'auth_expired' | null>(null)
+  const SCHOOL_RECORD_TOOL_SKIP_KEY = 'uniroad_skip_school_record_tool_confirm'
+  const [schoolRecordToolEnabled, setSchoolRecordToolEnabled] = useState(false)
+  const [isSchoolRecordToolModalOpen, setIsSchoolRecordToolModalOpen] = useState(false)
+  const [isSchoolGradeInputModalOpen, setIsSchoolGradeInputModalOpen] = useState(false)
+  /** 오른쪽 패널 전환: 채팅 | 성적입력 | 입시기록 메뉴 | 생기부 연동 (사이드 네비 유지) */
+  const [rightPanelView, setRightPanelView] = useState<'chat' | 'grade_input' | 'school_record_menu' | 'school_record_link' | 'mock_exam_input'>('chat')
+  const [schoolRecordLinked, setSchoolRecordLinked] = useState<boolean | null>(null)
+  const [schoolRecordStatusLoading, setSchoolRecordStatusLoading] = useState(false)
+  const [savedSchoolRecordReports, setSavedSchoolRecordReports] = useState<SavedSchoolRecordReport[]>([])
+  const [savedSchoolRecordReportsLoading, setSavedSchoolRecordReportsLoading] = useState(false)
+  const [showAllReports, setShowAllReports] = useState(false)
+  const [pendingReportMessageId, setPendingReportMessageId] = useState<string | null>(null)
+  const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null)
+  const [skipSchoolRecordToolConfirm, setSkipSchoolRecordToolConfirm] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(SCHOOL_RECORD_TOOL_SKIP_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
+  const SCORE_PREDICTION_SKIP_KEY = 'uniroad_skip_score_prediction_confirm'
+  const [skipScorePredictionConfirm, setSkipScorePredictionConfirmState] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(SCORE_PREDICTION_SKIP_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
+  const [isScorePredictionStartModalOpen, setIsScorePredictionStartModalOpen] = useState(false)
+  const [scorePredictionScoreSets, setScorePredictionScoreSets] = useState<Array<{ id: string; name: string }>>([])
+  const [scorePredictionScoreSetsLoading, setScorePredictionScoreSetsLoading] = useState(false)
   const isGalaxySession = isGalaxyAppSession()
   const hasProAccess = !!user?.is_premium || isGalaxySession
   const isInputLocked = sessionLockedByMasking && !isAuthenticated
@@ -220,12 +307,106 @@ export default function ChatPage() {
     if (isGalaxySession) return
     setIsProModalOpen(true)
   }
-  const handleSchoolRecordShortcut = () => {
-    if (hasProAccess) {
-      window.location.href = '/school-record'
-    } else {
-      openProModal()
+  const fetchSchoolRecordLinkedStatus = async (): Promise<boolean> => {
+    if (!isAuthenticated) return false
+    const token = getRequestToken()
+    if (!token) return false
+    const baseUrl = API_BASE || import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    try {
+      const res = await fetch(`${baseUrl}/api/school-record/status`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) return false
+      const data = await res.json()
+      return data?.linked === true
+    } catch {
+      return false
     }
+  }
+
+  const setSkipSchoolRecordConfirm = (value: boolean) => {
+    setSkipSchoolRecordToolConfirm(value)
+    try {
+      localStorage.setItem(SCHOOL_RECORD_TOOL_SKIP_KEY, value ? 'true' : 'false')
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  const setSkipScorePredictionConfirm = (value: boolean) => {
+    setSkipScorePredictionConfirmState(value)
+    try {
+      localStorage.setItem(SCORE_PREDICTION_SKIP_KEY, value ? 'true' : 'false')
+    } catch {
+      // ignore
+    }
+  }
+
+  const handleConfirmScorePredictionStart = async () => {
+    setIsScorePredictionStartModalOpen(false)
+    await startNewChat()
+  }
+
+  useEffect(() => {
+    if (!isScorePredictionStartModalOpen || !sessionId) return
+    setScorePredictionScoreSetsLoading(true)
+    listScoreSets(sessionId, getRequestToken())
+      .then((items) => setScorePredictionScoreSets(items.map((i) => ({ id: i.id, name: i.name }))))
+      .catch(() => setScorePredictionScoreSets([]))
+      .finally(() => setScorePredictionScoreSetsLoading(false))
+  }, [isScorePredictionStartModalOpen, sessionId])
+
+  const handleSelectScoreSetForPrediction = (item: { id: string; name: string }) => {
+    setIsScorePredictionStartModalOpen(false)
+    const nameForQuery = item.name.startsWith('@') ? item.name : `@${item.name}`
+    startNewChat()
+    setInput(`${nameForQuery}으로 갈 수 있는 대학 알려줘`)
+  }
+
+  const activateSchoolRecordTool = async () => {
+    setSchoolRecordStatusLoading(true)
+    const linked = await fetchSchoolRecordLinkedStatus()
+    setSchoolRecordLinked(linked)
+    setSchoolRecordStatusLoading(false)
+
+    if (!linked) {
+      navigate('/school-record-deep?tab=link')
+      return
+    }
+
+    await startNewChat()
+    setSchoolRecordToolEnabled(true)
+  }
+
+  const handleConfirmSchoolRecordToolStart = async () => {
+    setIsSchoolRecordToolModalOpen(false)
+    await activateSchoolRecordTool()
+  }
+
+  const handleSchoolRecordShortcut = () => {
+    if (!hasProAccess) {
+      openProModal()
+      if (window.innerWidth < 640) setIsSideNavOpen(false)
+      return
+    }
+
+    if (!isAuthenticated) {
+      setIsAuthModalOpen(true)
+      if (window.innerWidth < 640) setIsSideNavOpen(false)
+      return
+    }
+
+    if (skipSchoolRecordToolConfirm) {
+      void activateSchoolRecordTool()
+    } else {
+      setSchoolRecordLinked(null)
+      setIsSchoolRecordToolModalOpen(true)
+      setSchoolRecordStatusLoading(true)
+      void fetchSchoolRecordLinkedStatus()
+        .then((linked) => setSchoolRecordLinked(linked))
+        .finally(() => setSchoolRecordStatusLoading(false))
+    }
+
     if (window.innerWidth < 640) setIsSideNavOpen(false)
   }
   const goToGumroadCheckout = () => {
@@ -307,14 +488,13 @@ export default function ChatPage() {
   // 이미지 업로드 관련
   const [selectedImage, setSelectedImage] = useState<File | null>(null)
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null)
-  const [isUploadMenuOpen, setIsUploadMenuOpen] = useState(false) // 업로드 메뉴 열림 상태
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const sendingRef = useRef(false) // 중복 전송 방지
   const abortControllerRef = useRef<AbortController | null>(null) // 스트리밍 취소용
   const searchContainerRef = useRef<HTMLDivElement>(null) // 검색창 외부 클릭 감지용
   const imageInputRef = useRef<HTMLInputElement>(null) // 이미지 파일 input ref
-  const uploadMenuRef = useRef<HTMLDivElement>(null) // 업로드 메뉴 ref
+  const inputTextareaRef = useRef<HTMLTextAreaElement>(null)
 
   // 모바일 뒤로가기 버튼 처리
   useEffect(() => {
@@ -565,22 +745,6 @@ export default function ChatPage() {
     }
   }, [isSearchOpen])
 
-  // 업로드 메뉴 외부 클릭 감지
-  useEffect(() => {
-    if (!isUploadMenuOpen) return
-
-    const handleClickOutside = (event: MouseEvent) => {
-      if (uploadMenuRef.current && !uploadMenuRef.current.contains(event.target as Node)) {
-        setIsUploadMenuOpen(false)
-      }
-    }
-
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside)
-    }
-  }, [isUploadMenuOpen])
-
   // 새 채팅 시작 핸들러
   const handleNewChat = async () => {
     // 진행 중인 요청 취소
@@ -661,12 +825,142 @@ export default function ChatPage() {
   // 세션 선택 시 메시지 불러오기
   const prevSessionIdRef = useRef<string | null>(null)
   const isStreamingRef = useRef(false) // 스트리밍 중인지 추적
-  
+
+  useEffect(() => {
+    const mentionCtx = getMentionContext(input, inputCaretPos)
+    if (!mentionCtx) {
+      setIsScoreSuggestOpen(false)
+      setScoreSuggestItems([])
+      return
+    }
+
+    const debounce = setTimeout(async () => {
+      try {
+        const token = getRequestToken()
+        const items = await suggestScoreSets(mentionCtx.query, sessionId, token || undefined)
+        setScoreSuggestItems(items || [])
+        setScoreSuggestIndex(0)
+        setIsScoreSuggestOpen((items || []).length > 0)
+      } catch {
+        setIsScoreSuggestOpen(false)
+        setScoreSuggestItems([])
+      }
+    }, 120)
+
+    return () => clearTimeout(debounce)
+  }, [input, inputCaretPos, sessionId])
+
+  const applyScoreSuggestion = (item: ScoreSetSuggestItem) => {
+    const textarea = inputTextareaRef.current
+    const caretPos = textarea?.selectionStart ?? inputCaretPos
+    const mentionCtx = getMentionContext(input, caretPos)
+    if (!mentionCtx) return
+
+    const safeName = item.name.startsWith('@') ? item.name.slice(1) : item.name
+    const replacement = `@${safeName} `
+    const nextInput = `${input.slice(0, mentionCtx.start)}${replacement}${input.slice(mentionCtx.end)}`
+    const nextCaret = mentionCtx.start + replacement.length
+
+    setInput(nextInput)
+    setInputCaretPos(nextCaret)
+    setIsScoreSuggestOpen(false)
+    setScoreSuggestItems([])
+    setActiveScoreId(item.id)
+
+    requestAnimationFrame(() => {
+      if (!textarea) return
+      textarea.focus()
+      textarea.setSelectionRange(nextCaret, nextCaret)
+    })
+  }
+
+  const handleInputChange = (value: string, caretPos: number) => {
+    setInput(value)
+    setInputCaretPos(caretPos)
+  }
+
+  const renderInputOverlay = (text: string) => {
+    if (!text) return <>{'\u00A0'}</>
+    const mentionRegex = /(@[가-힣a-zA-Z0-9_]{1,10})/g
+    const parts = text.split(mentionRegex)
+    if (parts.length <= 1) return <>{text}</>
+    return (
+      <>
+        {parts.map((part, idx) => {
+          if (mentionRegex.test(part)) {
+            mentionRegex.lastIndex = 0
+            return (
+              <span key={idx} style={{ backgroundColor: '#eef2ff', color: '#4338ca', borderRadius: '9999px', boxShadow: '-4px 0 0 #eef2ff, 4px 0 0 #eef2ff, 0 0 0 1px #e0e7ff' }}>{part}</span>
+            )
+          }
+          return <span key={idx}>{part}</span>
+        })}
+      </>
+    )
+  }
+
+  const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isScoreSuggestOpen && scoreSuggestItems.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setScoreSuggestIndex((prev) => (prev + 1) % scoreSuggestItems.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setScoreSuggestIndex((prev) => (prev - 1 + scoreSuggestItems.length) % scoreSuggestItems.length)
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        applyScoreSuggestion(scoreSuggestItems[scoreSuggestIndex])
+        return
+      }
+      if (e.key === 'Escape') {
+        setIsScoreSuggestOpen(false)
+        return
+      }
+    }
+
+    if (e.key === 'Backspace') {
+      const ta = e.currentTarget
+      const pos = ta.selectionStart
+      const selEnd = ta.selectionEnd
+      if (pos === selEnd && pos > 0) {
+        const mentionRegex = /@[가-힣a-zA-Z0-9_]{1,10}/g
+        let match: RegExpExecArray | null
+        while ((match = mentionRegex.exec(input)) !== null) {
+          const start = match.index
+          const end = start + match[0].length
+          if (pos > start && pos <= end) {
+            e.preventDefault()
+            const newVal = input.slice(0, start) + input.slice(end)
+            setInput(newVal)
+            setInputCaretPos(start)
+            requestAnimationFrame(() => {
+              if (inputTextareaRef.current) {
+                inputTextareaRef.current.selectionStart = start
+                inputTextareaRef.current.selectionEnd = start
+              }
+            })
+            return
+          }
+        }
+      }
+    }
+
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
   useEffect(() => {
     // 세션이 변경되었을 때
     if (currentSessionId !== prevSessionIdRef.current) {
       prevSessionIdRef.current = currentSessionId
-      
+      setActiveScoreId(undefined)
+
       if (currentSessionId && isAuthenticated) {
         // API 호출용 sessionId 업데이트
         setSessionId(currentSessionId)
@@ -766,7 +1060,7 @@ export default function ChatPage() {
 
       setMessages((prev) => [
         ...prev,
-        { id: userMessageId, text: userInput, isUser: true },
+        { id: userMessageId, text: userInput, isUser: true, scoreMentions: extractScoreMentions(userInput) },
         { id: botMessageId, text: '', isUser: false, isStreaming: true },
       ])
 
@@ -834,6 +1128,7 @@ export default function ChatPage() {
       id: Date.now().toString(),
       text: currentImage ? `[이미지 첨부] ${userInput}` : userInput,
       isUser: true,
+      scoreMentions: extractScoreMentions(userInput),
       imageUrl: currentImagePreviewUrl || undefined,
     }
 
@@ -1071,6 +1366,33 @@ export default function ChatPage() {
           scrollToBottom()
         }
       
+      const onScoreReviewRequiredCallback = (payload: ScoreReviewRequiredEvent) => {
+          if (abortController.signal.aborted) return
+
+          console.log('🟢 score_review_required 수신:', payload)
+
+          setMessages((prev) => prev.map(msg =>
+            msg.id === streamingBotMessageId
+              ? {
+                  ...msg,
+                  text: '',
+                  isStreaming: false,
+                  scoreReview: {
+                    pendingId: payload.pending_id,
+                    titleAuto: payload.title_auto,
+                    scores: payload.scores || {},
+                  },
+                }
+              : msg
+          ))
+
+          setCurrentLog('')
+          setIsLoading(false)
+        }
+
+      const hasScoreMention = /@[가-힣a-zA-Z0-9_]{1,10}/.test(userInput)
+      const scoreIdForRequest = hasScoreMention ? activeScoreId : undefined
+
       // 이미지가 있으면 이미지와 함께 전송, 없으면 일반 전송
       const requestToken = getRequestToken()
       if (currentImage) {
@@ -1083,7 +1405,10 @@ export default function ChatPage() {
           onErrorCallback,
           abortController.signal,
           onChunkCallback,
-          requestToken  // 인증 토큰 전달
+          requestToken,  // 인증 토큰 전달
+          onScoreReviewRequiredCallback,
+          scoreIdForRequest,
+          schoolRecordToolEnabled
         )
       } else {
         await sendMessageStream(
@@ -1095,7 +1420,10 @@ export default function ChatPage() {
           abortController.signal,
           onChunkCallback,
           requestToken,  // 인증 토큰 전달
-          thinkingMode  // Thinking 모드 전달
+          thinkingMode,  // Thinking 모드 전달
+          onScoreReviewRequiredCallback,
+          scoreIdForRequest,
+          schoolRecordToolEnabled
         )
       }
     } catch (error: any) {
@@ -1193,6 +1521,179 @@ export default function ChatPage() {
     console.log('🔬 추가 테스트 모두 완료')
   }
 
+  const isSchoolRecordReportMessage = (content: string): boolean => {
+    const text = String(content || '')
+    return (
+      text.includes('# 0. 평가기준 설명') ||
+      text.includes('# 0. 학교별 평가기준 설명') ||
+      text.includes('# 1. 기준별 적용 평가') ||
+      text.includes('# 1. 대학별 기준 적용 평가') ||
+      text.includes('부록 A. 학년별 과목 세특 확장 평가') ||
+      text.includes('## 답변 후 꼬리 질문')
+    )
+  }
+
+  const cleanReportText = (content: string): string => {
+    return String(content || '')
+      .replace(/<cite[^>]*>([\s\S]*?)<\/cite>/g, '$1')
+      .replace(/[#*`>|[\]]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  const buildSavedReportTitle = (question: string, reportContent: string): string => {
+    const q = String(question || '').trim()
+    if (q) return q.length > 36 ? `${q.slice(0, 36)}...` : q
+    const cleaned = cleanReportText(reportContent)
+    if (!cleaned) return '생활기록부 심층 분석 리포트'
+    return cleaned.length > 36 ? `${cleaned.slice(0, 36)}...` : cleaned
+  }
+
+  const buildSavedReportDescription = (reportContent: string): string => {
+    const cleaned = cleanReportText(reportContent)
+    if (!cleaned) return '생기부 기반 분석 리포트입니다.'
+    return cleaned.length > 120 ? `${cleaned.slice(0, 120)}...` : cleaned
+  }
+
+  const openSavedSchoolRecordReport = async (report: SavedSchoolRecordReport) => {
+    setSelectedCategory(null)
+    setPendingReportMessageId(String(report.messageId || ''))
+    await selectSession(report.sessionId)
+  }
+
+  useEffect(() => {
+    if (!pendingReportMessageId || messages.length === 0) return
+    const target = document.getElementById(`chat-message-${pendingReportMessageId}`)
+    if (!target) return
+
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setHighlightedMessageId(pendingReportMessageId)
+    setPendingReportMessageId(null)
+
+    const timer = window.setTimeout(() => {
+      setHighlightedMessageId((prev) => (prev === pendingReportMessageId ? null : prev))
+    }, 1800)
+    return () => window.clearTimeout(timer)
+  }, [pendingReportMessageId, messages])
+
+  useEffect(() => {
+    if (!isAuthenticated || !schoolRecordToolEnabled) {
+      setSavedSchoolRecordReports([])
+      setSavedSchoolRecordReportsLoading(false)
+      return
+    }
+    if (messages.length > 0) {
+      setSavedSchoolRecordReportsLoading(false)
+      return
+    }
+
+    let cancelled = false
+    const baseUrl = API_BASE || import.meta.env.VITE_API_URL || 'http://localhost:8000'
+    const token = getRequestToken()
+
+    const loadSavedReports = async () => {
+      try {
+        setSavedSchoolRecordReportsLoading(true)
+        if (!token) {
+          if (!cancelled) setSavedSchoolRecordReports([])
+          return
+        }
+
+        const targetSessions = (sessions || []).slice(0, 12)
+        if (targetSessions.length === 0) {
+          if (!cancelled) setSavedSchoolRecordReports([])
+          return
+        }
+
+        const perSessionReports = await Promise.all(
+          targetSessions.map(async (session) => {
+            try {
+              const res = await fetch(`${baseUrl}/api/sessions/${session.id}/messages`, {
+                headers: { Authorization: `Bearer ${token}` },
+              })
+              if (!res.ok) return [] as SavedSchoolRecordReport[]
+              const rows = await res.json()
+              const list = Array.isArray(rows) ? rows : []
+              const reports: SavedSchoolRecordReport[] = []
+
+              list.forEach((row: any, idx: number) => {
+                if (String(row?.role || '') !== 'assistant') return
+                const content = String(row?.content || '')
+                if (!isSchoolRecordReportMessage(content)) return
+
+                let question = ''
+                for (let i = idx - 1; i >= 0; i -= 1) {
+                  if (String(list[i]?.role || '') === 'user') {
+                    question = String(list[i]?.content || '').trim()
+                    break
+                  }
+                }
+
+                reports.push({
+                  id: `${session.id}:${String(row?.message_id || row?.id || idx)}`,
+                  sessionId: session.id,
+                  messageId: String(row?.id || row?.message_id || idx),
+                  title: buildSavedReportTitle(question, content),
+                  description: buildSavedReportDescription(content),
+                  question,
+                  createdAt: String(row?.created_at || session.updated_at || ''),
+                })
+              })
+
+              return reports
+            } catch {
+              return [] as SavedSchoolRecordReport[]
+            }
+          })
+        )
+
+        const merged = perSessionReports
+          .flat()
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .slice(0, 9)
+
+        if (!cancelled) setSavedSchoolRecordReports(merged)
+      } finally {
+        if (!cancelled) setSavedSchoolRecordReportsLoading(false)
+      }
+    }
+
+    void loadSavedReports()
+    return () => {
+      cancelled = true
+    }
+  }, [isAuthenticated, schoolRecordToolEnabled, sessions, messages.length])
+
+  const schoolRecordResearchSuggestions = [
+    '내 생기부 기준으로 학생부종합전형 유리한 대학/학과 10개를 근거와 함께 정리해줘',
+    '교과/비교과를 함께 보고 내 강점과 약점을 평가해줘',
+    '면접에서 물어볼 가능성이 높은 질문 15개를 만들어줘',
+    '지원 전략을 상향·적정·안정 3단계로 나눠서 제안해줘',
+  ]
+
+  const schoolRecordResearchReports = [
+    {
+      title: '학생부종합 지원 전략 리포트',
+      description: '교과·비교과·세특을 통합 분석해 지원 가능 대학군과 위험 요소를 정리합니다.',
+      question: '내 생기부를 바탕으로 학생부종합 지원 전략 리포트를 작성해줘. 대학군을 상향/적정/안정으로 나눠줘.',
+    },
+    {
+      title: '세특 기반 면접 대비 리포트',
+      description: '활동 맥락과 전공 연계성을 기준으로 예상 질문과 답변 프레임을 구성합니다.',
+      question: '내 생기부 세특을 기반으로 면접 예상 질문 20개와 답변 포인트를 만들어줘.',
+    },
+    {
+      title: '학년별 성장 스토리 리포트',
+      description: '1~3학년 흐름을 분석해 자기소개서/면접에서 활용 가능한 스토리 라인을 정리합니다.',
+      question: '1학년부터 3학년까지의 성장 흐름을 스토리로 정리하고, 자기소개에 활용할 핵심 문장을 만들어줘.',
+    },
+  ]
+
+  const startSchoolRecordResearch = (question: string) => {
+    setSelectedCategory(null)
+    void handleSend(question)
+  }
+
 
 
   return (
@@ -1225,291 +1726,112 @@ export default function ChatPage() {
       }`}>
         {/* 사이드 네비게이션 */}
         <div
-          className={`fixed top-0 left-0 h-full w-80 z-50 transform transition-transform duration-300 ease-in-out ${
+          className={`fixed top-0 left-0 h-full w-56 z-50 transform transition-transform duration-300 ease-in-out ${
             isSideNavOpen ? 'translate-x-0' : '-translate-x-full'
-          } sm:fixed sm:z-40`}
-          style={{ backgroundColor: '#F1F5FB' }}
+          } sm:fixed sm:z-40 bg-gray-50`}
         >
         <div className="h-full flex flex-col">
-          {/* 사이드바 토글 버튼 (왼쪽 상단) */}
-          <div className="absolute top-4 left-4 z-10">
+          {/* 상단: 닫기(왼쪽) + 채팅 기록 검색(오른쪽) */}
+          <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200 bg-gray-50">
             <button
               onClick={() => setIsSideNavOpen(false)}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              className="p-2 -ml-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
               title="사이드바 닫기"
             >
-              <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
+            <button
+              onClick={() => setIsSearchOpen(!isSearchOpen)}
+              className="p-2 -mr-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+              title="채팅 기록 검색"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </button>
           </div>
 
-          {/* 1. 새 채팅 버튼 (로그인/비로그인 모두 표시) */}
-          <div className="px-4 sm:px-6 pt-16 pb-2">
+          {/* 메뉴: 새 채팅, 내 입시 기록 연동하기 (깔끔한 리스트 스타일) */}
+          <nav className="px-4 pt-5 pb-4">
             <button
               onClick={() => {
                 handleNewChat()
-                // 모바일에서는 사이드바 자동 닫기
-                if (window.innerWidth < 640) {
-                  setIsSideNavOpen(false)
+                if (window.innerWidth < 640) setIsSideNavOpen(false)
+              }}
+              className="w-full flex items-center gap-3 px-2 py-3 rounded-lg transition-colors text-left text-gray-800 hover:bg-gray-100/80"
+            >
+              <span className="flex items-center justify-center w-5 h-5 text-gray-600">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+              </span>
+              <span className="text-xs font-medium text-gray-800">새 채팅</span>
+            </button>
+            <button
+              onClick={() => {
+                if (!isAuthenticated) {
+                  alert('로그인이 필요합니다.')
+                  trackUserAction('login_modal_open', 'school_record_link')
+                  sessionStorage.setItem('uniroad_login_modal_source', 'school_record_link')
+                  setIsAuthModalOpen(true)
+                  return
+                }
+                setRightPanelView('school_record_menu')
+              }}
+              className="w-full flex items-center gap-3 px-2 py-3 rounded-lg transition-colors text-left text-gray-800 hover:bg-gray-100/80"
+            >
+              <span className="flex items-center justify-center w-5 h-5 shrink-0">
+                <img src="/folder-icon.png" alt="" className="w-5 h-5 object-contain" />
+              </span>
+              <span className="text-xs font-medium text-gray-800">내 입시 기록 연동하기</span>
+            </button>
+          </nav>
+
+          {/* 분석 */}
+          <div className="px-4 sm:px-6 pt-2 pb-2">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-xs font-bold text-gray-900">분석</h2>
+            </div>
+            <button
+              onClick={() => handleSchoolRecordShortcut()}
+              className="w-full flex items-center justify-start gap-3 pl-0 pr-2 py-3 rounded-lg transition-colors text-left text-gray-800 hover:bg-gray-100/80"
+            >
+              <span className="flex items-center justify-center w-6 h-6 shrink-0">
+                <img src="/pen-icon.png" alt="" className="w-6 h-6 object-contain" />
+              </span>
+              <span className="text-xs font-medium text-gray-800">내 생활기록부 분석하기</span>
+            </button>
+            <button
+              onClick={() => {
+                if (!isAuthenticated) {
+                  alert('로그인이 필요합니다.')
+                  trackUserAction('login_modal_open', 'school_grade_input')
+                  sessionStorage.setItem('uniroad_login_modal_source', 'school_grade_input')
+                  setIsAuthModalOpen(true)
+                  return
+                }
+                if (skipScorePredictionConfirm) {
+                  setRightPanelView('grade_input')
+                } else {
+                  setIsScorePredictionStartModalOpen(true)
                 }
               }}
-              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
+              className="w-full flex items-center justify-start gap-3 pl-0 pr-2 py-3 rounded-lg transition-colors text-left text-gray-800 hover:bg-gray-100/80"
             >
-              <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-              <span className="text-sm font-medium text-left">새 채팅</span>
+              <span className="flex items-center justify-center w-6 h-6 shrink-0 -ml-0.5">
+                <img src="/calculator-icon.png" alt="" className="w-6 h-6 object-contain object-left" />
+              </span>
+              <span className="text-xs font-medium text-gray-800">내 점수로 어디 갈 수 있을까?</span>
             </button>
           </div>
 
-          {/* 2. 공지사항 (드롭다운) */}
-          <div className="px-4 sm:px-6 pb-2">
-            <button 
-              onClick={() => setIsAnnouncementDropdownOpen(!isAnnouncementDropdownOpen)}
-              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
-            >
-              <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-              </svg>
-              <span className="text-sm font-medium flex-1 text-left">공지사항</span>
-              {/* 24시간 이내 공지사항이 있으면 NEW 배지 표시 */}
-              {announcements.some(announcement => {
-                const createdDate = new Date(announcement.created_at)
-                const now = new Date()
-                const diffTime = now.getTime() - createdDate.getTime()
-                const diffHours = diffTime / (1000 * 60 * 60)
-                return diffHours <= 24
-              }) && (
-                <span className="new-badge animate-shake-new flex-shrink-0">NEW</span>
-              )}
-              <svg 
-                className={`w-5 h-5 text-gray-500 flex-shrink-0 transition-transform ${isAnnouncementDropdownOpen ? 'rotate-180' : ''}`}
-                fill="none" 
-                stroke="currentColor" 
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            
-            {/* 드롭다운 메뉴 */}
-            {isAnnouncementDropdownOpen && (
-              <div className="mt-2 ml-4 space-y-1 border-l-2 border-gray-200 pl-4 max-h-96 overflow-y-auto">
-                {announcements.length === 0 ? (
-                  <p className="text-xs text-gray-500 py-2">등록된 공지사항이 없습니다.</p>
-                ) : (
-                  announcements.map((announcement) => {
-                    // 24시간 이내인지 확인
-                    const createdDate = new Date(announcement.created_at)
-                    const now = new Date()
-                    const diffTime = now.getTime() - createdDate.getTime()
-                    const diffHours = diffTime / (1000 * 60 * 60)
-                    const isNew = diffHours <= 24
-
-                    return (
-                    <div key={announcement.id} className={`group ${isNew ? 'animate-shake-new' : ''}`}>
-                      <button 
-                        onClick={() => {
-                          setSelectedAnnouncement(announcement)
-                          setIsAnnouncementModalOpen(false)
-                          setTimeout(() => setIsAnnouncementModalOpen(true), 0)
-                        }}
-                        className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
-                      >
-                        <div className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
-                          announcement.is_pinned ? 'bg-red-500' : 'border-2 border-gray-300'
-                        } group-hover:border-blue-500 transition-colors`}>
-                          {announcement.is_pinned && (
-                            <svg className="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
-                              <path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z" />
-                            </svg>
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0 relative">
-                          <div className="flex items-center gap-2">
-                            <p className="text-xs font-medium text-gray-900 truncate pr-1">{announcement.title}</p>
-                            {isNew && (
-                              <span className="new-badge flex-shrink-0">NEW</span>
-                            )}
-                          </div>
-                          <p className="text-[10px] text-gray-500">
-                            {new Date(announcement.created_at).toLocaleDateString('ko-KR')}
-                          </p>
-                          {/* 관리자 아이콘 - hover시 제목 위에 겹쳐서 표시 */}
-                          {isAuthenticated && isAdmin && (
-                            <div className="absolute right-0 top-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-white/90 rounded px-1">
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  openEditModal(announcement)
-                                }}
-                                className="p-1 hover:bg-blue-100 rounded text-blue-600"
-                                title="수정"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                </svg>
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  handleDeleteAnnouncement(announcement.id)
-                                }}
-                                className="p-1 hover:bg-red-100 rounded text-red-600"
-                                title="삭제"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                                </svg>
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      </button>
-                    </div>
-                    )
-                  })
-                )}
-                
-                {/* 관리자 추가 버튼 */}
-                {isAuthenticated && isAdmin && (
-                  <button
-                    onClick={openCreateModal}
-                    className="w-full flex items-center gap-2 px-3 py-2.5 mt-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-left group border-2 border-dashed border-blue-300"
-                  >
-                    <div className="w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center flex-shrink-0">
-                      <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                      </svg>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-xs font-medium text-blue-700">새 공지사항 추가</p>
-                    </div>
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* 3. 내 입시 기록 관리 (드롭다운) */}
-          <div className="px-4 sm:px-6 pb-2">
-            <button 
-              onClick={() => setIsRecordDropdownOpen(!isRecordDropdownOpen)}
-              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
-            >
-              <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              <span className="text-sm font-medium flex-1 text-left">내 입시 기록 관리</span>
-              <svg 
-                className={`w-5 h-5 text-gray-500 flex-shrink-0 transition-transform ${isRecordDropdownOpen ? 'rotate-180' : ''}`}
-                fill="none" 
-                stroke="currentColor" 
-                viewBox="0 0 24 24"
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-              </svg>
-            </button>
-            
-            {/* 드롭다운 메뉴 */}
-            {isRecordDropdownOpen && (
-              <div className="mt-2 ml-4 space-y-1 border-l-2 border-gray-200 pl-4">
-                {/* 내 생활기록부 관리 - 잠금 */}
-                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left group opacity-60 cursor-not-allowed">
-                  <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0">
-                    <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-gray-900">내 생활기록부 관리</p>
-                    <p className="text-[10px] text-gray-500">10초만에 연동하기</p>
-                  </div>
-                </button>
-
-                {/* 3월 6월 9월 모의고사 성적 입력 */}
-                <button 
-                  onClick={() => {
-                    if (!isAuthenticated) {
-                      alert('로그인이 필요합니다.')
-                      trackUserAction('login_modal_open', 'mock_exam_button')
-                      sessionStorage.setItem('uniroad_login_modal_source', 'mock_exam_button')
-                      setIsAuthModalOpen(true)
-                      return
-                    }
-                    setIsProfileFormOpen(true)
-                  }}
-                  className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left group"
-                >
-                  <div className="w-5 h-5 rounded-full border-2 border-blue-500 flex items-center justify-center flex-shrink-0 group-hover:border-blue-600 transition-colors">
-                    <svg className="w-3 h-3 text-blue-500 group-hover:text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-gray-900">모의고사 성적 입력</p>
-                    <p className="text-[10px] text-gray-500">AI 상담에 활용됩니다</p>
-                  </div>
-                </button>
-
-                {/* 내신 성적 입력 - 잠금 */}
-                <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left group opacity-60 cursor-not-allowed">
-                  <div className="w-5 h-5 rounded-full border-2 border-gray-300 flex items-center justify-center flex-shrink-0">
-                    <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                    </svg>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-gray-900">내신 성적 입력</p>
-                    <p className="text-[10px] text-gray-500">내신 성적을 입력해주세요</p>
-                  </div>
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* 4. 의견 보내기 */}
-          <div className="px-4 sm:px-6 pb-2">
-            <button 
-              onClick={() => setIsFeedbackModalOpen(true)}
-              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
-            >
-              <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-              </svg>
-              <span className="text-sm font-medium text-left">의견 보내기</span>
-            </button>
-          </div>
-
-          {/* 생기부 세특 평가 - PRO 유저는 바로 이동, Basic 유저는 PRO 모달 */}
-          <div className="px-4 sm:px-6 pb-2">
-            <button
-              onClick={handleSchoolRecordShortcut}
-              className="w-full flex items-center justify-start gap-3 px-3 py-2.5 text-gray-700 hover:bg-[#DEE2E6] rounded-lg transition-colors text-left"
-            >
-              <svg className="w-5 h-5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              <span className="text-sm font-medium text-left">생기부 세특 평가</span>
-              <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded font-medium">beta</span>
-            </button>
-          </div>
-
-          {/* 5. 채팅 내역 (로그인한 경우에만 표시) */}
+          {/* 기록 (로그인한 경우에만 표시) */}
           {isAuthenticated && (
             <div className="flex-1 px-4 sm:px-6 pb-4 overflow-y-auto custom-scrollbar">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-bold text-gray-900">채팅 내역</h2>
-                <button
-                  onClick={() => setIsSearchOpen(!isSearchOpen)}
-                  className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-                  title="채팅 검색"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
-                </button>
+                <h2 className="text-xs font-bold text-gray-900">기록</h2>
               </div>
               
               {/* 검색창 (토글) */}
@@ -1521,7 +1843,7 @@ export default function ChatPage() {
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="채팅 검색..."
                     autoFocus
-                    className="w-full px-3 py-2 pl-9 text-sm bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-2 pl-9 text-xs bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                   <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -1587,7 +1909,7 @@ export default function ChatPage() {
                       <button
                         onClick={async (e) => {
                           e.stopPropagation()
-                          if (confirm('이 채팅 내역을 삭제하시겠습니까?')) {
+                          if (confirm('이 기록을 삭제하시겠습니까?')) {
                             try {
                               await deleteSession(session.id)
                             } catch (error) {
@@ -1668,7 +1990,7 @@ export default function ChatPage() {
                     sessionStorage.setItem('uniroad_login_modal_source', 'sidebar_login_button')
                     setIsAuthModalOpen(true)
                   }}
-                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 active:bg-blue-700 transition-colors font-medium text-xs sm:text-sm"
+                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 active:bg-blue-700 transition-colors font-medium text-xs"
                 >
                   회원가입 또는 로그인
                 </button>
@@ -1688,17 +2010,19 @@ export default function ChatPage() {
 
       {/* 메인 채팅 영역 */}
       <div className={`flex flex-col flex-1 min-w-0 transition-all duration-300 ${
-        isSideNavOpen ? 'sm:ml-80' : 'sm:ml-0'
+        isSideNavOpen ? 'sm:ml-56' : 'sm:ml-0'
       }`}>
+        {rightPanelView === 'chat' ? (
+          <>
         {/* 헤더 - 모바일과 데스크톱 분리 */}
         <header className="bg-white safe-area-top sticky top-0 z-10">
           {/* 모바일 헤더 */}
-          <div className="sm:hidden px-4 py-3 flex justify-between items-center">
-            <div className="flex items-center gap-3">
+          <div className="sm:hidden pl-0 pr-4 py-3 flex justify-between items-center">
+            <div className="flex items-center gap-2 -ml-1">
             {!isSideNavOpen && (
             <button
                 onClick={() => setIsSideNavOpen(true)}
-                className="p-2 -ml-2 hover:bg-gray-100 rounded-lg transition-colors"
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
             >
               <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -1707,8 +2031,8 @@ export default function ChatPage() {
             )}
               <img
                 src="/로고.png"
-                alt="UniZ Logo"
-                className="h-8 cursor-pointer"
+                alt="유니로드"
+                className="h-5 cursor-pointer"
                 onClick={handleNewChat}
               />
             </div>
@@ -1741,8 +2065,8 @@ export default function ChatPage() {
           </div>
           
           {/* 데스크톱 헤더 */}
-          <div className="hidden sm:flex px-6 py-4 justify-between items-center">
-            <div className="flex items-center gap-4">
+          <div className="hidden sm:flex pl-2 pr-6 py-4 justify-between items-center">
+            <div className="flex items-center gap-2 -ml-1">
               {/* 사이드바 토글 버튼 - 사이드바 닫혔을 때만 표시 */}
               {!isSideNavOpen && (
                 <button
@@ -1757,8 +2081,8 @@ export default function ChatPage() {
               )}
               <img
                 src="/로고.png"
-                alt="UniZ Logo"
-                className="h-10 cursor-pointer"
+                alt="유니로드"
+                className="h-6 cursor-pointer"
                 onClick={handleNewChat}
               />
             </div>
@@ -1874,35 +2198,111 @@ export default function ChatPage() {
         </header>
 
         {/* 채팅 영역 */}
-        <div className={`flex-1 px-[17px] sm:px-6 py-4 ${messages.length === 0 ? 'overflow-hidden flex flex-col justify-end' : 'overflow-y-auto'}`}>
-          <div className="max-w-[800px] mx-auto">
+        <div className={`flex-1 py-4 ${messages.length === 0 ? 'overflow-hidden flex flex-col justify-start px-2 sm:px-4' : 'overflow-y-auto px-[17px] sm:px-6'}`}>
+          <div className={`mx-auto w-full ${messages.length === 0 ? 'max-w-[600px]' : 'max-w-[600px]'}`}>
             {messages.length === 0 ? (
-              <div className="flex flex-col items-center px-4 sm:px-8 pb-4">
-                {/* 상단 영역: 인사말 + 카드 + 채팅창 */}
-                <div className="w-full flex flex-col justify-center sm:flex-none">
-                  {/* 인사말 */}
-                  <div className="text-center mb-6 sm:mb-10 px-2">
-                    <h1 className="text-lg sm:text-2xl md:text-3xl font-bold text-gray-900 mb-2 sm:mb-4 break-keep leading-relaxed">
-                      {isAuthenticated && user?.name ? (
-                        <>안녕하세요 {user.name}님 👋<br className="sm:hidden" /> 여러분과 입시 여정을 함께하는<br className="sm:hidden" /> 유니로드입니다!</>
-                      ) : (
-                        <>안녕하세요 👋<br className="sm:hidden" /> 여러분과 입시 여정을 함께하는<br className="sm:hidden" /> 유니로드입니다!</>
-                      )}
-                    </h1>
-                    <p className="text-base sm:text-lg text-gray-600">
-                      무엇을 도와드릴까요? 🎓
-                    </p>
+              <>
+              <div className="flex flex-col items-center w-full pt-5 pb-4 mx-auto px-1 sm:px-2">
+                {/* 레이아웃: 제목 → 큰 입력 카드 → 하단 4개 버튼 */}
+                <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 text-center mb-1">
+                  입시에 대한 궁금한 점을 물어보세요
+                </h2>
+                <p className="text-xs sm:text-sm text-gray-500 text-center mb-6">
+                  출처 기반의 정확한 입시 정보를 전달해드립니다
+                </p>
+                {/* 빈 화면: 실제 채팅 입력창 */}
+                <div className="w-full mx-auto px-1 sm:px-2 mt-6 mb-6">
+                  <div className="bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.08)] focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.12)] px-4 py-2 transition-shadow duration-200">
+                    <textarea
+                      ref={inputTextareaRef}
+                      value={input}
+                      onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
+                      onKeyDown={handleInputKeyDown}
+                      placeholder="입시에 대한 궁금한 점을 물어보세요"
+                      disabled={isLoading || isInputLocked}
+                      rows={1}
+                      className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                      style={{ height: 'auto' }}
+                      onInput={(e) => {
+                        const target = e.target as HTMLTextAreaElement
+                        target.style.height = 'auto'
+                        target.style.height = Math.min(target.scrollHeight, 200) + 'px'
+                      }}
+                    />
+                    {isScoreSuggestOpen && scoreSuggestItems.length > 0 && (
+                      <div className="mt-2 bg-white border border-gray-200 rounded-xl shadow-lg py-1 max-h-48 overflow-y-auto w-48">
+                        {scoreSuggestItems.map((item, idx) => (
+                          <button
+                            key={`${item.id}-${item.name}`}
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => applyScoreSuggestion(item)}
+                            className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                              idx === scoreSuggestIndex ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50 text-gray-700'
+                            }`}
+                          >
+                            {item.name.startsWith('@') ? item.name : `@${item.name}`}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex items-center justify-between mt-2">
+                      <div className="flex items-center gap-2">
+                        {schoolRecordToolEnabled && (
+                          <div className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 rounded-full px-3 py-1 text-sm font-medium">
+                            <span>생기부 분석</span>
+                            <button
+                              onClick={() => setSchoolRecordToolEnabled(false)}
+                              className="hover:bg-amber-200 rounded-full transition-colors"
+                              title="도구 끄기"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={(e) => openThinkingModeModal(e)}
+                          disabled={isLoading || isInputLocked}
+                          className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-2 ${
+                            'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
+                          } disabled:opacity-50`}
+                          title={thinkingMode ? 'Thinking 모드' : 'Auto 모드'}
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                          </svg>
+                          <span className="text-sm">{thinkingMode ? 'Thinking' : 'Auto'}</span>
+                          <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={() => handleSend()}
+                          disabled={isLoading || isInputLocked || (!input.trim() && !selectedImage)}
+                          className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
                   </div>
-
-                  {/* 롤링 플레이스홀더 - 채팅창 위에 배치 */}
-                  <div className="w-full mb-6 sm:mb-10">
-                    <RollingPlaceholder
+                </div>
+                {/* 하단 4개 액션 버튼 */}
+                <div className="w-full mb-6 sm:mb-10">
+                  <RollingPlaceholder
                       onQuestionClick={(question) => {
                         setSelectedCategory(null) // 질문 클릭 시 카테고리 초기화
                         handleSend(question)
                       }}
                       selectedCategory={selectedCategory}
                       onCategorySelect={setSelectedCategory}
+                      onCategoryExpand={(firstQuestion) => setInput(firstQuestion)}
                       isAuthenticated={isAuthenticated}
                       onLoginRequired={(message) => {
                         setAuthModalMessage(message)
@@ -1915,6 +2315,96 @@ export default function ChatPage() {
                       onSchoolRecordClick={handleSchoolRecordShortcut}
                     />
                   </div>
+
+                  {schoolRecordToolEnabled && (
+                    <div className="w-full mb-6 sm:mb-10 max-w-3xl mx-auto px-2 sm:px-4">
+                      <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4 sm:p-5">
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-blue-100 text-blue-700">📘</span>
+                          <h3 className="text-sm sm:text-base font-semibold text-gray-900">생기부 심층 분석 빠른 시작</h3>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          {schoolRecordResearchSuggestions.map((item) => (
+                            <button
+                              key={item}
+                              type="button"
+                              onClick={() => startSchoolRecordResearch(item)}
+                              className="text-left rounded-xl border border-white bg-white px-3 py-2 text-sm text-gray-700 hover:border-blue-200 hover:bg-blue-50 transition-colors"
+                            >
+                              {item}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
+                        <div className="flex items-center justify-between mb-3">
+                          <h3 className="text-sm sm:text-base font-semibold text-gray-900">최근 생기부 분석 리포트</h3>
+                          {savedSchoolRecordReports.length > 3 && (
+                            <button
+                              type="button"
+                              onClick={() => setShowAllReports((v) => !v)}
+                              className="text-xs text-blue-600 hover:text-blue-700"
+                            >
+                              {showAllReports ? '접기' : '모두 보기'}
+                            </button>
+                          )}
+                        </div>
+
+                        {savedSchoolRecordReportsLoading ? (
+                          <p className="text-sm text-gray-500">생성된 리포트를 불러오는 중...</p>
+                        ) : savedSchoolRecordReports.length > 0 ? (
+                          <div className="space-y-2">
+                            {(showAllReports ? savedSchoolRecordReports : savedSchoolRecordReports.slice(0, 3)).map((report) => (
+                              <button
+                                key={report.id}
+                                type="button"
+                                onClick={() => void openSavedSchoolRecordReport(report)}
+                                className="w-full text-left rounded-xl border border-gray-100 px-3 py-2 hover:bg-gray-50 transition-colors"
+                              >
+                                <p className="text-sm font-medium text-gray-900">{report.title}</p>
+                                <p className="text-xs text-gray-500 mt-1 line-clamp-2">{report.description}</p>
+                                <div className="mt-2 flex items-center justify-between">
+                                  <p className="text-[11px] text-gray-400">
+                                    {report.createdAt ? new Date(report.createdAt).toLocaleDateString('ko-KR') : ''}
+                                  </p>
+                                  <p className="text-[11px] font-medium text-blue-600">리포트 열기</p>
+                                </div>
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="space-y-2">
+                              {(showAllReports ? schoolRecordResearchReports : schoolRecordResearchReports.slice(0, 3)).map((report) => (
+                                <button
+                                  key={report.title}
+                                  type="button"
+                                  onClick={() => startSchoolRecordResearch(report.question)}
+                                  className="w-full text-left rounded-xl border border-gray-100 px-3 py-2 hover:bg-gray-50 transition-colors"
+                                >
+                                  <p className="text-sm font-medium text-gray-900">{report.title}</p>
+                                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">{report.description}</p>
+                                  <p className="mt-2 text-[11px] font-medium text-blue-600">지금 바로 작성하기</p>
+                                </button>
+                              ))}
+                            </div>
+                            {schoolRecordResearchReports.length > 3 && (
+                              <div className="mt-2 flex justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => setShowAllReports((v) => !v)}
+                                  className="text-xs text-blue-600 hover:text-blue-700"
+                                >
+                                  {showAllReports ? '접기' : '모두 보기'}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   {/* 데스크톱: 이미지 미리보기 */}
                   {imagePreviewUrl && (
@@ -1937,289 +2427,8 @@ export default function ChatPage() {
                       </div>
                     </div>
                   )}
-                  
-                  {/* 데스크톱: 채팅창 (모바일에서 숨김) */}
-                  <div className="hidden sm:block w-full max-w-3xl mx-auto px-4">
-                    <div className="bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.08)] focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.12)] px-4 py-3 transition-shadow duration-200">
-                      {/* 텍스트 입력 영역 */}
-                      <textarea
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault()
-                            handleSend()
-                          }
-                        }}
-                        placeholder="유니로드에게 무엇이든 물어보세요"
-                        disabled={isLoading || isInputLocked}
-                        rows={1}
-                        className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[32px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
-                        style={{ height: 'auto' }}
-                        onInput={(e) => {
-                          const target = e.target as HTMLTextAreaElement
-                          target.style.height = 'auto'
-                          target.style.height = Math.min(target.scrollHeight, 200) + 'px'
-                        }}
-                      />
-                      
-                      {/* 하단 영역: 버튼들 + 태그 + 전송 버튼 */}
-                      <div className="flex items-center justify-between mt-2">
-                        <div className="flex items-center gap-2">
-                          {/* 성적 입력 메뉴 버튼 */}
-                          <div className="relative" ref={uploadMenuRef}>
-                            <button
-                              onClick={() => setIsUploadMenuOpen(!isUploadMenuOpen)}
-                              disabled={isLoading || isInputLocked}
-                              className="w-8 h-8 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                              title="성적 입력"
-                            >
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                              </svg>
-                            </button>
-                            
-                            {/* 드롭업 메뉴 */}
-                            {isUploadMenuOpen && (
-                              <div className="absolute bottom-10 left-0 bg-white rounded-xl shadow-lg border border-gray-200 py-2 min-w-[200px] z-50">
-                                <button
-                                  onClick={() => {
-                                    imageInputRef.current?.click()
-                                    setIsUploadMenuOpen(false)
-                                  }}
-                                  className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                                >
-                                  <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                  </svg>
-                                  <span className="text-sm font-medium text-gray-700">성적표 이미지 입력하기</span>
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    if (!isAuthenticated) {
-                                      alert('로그인이 필요합니다.')
-                                      trackUserAction('login_modal_open', 'score_input_button')
-                                      sessionStorage.setItem('uniroad_login_modal_source', 'score_input_button')
-                                      setIsAuthModalOpen(true)
-                                    } else {
-                                      setIsProfileFormOpen(true)
-                                    }
-                                    setIsUploadMenuOpen(false)
-                                  }}
-                                  className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                                >
-                                  <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                  </svg>
-                                  <span className="text-sm font-medium text-gray-700">성적표 입력하기</span>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                          
-                          {/* 선택된 카테고리 태그 */}
-                          {selectedCategory && (
-                            <div className="inline-flex items-center gap-1.5 bg-blue-100 text-blue-700 rounded-full px-3 py-1 text-sm font-medium">
-                              <span>{selectedCategory}</span>
-                              <button
-                                onClick={() => setSelectedCategory(null)}
-                                className="hover:bg-blue-200 rounded-full transition-colors"
-                                title="태그 제거"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        
-                        {/* 응답 모드 선택(Auto/Thinking) + 전송 버튼 */}
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={(e) => openThinkingModeModal(e)}
-                            disabled={isLoading || isInputLocked}
-                            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-2 ${
-                              'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
-                            } disabled:opacity-50`}
-                            title={thinkingMode ? 'Thinking 모드' : 'Auto 모드'}
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                            </svg>
-                            <span className="text-sm">{thinkingMode ? 'Thinking' : 'Auto'}</span>
-                            <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => handleSend()}
-                            disabled={isLoading || isInputLocked || (!input.trim() && !selectedImage)}
-                            className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
                 </div>
-
-                {/* 모바일 하단: 채팅창 (데스크톱에서 숨김) */}
-                <div className="sm:hidden w-full mt-auto pb-2">
-                  {/* 모바일: 이미지 미리보기 */}
-                  {imagePreviewUrl && (
-                    <div className="mb-2">
-                      <div className="inline-flex items-center gap-2 bg-gray-100 rounded-lg p-2">
-                        <img 
-                          src={imagePreviewUrl} 
-                          alt="첨부 이미지" 
-                          className="h-12 w-12 object-cover rounded-lg"
-                        />
-                        <button
-                          onClick={handleImageRemove}
-                          className="p-1 hover:bg-gray-200 rounded-full transition-colors"
-                          title="이미지 제거"
-                        >
-                          <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                  
-                  <div className="w-full">
-                    <div className="bg-gray-50 rounded-3xl focus-within:ring-2 focus-within:ring-blue-500 px-3 py-2">
-                      {/* 텍스트 입력 영역 */}
-                      <textarea
-                        value={input}
-                        onChange={(e) => setInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && !e.shiftKey) {
-                            e.preventDefault()
-                            handleSend()
-                          }
-                        }}
-                        placeholder="유니로드에게 무엇이든 물어보세요"
-                        disabled={isLoading || isInputLocked}
-                        rows={1}
-                        className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
-                        style={{ height: 'auto' }}
-                        onInput={(e) => {
-                          const target = e.target as HTMLTextAreaElement
-                          target.style.height = 'auto'
-                          target.style.height = Math.min(target.scrollHeight, 200) + 'px'
-                        }}
-                      />
-                      
-                      {/* 하단 영역: 버튼들 + 태그 + 전송 버튼 */}
-                      <div className="flex items-center justify-between mt-2">
-                        <div className="flex items-center gap-2">
-                          {/* 성적 입력 메뉴 버튼 (모바일) */}
-                          <div className="relative">
-                            <button
-                              onClick={() => setIsUploadMenuOpen(!isUploadMenuOpen)}
-                              disabled={isLoading || isInputLocked}
-                              className="w-8 h-8 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                              title="성적 입력"
-                            >
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                              </svg>
-                            </button>
-                            
-                            {/* 드롭업 메뉴 (모바일) */}
-                            {isUploadMenuOpen && (
-                              <div className="absolute bottom-10 left-0 bg-white rounded-xl shadow-lg border border-gray-200 py-2 min-w-[200px] z-50">
-                                <button
-                                  onClick={() => {
-                                    imageInputRef.current?.click()
-                                    setIsUploadMenuOpen(false)
-                                  }}
-                                  className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                                >
-                                  <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                  </svg>
-                                  <span className="text-sm font-medium text-gray-700">성적표 이미지 입력하기</span>
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    if (!isAuthenticated) {
-                                      alert('로그인이 필요합니다.')
-                                      trackUserAction('login_modal_open', 'score_input_button')
-                                      sessionStorage.setItem('uniroad_login_modal_source', 'score_input_button')
-                                      setIsAuthModalOpen(true)
-                                    } else {
-                                      setIsProfileFormOpen(true)
-                                    }
-                                    setIsUploadMenuOpen(false)
-                                  }}
-                                  className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                                >
-                                  <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                                  </svg>
-                                  <span className="text-sm font-medium text-gray-700">성적표 입력하기</span>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                          
-                          {/* 선택된 카테고리 태그 */}
-                          {selectedCategory && (
-                            <div className="inline-flex items-center gap-1 bg-blue-100 text-blue-700 rounded-full px-2.5 py-0.5 text-xs font-medium">
-                              <span>{selectedCategory}</span>
-                              <button
-                                onClick={() => setSelectedCategory(null)}
-                                className="hover:bg-blue-200 rounded-full transition-colors"
-                                title="태그 제거"
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                        
-                        {/* 응답 모드 선택(Auto/Thinking) + 전송 버튼 */}
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={(e) => openThinkingModeModal(e)}
-                            disabled={isLoading || isInputLocked}
-                            className={`px-2 py-1 rounded-full text-xs font-medium transition-all flex items-center gap-1 ${
-                              'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
-                            } disabled:opacity-50`}
-                            title={thinkingMode ? 'Thinking 모드' : 'Auto 모드'}
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                            </svg>
-                            <span className="text-xs">{thinkingMode ? 'Thinking' : 'Auto'}</span>
-                            <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                            </svg>
-                          </button>
-                          <button
-                            onClick={() => handleSend()}
-                            disabled={isLoading || isInputLocked || (!input.trim() && !selectedImage)}
-                            className="w-9 h-9 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              </>
             ) : null}
 
             {messages.map((msg, index) => {
@@ -2235,12 +2444,21 @@ export default function ChatPage() {
               }
               
               return (
-                <ChatMessage
+                <div
                   key={msg.id}
+                  id={`chat-message-${msg.id}`}
+                  className={`transition-colors duration-700 rounded-xl ${
+                    highlightedMessageId === msg.id ? 'bg-blue-50/70' : ''
+                  }`}
+                >
+                <ChatMessage
                   message={msg.text}
                   isUser={msg.isUser}
+                  scoreMentions={msg.scoreMentions}
+                  scoreReview={msg.scoreReview}
                   sources={msg.sources}
                   source_urls={msg.source_urls}
+                  usedChunks={msg.used_chunks}
                   userQuery={userQuery}
                   isStreaming={msg.isStreaming}
                   imageUrl={msg.imageUrl}
@@ -2259,13 +2477,150 @@ export default function ChatPage() {
                       setIsAgentPanelOpen(true)
                     }
                   }}
+                  onFollowUpClick={(question) => handleSend(question)}
+                  onScoreReviewApprove={async (pendingId, title, scores) => {
+                    try {
+                      const requestToken = getRequestToken()
+                      const approved = await approveScoreReview(
+                        pendingId,
+                        sessionId,
+                        title,
+                        scores,
+                        requestToken
+                      )
+                      const approvedScoreId = approved.score_id
+
+                      let originalQuestion = ''
+                      for (let i = index - 1; i >= 0; i--) {
+                        if (messages[i].isUser) {
+                          originalQuestion = messages[i].text
+                          break
+                        }
+                      }
+
+                      setActiveScoreId(approvedScoreId)
+                      setMessages((prev) => prev.map((m) =>
+                        m.id === msg.id
+                          ? { ...m, text: '', scoreReview: undefined, isStreaming: true }
+                          : m
+                      ))
+                      setIsLoading(true)
+
+                      if (originalQuestion) {
+                        const abortController = new AbortController()
+                        abortControllerRef.current = abortController
+                        const botMsgId = msg.id
+
+                        await sendMessageStream(
+                          originalQuestion,
+                          sessionId,
+                          (log) => setCurrentLog(log),
+                          (response) => {
+                            const finalText = response.response || ''
+                            setMessages((prev) => prev.map((m) =>
+                              m.id === botMsgId
+                                ? {
+                                    ...m,
+                                    text: finalText,
+                                    isStreaming: false,
+                                    sources: response.sources,
+                                    source_urls: response.source_urls,
+                                    agentData: {
+                                      routerOutput: response.router_output || null,
+                                      functionResults: response.function_results || null,
+                                      mainAgentOutput: finalText,
+                                      rawAnswer: response.raw_answer || null,
+                                      logs: [],
+                                    },
+                                  }
+                                : m
+                            ))
+                            setIsLoading(false)
+                            setCurrentLog('')
+                          },
+                          (error) => {
+                            setMessages((prev) => prev.map((m) =>
+                              m.id === botMsgId
+                                ? { ...m, text: error, isStreaming: false }
+                                : m
+                            ))
+                            setIsLoading(false)
+                            setCurrentLog('')
+                          },
+                          abortController.signal,
+                          (chunk) => {
+                            setMessages((prev) => prev.map((m) =>
+                              m.id === botMsgId
+                                ? { ...m, text: m.text + chunk }
+                                : m
+                            ))
+                            scrollToBottom()
+                          },
+                          requestToken,
+                          thinkingMode,
+                          undefined,
+                          approvedScoreId,
+                        )
+                      }
+                    } catch (e) {
+                      console.error('성적 검토 승인 실패:', e)
+                      setMessages((prev) => prev.map((m) =>
+                        m.id === msg.id
+                          ? {
+                              ...m,
+                              text: '성적 저장 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.',
+                              scoreReview: undefined,
+                              isStreaming: false,
+                            }
+                          : m
+                      ))
+                      setIsLoading(false)
+                    }
+                  }}
+                  onScoreReviewSkipSession={async (pendingId) => {
+                    try {
+                      const requestToken = getRequestToken()
+                      await skipScoreReviewSession(sessionId, pendingId, requestToken)
+                      setMessages((prev) => prev.map((m) =>
+                        m.id === msg.id
+                          ? {
+                              ...m,
+                              text: '이번 세션에서는 성적 확인을 다시 묻지 않아요. 질문을 계속해 주세요.',
+                              scoreReview: undefined,
+                            }
+                          : m
+                      ))
+                    } catch (e) {
+                      console.error('성적 검토 스킵 실패:', e)
+                    }
+                  }}
+                  onScoreTagClick={async (name) => {
+                    try {
+                      const requestToken = getRequestToken()
+                      const data = await getScoreSetByName(name, sessionId, requestToken)
+                      setActiveScoreId(data.id)
+                      const normalizedName = data.name.startsWith('@') ? data.name : `@${data.name}`
+                      setScorePreview({
+                        name: normalizedName,
+                        scores: data.scores || {},
+                      })
+                    } catch (e) {
+                      console.error('성적표 조회 실패:', e)
+                      alert('성적표를 불러오지 못했습니다.')
+                    }
+                  }}
                 />
+                </div>
               )
             })}
 
             {isLoading && (
               <div className="flex justify-start mb-4">
-                <ThinkingProcess logs={agentData.logs} />
+                {schoolRecordToolEnabled ? (
+                  <SchoolRecordResearchProgress logs={agentData.logs} />
+                ) : (
+                  <ThinkingProcess logs={agentData.logs} />
+                )}
               </div>
             )}
 
@@ -2279,7 +2634,7 @@ export default function ChatPage() {
             {/* 이미지 미리보기 */}
             {imagePreviewUrl && (
               <div className="px-4 sm:px-6 pb-2">
-                <div className="max-w-[800px] mx-auto">
+                <div className="max-w-[600px] mx-auto">
                   <div className="inline-flex items-center gap-2 bg-gray-100 rounded-lg p-2">
                     <img 
                       src={imagePreviewUrl} 
@@ -2301,7 +2656,7 @@ export default function ChatPage() {
             )}
             
             <div className="px-4 sm:px-6 py-2">
-              <div className="max-w-[800px] mx-auto">
+              <div className="max-w-[600px] mx-auto">
                 <div className="bg-gray-50 rounded-3xl focus-within:ring-2 focus-within:ring-blue-500 px-3 sm:px-4 py-2 sm:py-3">
                   {isInputLocked && lockReason === 'guest_masked' && (
                     <div className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs sm:text-sm text-amber-700">
@@ -2310,15 +2665,11 @@ export default function ChatPage() {
                   )}
                   {/* 텍스트 입력 영역 */}
                   <textarea
+                    ref={inputTextareaRef}
                     value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && !e.shiftKey) {
-                        e.preventDefault()
-                        handleSend()
-                      }
-                    }}
-                    placeholder="유니로드에게 무엇이든 물어보세요"
+                    onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
+                    onKeyDown={handleInputKeyDown}
+                    placeholder="입시에 대한 궁금한 점을 물어보세요"
                     disabled={isLoading || isInputLocked}
                     rows={1}
                     className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] sm:min-h-[32px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
@@ -2329,76 +2680,27 @@ export default function ChatPage() {
                       target.style.height = Math.min(target.scrollHeight, 200) + 'px'
                     }}
                   />
+                  {isScoreSuggestOpen && scoreSuggestItems.length > 0 && (
+                    <div className="mt-2 bg-white border border-gray-200 rounded-xl shadow-lg py-1 max-h-48 overflow-y-auto w-48">
+                      {scoreSuggestItems.map((item, idx) => (
+                        <button
+                          key={`${item.id}-${item.name}`}
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => applyScoreSuggestion(item)}
+                          className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                            idx === scoreSuggestIndex ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50 text-gray-700'
+                          }`}
+                        >
+                          {item.name.startsWith('@') ? item.name : `@${item.name}`}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                   
-                  {/* 하단 영역: 버튼들 + 태그 + 전송 버튼 */}
+                  {/* 하단 영역: 버튼들 + 전송 버튼 */}
                   <div className="flex items-center justify-between mt-2">
                     <div className="flex items-center gap-2">
-                      {/* 성적 입력 메뉴 버튼 */}
-                      <div className="relative">
-                        <button
-                          onClick={() => setIsUploadMenuOpen(!isUploadMenuOpen)}
-                          disabled={isLoading || isInputLocked}
-                          className="w-8 h-8 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-full flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                          title="성적 입력"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                          </svg>
-                        </button>
-                        
-                        {/* 드롭업 메뉴 */}
-                        {isUploadMenuOpen && (
-                          <div className="absolute bottom-10 left-0 bg-white rounded-xl shadow-lg border border-gray-200 py-2 min-w-[200px] z-50">
-                            <button
-                              onClick={() => {
-                                imageInputRef.current?.click()
-                                setIsUploadMenuOpen(false)
-                              }}
-                              className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                            >
-                              <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                              </svg>
-                              <span className="text-sm font-medium text-gray-700">성적표 이미지 입력하기</span>
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (!isAuthenticated) {
-                                  alert('로그인이 필요합니다.')
-                                  trackUserAction('login_modal_open', 'score_input_button')
-                                  sessionStorage.setItem('uniroad_login_modal_source', 'score_input_button')
-                                  setIsAuthModalOpen(true)
-                                } else {
-                                  setIsProfileFormOpen(true)
-                                }
-                                setIsUploadMenuOpen(false)
-                              }}
-                              className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center gap-3 transition-colors"
-                            >
-                              <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                              </svg>
-                              <span className="text-sm font-medium text-gray-700">성적표 입력하기</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* 선택된 카테고리 태그 */}
-                      {selectedCategory && (
-                        <div className="inline-flex items-center gap-1 sm:gap-1.5 bg-blue-100 text-blue-700 rounded-full px-2.5 sm:px-3 py-0.5 sm:py-1 text-xs sm:text-sm font-medium">
-                          <span>{selectedCategory}</span>
-                          <button
-                            onClick={() => setSelectedCategory(null)}
-                            className="hover:bg-blue-200 rounded-full transition-colors"
-                            title="태그 제거"
-                          >
-                            <svg className="w-3.5 h-3.5 sm:w-4 sm:h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                            </svg>
-                          </button>
-                        </div>
-                      )}
                     </div>
                     
                     {/* 응답 모드 선택(Auto/Thinking) + 전송 버튼 */}
@@ -2435,6 +2737,119 @@ export default function ChatPage() {
             </div>
           </div>
         )}
+          </>
+        ) : (
+          <>
+            <div className="bg-white safe-area-top sticky top-0 z-10 border-b border-gray-200 px-4 py-3 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                if (rightPanelView === 'school_record_link' || rightPanelView === 'mock_exam_input') setRightPanelView('school_record_menu')
+                else setRightPanelView('chat')
+              }}
+                className="p-2 -ml-1 rounded-lg hover:bg-gray-100 transition-colors flex items-center gap-2 text-gray-700"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                </svg>
+                <span className="text-sm font-medium">
+                  {rightPanelView === 'school_record_link' || rightPanelView === 'mock_exam_input' ? '입시 기록 메뉴로' : '채팅으로 돌아가기'}
+                </span>
+              </button>
+            </div>
+            <div className="flex-1 overflow-auto min-h-0">
+              {rightPanelView === 'grade_input' && (
+                <SchoolGradeInputModal
+                  embedded
+                  isOpen
+                  onClose={() => setRightPanelView('chat')}
+                  onRequireSchoolRecordLink={() => setRightPanelView('school_record_menu')}
+                  onOpenMockExamInput={() => setRightPanelView('mock_exam_input')}
+                />
+              )}
+              {rightPanelView === 'mock_exam_input' && (
+                <ScoreSetManagerModal
+                  embedded
+                  isOpen
+                  onClose={() => setRightPanelView('school_record_menu')}
+                  sessionId={sessionId}
+                  token={getRequestToken()}
+                  onUseScoreSet={(scoreSetId, scoreSetName) => {
+                    setActiveScoreId(scoreSetId)
+                    setInput((prev) => (prev.trim() ? `${prev} ${scoreSetName} ` : `${scoreSetName} `))
+                    setRightPanelView('chat')
+                  }}
+                />
+              )}
+              {rightPanelView === 'school_record_menu' && (
+                <div className="p-6 max-w-2xl mx-auto">
+                  <h1 className="text-xl font-bold text-gray-900 mb-6">입시 기록 연동</h1>
+                  <div className="rounded-2xl bg-blue-50/80 border border-blue-100 p-5 sm:p-6 mb-8">
+                    <p className="font-semibold text-gray-900 mb-1">신뢰할 수 있는 자료를 한 곳에 모아, 더 깊이 있는 답변을 받아보세요.</p>
+                    <p className="text-sm text-gray-600">생활기록부, 내신 성적, 모의고사 성적을 연동할 수 있어요.</p>
+                    <div className="mt-4 flex flex-wrap gap-2 justify-end opacity-70">
+                      <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-700 text-xs font-medium">W</span>
+                      <span className="inline-flex items-center justify-center w-8 h-8 rounded bg-blue-200 text-blue-700 text-xs font-medium">X</span>
+                      <span className="inline-flex items-center justify-center w-8 h-8 rounded bg-blue-100 text-blue-700 text-xs font-medium">PDF</span>
+                      <svg className="w-8 h-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="relative group">
+                      <button
+                        type="button"
+                        onClick={() => setRightPanelView('school_record_link')}
+                        className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 bg-white hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left"
+                      >
+                        <span className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        </span>
+                        <span className="font-medium text-gray-900">생활기록부 연동하기</span>
+                      </button>
+                      <div className="absolute top-full left-0 right-0 mt-2 px-4 py-3 rounded-xl border border-blue-200 bg-white shadow-md text-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity z-10 pointer-events-none">
+                        <p className="font-medium text-gray-900">생활기록부를 연동하고 더 많은 기능을 즐겨보세요</p>
+                        <p className="text-xs text-gray-600 mt-1">연동하는 법을 할 줄 몰라도 좋아요 차근차근 알려줄게요</p>
+                      </div>
+                    </div>
+                    <div className="relative group">
+                      <button
+                        type="button"
+                        onClick={() => setRightPanelView('grade_input')}
+                        className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 bg-white hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left"
+                      >
+                        <span className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        </span>
+                        <span className="font-medium text-gray-900">내신 성적 입력하기</span>
+                      </button>
+                      <div className="absolute top-full left-0 right-0 mt-2 px-4 py-3 rounded-xl border border-blue-200 bg-white shadow-md text-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity z-10 pointer-events-none">
+                        <p className="font-medium text-gray-900">고등학교 내신을 입력하고 더 많은 기능을 즐겨보세요</p>
+                        <p className="text-xs text-gray-600 mt-1">생활기록부를 연동하면 자동으로 입력돼요</p>
+                      </div>
+                    </div>
+                    <div className="relative group">
+                      <button
+                        type="button"
+                        onClick={() => setRightPanelView('mock_exam_input')}
+                        className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 bg-white hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left"
+                      >
+                        <span className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600">
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                        </span>
+                        <span className="font-medium text-gray-900">모의고사 성적 입력하기</span>
+                      </button>
+                      <div className="absolute top-full left-0 right-0 mt-2 px-4 py-3 rounded-xl border border-blue-200 bg-white shadow-md text-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity z-10 pointer-events-none">
+                        <p className="font-medium text-gray-900">모의고사 성적을 입력하고 더 많은 기능을 즐겨보세요</p>
+                        <p className="text-xs text-gray-600 mt-1">모의고사 성적을 몇개만 알려주어도, AI가 자동으로 채워서 분석해드려요</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {rightPanelView === 'school_record_link' && <SchoolRecordDeepAnalysisPage />}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Auto / Thinking 모드 선택 모달 - Auto 버튼 바로 위에 표시 */}
@@ -2445,26 +2860,23 @@ export default function ChatPage() {
           aria-hidden
         >
           <div
-            className="absolute bg-white rounded-2xl shadow-2xl border border-gray-200 w-[min(300px,calc(100vw-24px))] overflow-hidden"
+            className="absolute bg-white rounded-2xl shadow-2xl w-[min(300px,calc(100vw-24px))] overflow-hidden"
             style={{
               bottom: `${window.innerHeight - thinkingModeModalAnchor.top + 8}px`,
               left: `${Math.min(thinkingModeModalAnchor.left, window.innerWidth - 308)}px`,
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-4 pt-4 pb-1">
-              <p className="text-sm font-medium text-gray-500">유니로드</p>
-            </div>
-            <div className="px-2 pb-4 pt-0.5">
+            <div className="px-4 pt-4 pb-4">
               <button
                 onClick={() => {
                   setThinkingMode(false)
                   closeThinkingModeModal()
                 }}
-                className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl hover:bg-gray-50 transition-colors text-left"
+                className="w-full flex items-center justify-between gap-3 px-3 py-3 hover:bg-gray-50 rounded-lg transition-colors text-left"
               >
                 <div>
-                  <p className="font-medium text-gray-900">Auto</p>
+                  <p className="font-semibold text-gray-900">Auto</p>
                   <p className="text-sm text-gray-500 mt-0.5">난이도에 따라 생각하는 시간 조정</p>
                 </div>
                 {!thinkingMode && (
@@ -2483,15 +2895,11 @@ export default function ChatPage() {
                     openProModal()
                   }
                 }}
-                className="w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl hover:bg-gray-50 transition-colors text-left"
+                className="w-full flex items-center justify-between gap-3 px-3 py-3 hover:bg-gray-50 rounded-lg transition-colors text-left"
               >
-                <div className="flex items-center gap-2">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="font-medium text-gray-900">Thinking</p>
-                    </div>
-                    <p className="text-sm text-gray-500 mt-0.5">더 많은 자료 참고하여 더 깊이 생각</p>
-                  </div>
+                <div>
+                  <p className="font-semibold text-gray-900">Thinking</p>
+                  <p className="text-sm text-gray-500 mt-0.5">더 많은 자료 참고하여 더 깊이 생각</p>
                 </div>
                 {thinkingMode && (
                   <svg className="w-5 h-5 text-gray-900 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2981,6 +3389,55 @@ export default function ChatPage() {
         </div>
       )}
 
+      <SchoolRecordToolStartModal
+        isOpen={isSchoolRecordToolModalOpen}
+        linked={schoolRecordLinked}
+        loading={schoolRecordStatusLoading}
+        dontAskAgain={skipSchoolRecordToolConfirm}
+        confirmLabel={schoolRecordLinked === true ? '새 채팅' : '생기부 연동하기'}
+        onToggleDontAskAgain={setSkipSchoolRecordConfirm}
+        onClose={() => setIsSchoolRecordToolModalOpen(false)}
+        onConfirm={() => { void handleConfirmSchoolRecordToolStart() }}
+      />
+
+      <SchoolRecordToolStartModal
+        isOpen={isScorePredictionStartModalOpen}
+        linked={true}
+        loading={scorePredictionScoreSetsLoading}
+        dontAskAgain={skipScorePredictionConfirm}
+        confirmLabel="새 채팅"
+        title="합격 예측을 시작하시겠습니까?"
+        description="연동된 성적을 읽어 더 정확하게 답합니다."
+        statusText={
+          scorePredictionScoreSetsLoading
+            ? '성적 목록을 불러오는 중...'
+            : scorePredictionScoreSets.length === 0
+              ? '저장된 모의고사 성적이 없습니다. 성적을 먼저 입력해 주세요.'
+              : '연동된 성적을 읽어 더 정확하게 답합니다.'
+        }
+        scoreSets={scorePredictionScoreSets.length > 0 ? scorePredictionScoreSets : undefined}
+        onSelectScoreSet={handleSelectScoreSetForPrediction}
+        onToggleDontAskAgain={setSkipScorePredictionConfirm}
+        onClose={() => setIsScorePredictionStartModalOpen(false)}
+        onConfirm={() => { void handleConfirmScorePredictionStart() }}
+      />
+
+      <SchoolGradeInputModal
+        isOpen={isSchoolGradeInputModalOpen}
+        onClose={() => setIsSchoolGradeInputModalOpen(false)}
+        onRequireSchoolRecordLink={() => {
+          setIsSchoolGradeInputModalOpen(false)
+          navigate('/school-record-deep?tab=link')
+        }}
+        onOpenMockExamInput={() => {
+          setIsSchoolGradeInputModalOpen(false)
+          // 성적 입력 모달이 닫힌 뒤 모의고사 성적 관리 모달(해당 모달) 오픈
+          requestAnimationFrame(() => {
+            setIsScoreSetManagerOpen(true)
+          })
+        }}
+      />
+
       {/* 프로필 폼 모달 */}
       <ProfileForm 
         isOpen={isProfileFormOpen} 
@@ -2990,6 +3447,61 @@ export default function ChatPage() {
         }}
         showGuide={showProfileGuide}
       />
+
+      <ScoreSetManagerModal
+        isOpen={isScoreSetManagerOpen}
+        onClose={() => setIsScoreSetManagerOpen(false)}
+        sessionId={sessionId}
+        token={getRequestToken()}
+        onUseScoreSet={(scoreSetId, scoreSetName) => {
+          setActiveScoreId(scoreSetId)
+          setInput((prev) => (prev.trim() ? `${prev} ${scoreSetName} ` : `${scoreSetName} `))
+          setIsScoreSetManagerOpen(false)
+        }}
+      />
+
+      {scorePreview && (
+        <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4" onClick={() => setScorePreview(null)}>
+          <div className="bg-white w-full max-w-3xl rounded-xl shadow-xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <div className="sticky top-0 bg-white border-b px-4 py-3 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-gray-900">{scorePreview.name} 성적표</h3>
+              <button className="text-gray-500 hover:text-gray-700 text-2xl" onClick={() => setScorePreview(null)}>
+                ×
+              </button>
+            </div>
+            <div className="p-4">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="text-left">
+                      <th className="py-2 border-b">과목</th>
+                      <th className="py-2 border-b">선택과목</th>
+                      <th className="py-2 border-b">표준점수</th>
+                      <th className="py-2 border-b">백분위</th>
+                      <th className="py-2 border-b">등급</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {Object.entries(scorePreview.scores || {}).map(([subject, row]) => {
+                      const scoreRow = row as Record<string, any>
+                      return (
+                        <tr key={subject} className="border-b border-gray-100">
+                          <td className="py-2">{subject}</td>
+                          <td className="py-2">{scoreRow['선택과목'] ?? scoreRow['과목명'] ?? '-'}</td>
+                          <td className="py-2">{scoreRow['표준점수'] ?? '-'}</td>
+                          <td className="py-2">{scoreRow['백분위'] ?? '-'}</td>
+                          <td className="py-2">{scoreRow['등급'] ?? '-'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <p className="mt-3 text-xs text-gray-500">읽기 전용 보기입니다.</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PRO 업그레이드 팝업 - 웹 + 로그인한 Basic 유저에게만 표시 (PRO 유저는 숨김) */}
       {isProPopupVisible && !isGalaxySession && !isCapacitorApp() && isAuthenticated && user?.id && !user?.is_premium && (

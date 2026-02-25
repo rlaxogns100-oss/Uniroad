@@ -6,10 +6,17 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
+from supabase import create_client
+from config import settings
 from services.supabase_client import supabase_service
 from middleware.auth import get_current_user
 
 router = APIRouter()
+
+
+def _auth_client():
+    """인증 요청은 공유 클라이언트 대신 매 요청 fresh client 사용."""
+    return create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
 
 def _safe_name(name: Optional[str], email: Optional[str]) -> str:
     raw = (name or "").strip()
@@ -69,7 +76,8 @@ async def sign_up(request: SignUpRequest):
     """
     try:
         # Supabase Auth로 회원가입
-        response = supabase_service.client.auth.sign_up({
+        auth_client = _auth_client()
+        response = auth_client.auth.sign_up({
             "email": request.email,
             "password": request.password,
             "options": {
@@ -118,7 +126,8 @@ async def sign_in(request: SignInRequest):
     """
     try:
         # Supabase Auth로 로그인
-        response = supabase_service.client.auth.sign_in_with_password({
+        auth_client = _auth_client()
+        response = auth_client.auth.sign_in_with_password({
             "email": request.email,
             "password": request.password,
         })
@@ -205,7 +214,8 @@ async def refresh_token(refresh_token: str):
     액세스 토큰 갱신
     """
     try:
-        response = supabase_service.client.auth.refresh_session(refresh_token)
+        auth_client = _auth_client()
+        response = auth_client.auth.refresh_session(refresh_token)
 
         if response.session is None:
             raise HTTPException(status_code=401, detail="토큰 갱신 실패")
@@ -231,7 +241,8 @@ async def get_oauth_url(request: OAuthRequest):
     try:
         redirect_to = request.redirect_to or "http://localhost:5173"
 
-        response = supabase_service.client.auth.sign_in_with_oauth({
+        auth_client = _auth_client()
+        response = auth_client.auth.sign_in_with_oauth({
             "provider": request.provider,
             "options": {
                 "redirect_to": redirect_to,
@@ -268,7 +279,8 @@ async def oauth_callback(request: OAuthCallbackRequest):
     is_new_user: 이번 로그인이 신규 가입(최초 1회)인 경우 True (GA4 sign_up용)
     """
     try:
-        response = supabase_service.client.auth.exchange_code_for_session({
+        auth_client = _auth_client()
+        response = auth_client.auth.exchange_code_for_session({
             "auth_code": request.code
         })
 
