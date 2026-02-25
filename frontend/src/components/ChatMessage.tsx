@@ -599,6 +599,12 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
               <tbody>
                 {subjects.map((subject) => {
                   const row = scoreReviewScores?.[subject] || {}
+                  const electiveValue =
+                    subject === '한국사' ? '-' : row['선택과목'] ?? row['과목명'] ?? '미응시'
+                  const isKoreanHistory = subject === '한국사'
+                  const isNoExam = !isKoreanHistory && electiveValue === '미응시'
+                  const disableStandardPercentile = isKoreanHistory || isNoExam
+                  const disableGrade = isNoExam
                   const setVal = (key: string, value: any) =>
                     setScoreReviewScores((prev) => ({
                       ...prev,
@@ -614,8 +620,16 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
                           <select
                             className="w-full px-2 py-1 rounded border border-gray-200 bg-white"
                             disabled={!isEditScoreReview}
-                            value={row['선택과목'] ?? row['과목명'] ?? '미응시'}
-                            onChange={(e) => setVal('선택과목', e.target.value)}
+                            value={electiveValue}
+                            onChange={(e) => {
+                              const nextValue = e.target.value
+                              setVal('선택과목', nextValue)
+                              if (nextValue === '미응시') {
+                                setVal('표준점수', null)
+                                setVal('백분위', null)
+                                setVal('등급', null)
+                              }
+                            }}
                           >
                             {(electiveOptionsMap[subject] || ['미응시']).map((option) => (
                               <option key={option} value={option}>
@@ -626,37 +640,49 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
                         )}
                       </td>
                       <td className="py-1">
-                        <input
-                          type="number"
-                          min={0}
-                          max={200}
-                          className="w-full px-2 py-1 rounded border border-gray-200"
-                          disabled={!isEditScoreReview}
-                          value={row['표준점수'] ?? ''}
-                          onChange={(e) => setVal('표준점수', e.target.value === '' ? null : Number(e.target.value))}
-                        />
+                        {disableStandardPercentile ? (
+                          <span className="text-gray-400">-</span>
+                        ) : (
+                          <input
+                            type="number"
+                            min={0}
+                            max={200}
+                            className="w-full px-2 py-1 rounded border border-gray-200"
+                            disabled={!isEditScoreReview}
+                            value={row['표준점수'] ?? ''}
+                            onChange={(e) => setVal('표준점수', e.target.value === '' ? null : Number(e.target.value))}
+                          />
+                        )}
                       </td>
                       <td className="py-1">
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          className="w-full px-2 py-1 rounded border border-gray-200"
-                          disabled={!isEditScoreReview}
-                          value={row['백분위'] ?? ''}
-                          onChange={(e) => setVal('백분위', e.target.value === '' ? null : Number(e.target.value))}
-                        />
+                        {disableStandardPercentile ? (
+                          <span className="text-gray-400">-</span>
+                        ) : (
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            className="w-full px-2 py-1 rounded border border-gray-200"
+                            disabled={!isEditScoreReview}
+                            value={row['백분위'] ?? ''}
+                            onChange={(e) => setVal('백분위', e.target.value === '' ? null : Number(e.target.value))}
+                          />
+                        )}
                       </td>
                       <td className="py-1">
-                        <input
-                          type="number"
-                          min={1}
-                          max={9}
-                          className="w-full px-2 py-1 rounded border border-gray-200"
-                          disabled={!isEditScoreReview}
-                          value={row['등급'] ?? ''}
-                          onChange={(e) => setVal('등급', e.target.value === '' ? null : Number(e.target.value))}
-                        />
+                        {disableGrade ? (
+                          <span className="text-gray-400">-</span>
+                        ) : (
+                          <input
+                            type="number"
+                            min={1}
+                            max={9}
+                            className="w-full px-2 py-1 rounded border border-gray-200"
+                            disabled={!isEditScoreReview}
+                            value={row['등급'] ?? ''}
+                            onChange={(e) => setVal('등급', e.target.value === '' ? null : Number(e.target.value))}
+                          />
+                        )}
                       </td>
                     </tr>
                   )

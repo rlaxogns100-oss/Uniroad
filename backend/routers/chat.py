@@ -180,6 +180,26 @@ class ScoreReviewSkipSessionRequest(BaseModel):
     session_id: str
 
 
+class ScoreSetCreateRequest(BaseModel):
+    name: str
+    scores: Dict[str, Any]
+    session_id: Optional[str] = None
+
+
+class ScoreSetUpdateRequest(BaseModel):
+    name: str
+    scores: Dict[str, Any]
+    session_id: Optional[str] = None
+
+
+def _resolve_score_owner(user_id: Optional[str], session_id: Optional[str]) -> str:
+    if user_id:
+        return user_id
+    if session_id:
+        return f"guest:{session_id}"
+    raise HTTPException(status_code=400, detail="session_id 또는 로그인 정보가 필요합니다.")
+
+
 async def _prepare_score_review_gate(
     message: str,
     history: List[Dict[str, Any]],
@@ -1790,6 +1810,126 @@ async def get_score_set(
     if not row:
         raise HTTPException(status_code=404, detail="성적 세트를 찾을 수 없습니다.")
     return {"id": row.get("id"), "name": f"@{row.get('name')}", "scores": row.get("scores", {})}
+
+
+@router.get("/v2/score-sets")
+async def list_score_sets(
+    session_id: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    owner = _resolve_score_owner(user_id, session_id)
+    rows = await supabase_service.list_user_score_sets(owner, limit=100, include_scores=True)
+    items = [
+        {
+            "id": row.get("id"),
+            "name": f"@{row.get('name')}",
+            "scores": row.get("scores", {}),
+            "updated_at": row.get("updated_at"),
+        }
+        for row in rows
+    ]
+    return {"items": items}
+
+
+@router.post("/v2/score-sets")
+async def create_score_set(
+    request: ScoreSetCreateRequest,
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    owner = _resolve_score_owner(user_id, request.session_id)
+
+    raw_name = (request.name or "").strip()
+    if not raw_name:
+        raise HTTPException(status_code=400, detail="성적 이름은 필수입니다.")
+    name = raw_name[1:] if raw_name.startswith("@") else raw_name
+    if len(name) > 10:
+        raise HTTPException(status_code=400, detail="성적 제목은 최대 10자입니다.")
+
+    existing = await supabase_service.get_user_score_set_by_name(owner, name)
+    if existing:
+        raise HTTPException(status_code=409, detail="이미 같은 이름의 성적이 있습니다.")
+
+    saved = await supabase_service.upsert_user_score_set(
+        user_id=owner,
+        name=name,
+        scores=request.scores or {},
+        source_message=None,
+        title_auto_generated=False,
+    )
+    if not saved:
+        raise HTTPException(status_code=500, detail="성적 생성에 실패했습니다.")
+    return {
+        "id": saved.get("id"),
+        "name": f"@{saved.get('name')}",
+        "scores": saved.get("scores", {}),
+        "updated_at": saved.get("updated_at"),
+    }
+
+
+@router.put("/v2/score-sets/{score_set_id}")
+async def update_score_set(
+    score_set_id: str,
+    request: ScoreSetUpdateRequest,
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    owner = _resolve_score_owner(user_id, request.session_id)
+
+    target = await supabase_service.get_user_score_set_by_id(score_set_id, user_id=owner)
+    if not target:
+        raise HTTPException(status_code=404, detail="성적 세트를 찾을 수 없습니다.")
+
+    raw_name = (request.name or "").strip()
+    if not raw_name:
+        raise HTTPException(status_code=400, detail="성적 이름은 필수입니다.")
+    name = raw_name[1:] if raw_name.startswith("@") else raw_name
+    if len(name) > 10:
+        raise HTTPException(status_code=400, detail="성적 제목은 최대 10자입니다.")
+
+    same_name = await supabase_service.get_user_score_set_by_name(owner, name)
+    if same_name and str(same_name.get("id")) != str(score_set_id):
+        raise HTTPException(status_code=409, detail="이미 같은 이름의 성적이 있습니다.")
+
+    updated = await supabase_service.update_user_score_set_by_id(
+        user_id=owner,
+        score_set_id=score_set_id,
+        name=name,
+        scores=request.scores or {},
+    )
+    if not updated:
+        raise HTTPException(status_code=500, detail="성적 수정에 실패했습니다.")
+
+    return {
+        "id": updated.get("id"),
+        "name": f"@{updated.get('name')}",
+        "scores": updated.get("scores", {}),
+        "updated_at": updated.get("updated_at"),
+    }
+
+
+@router.delete("/v2/score-sets/{score_set_id}")
+async def delete_score_set(
+    score_set_id: str,
+    session_id: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(None),
+):
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    owner = _resolve_score_owner(user_id, session_id)
+
+    target = await supabase_service.get_user_score_set_by_id(score_set_id, user_id=owner)
+    if not target:
+        raise HTTPException(status_code=404, detail="성적 세트를 찾을 수 없습니다.")
+
+    ok = await supabase_service.delete_user_score_set_by_id(owner, score_set_id)
+    if not ok:
+        raise HTTPException(status_code=500, detail="성적 삭제에 실패했습니다.")
+    return {"ok": True}
 
 
 @router.post("/reset")

@@ -19,7 +19,7 @@ import AgentPanel from '../components/AgentPanel'
 import AuthModal from '../components/AuthModal'
 import PreregisterModal from '../components/PreregisterModal'
 import RollingPlaceholder from '../components/RollingPlaceholder'
-import ProfileForm from '../components/ProfileForm'
+import ScoreSetManagerModal from '../components/ScoreSetManagerModal'
 import { redirectToGumroadCheckout } from '../utils/gumroad'
 import { useAuth } from '../contexts/AuthContext'
 import { useChat } from '../hooks/useChat'
@@ -208,7 +208,6 @@ export default function ChatPage() {
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false)
   const [isAnnouncementModalOpen, setIsAnnouncementModalOpen] = useState(false)
   const [isProfileFormOpen, setIsProfileFormOpen] = useState(false)
-  const [showProfileGuide, setShowProfileGuide] = useState(false)
   const [activeScoreId, setActiveScoreId] = useState<string | undefined>(undefined)
   const [scoreSuggestItems, setScoreSuggestItems] = useState<ScoreSetSuggestItem[]>([])
   const [scoreSuggestIndex, setScoreSuggestIndex] = useState(0)
@@ -2081,7 +2080,6 @@ export default function ChatPage() {
                         setIsAuthModalOpen(true)
                       }}
                       onProfileRequired={() => {
-                        setShowProfileGuide(true)
                         setIsProfileFormOpen(true)
                       }}
                       onSchoolRecordClick={handleSchoolRecordShortcut}
@@ -3347,14 +3345,16 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* 프로필 폼 모달 */}
-      <ProfileForm 
-        isOpen={isProfileFormOpen} 
-        onClose={() => {
+      <ScoreSetManagerModal
+        isOpen={isProfileFormOpen}
+        onClose={() => setIsProfileFormOpen(false)}
+        sessionId={sessionId}
+        token={accessToken || undefined}
+        onUseScoreSet={(scoreSetId, scoreSetName) => {
+          setActiveScoreId(scoreSetId)
+          setInput((prev) => (prev.trim() ? `${prev} ${scoreSetName} ` : `${scoreSetName} `))
           setIsProfileFormOpen(false)
-          setShowProfileGuide(false)
         }}
-        showGuide={showProfileGuide}
       />
 
       {scorePreview && (

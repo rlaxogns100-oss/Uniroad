@@ -522,13 +522,20 @@ class SupabaseService:
 
     @classmethod
     async def list_user_score_sets(
-        cls, user_id: str, keyword: str = "", limit: int = 8
+        cls,
+        user_id: str,
+        keyword: str = "",
+        limit: int = 8,
+        include_scores: bool = False,
     ) -> List[Dict[str, Any]]:
         client = cls.get_admin_client()
         try:
+            select_cols = "id,name,updated_at"
+            if include_scores:
+                select_cols = f"{select_cols},scores"
             query = (
                 client.table("user_score_sets")
-                .select("id,name,updated_at")
+                .select(select_cols)
                 .eq("user_id", user_id)
                 .order("updated_at", desc=True)
                 .limit(limit)
@@ -540,6 +547,48 @@ class SupabaseService:
         except Exception as e:
             print(f"❌ list_user_score_sets 오류: {e}")
             return []
+
+    @classmethod
+    async def update_user_score_set_by_id(
+        cls,
+        user_id: str,
+        score_set_id: str,
+        name: str,
+        scores: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        client = cls.get_admin_client()
+        try:
+            score_name = cls._normalize_score_name(name)
+            response = (
+                client.table("user_score_sets")
+                .update(
+                    {
+                        "name": score_name,
+                        "scores": scores or {},
+                    }
+                )
+                .eq("id", score_set_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+            if response.data and len(response.data) > 0:
+                return response.data[0]
+            return None
+        except Exception as e:
+            print(f"❌ update_user_score_set_by_id 오류: {e}")
+            return None
+
+    @classmethod
+    async def delete_user_score_set_by_id(cls, user_id: str, score_set_id: str) -> bool:
+        client = cls.get_admin_client()
+        try:
+            client.table("user_score_sets").delete().eq("id", score_set_id).eq(
+                "user_id", user_id
+            ).execute()
+            return True
+        except Exception as e:
+            print(f"❌ delete_user_score_set_by_id 오류: {e}")
+            return False
 
     @classmethod
     async def create_chat_score_pending(

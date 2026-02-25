@@ -111,6 +111,13 @@ export interface ScoreSetSuggestItem {
   name: string
 }
 
+export interface ScoreSetItem {
+  id: string
+  name: string
+  scores: Record<string, any>
+  updated_at?: string
+}
+
 export interface UploadResponse {
   success: boolean
   message: string
@@ -891,6 +898,57 @@ export const getScoreSetByName = async (
     headers: token ? { Authorization: `Bearer ${token}` } : undefined,
   })
   return response.data
+}
+
+export const listScoreSets = async (
+  sessionId: string,
+  token?: string
+): Promise<ScoreSetItem[]> => {
+  const response = await api.get('/chat/v2/score-sets', {
+    params: { session_id: sessionId },
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  })
+  return response.data?.items || []
+}
+
+export const createScoreSet = async (
+  sessionId: string,
+  name: string,
+  scores: Record<string, any>,
+  token?: string
+): Promise<ScoreSetItem> => {
+  const response = await api.post(
+    '/chat/v2/score-sets',
+    { session_id: sessionId, name, scores },
+    { headers: token ? { Authorization: `Bearer ${token}` } : undefined }
+  )
+  return response.data
+}
+
+export const updateScoreSet = async (
+  scoreSetId: string,
+  sessionId: string,
+  name: string,
+  scores: Record<string, any>,
+  token?: string
+): Promise<ScoreSetItem> => {
+  const response = await api.put(
+    `/chat/v2/score-sets/${scoreSetId}`,
+    { session_id: sessionId, name, scores },
+    { headers: token ? { Authorization: `Bearer ${token}` } : undefined }
+  )
+  return response.data
+}
+
+export const deleteScoreSet = async (
+  scoreSetId: string,
+  sessionId: string,
+  token?: string
+): Promise<void> => {
+  await api.delete(`/chat/v2/score-sets/${scoreSetId}`, {
+    params: { session_id: sessionId },
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  })
 }
 
 // ============================================================
