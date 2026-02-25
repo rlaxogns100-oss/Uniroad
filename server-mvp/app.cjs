@@ -23,8 +23,8 @@ const HWP_NOTIFY_EMAILS = (process.env.HWP_NOTIFY_EMAILS || '')
 // 토스페이먼츠 자동결제(빌링) 설정
 // - TOSS_BILLING_CLIENT_KEY: API 개별 연동 "클라이언트 키" (테스트/라이브)
 // - TOSS_BILLING_SECRET_KEY: API 개별 연동 "시크릿 키"   (테스트/라이브)
-const TOSS_BILLING_CLIENT_KEY = process.env.TOSS_BILLING_CLIENT_KEY || 'test_ck_GePWvyJnrKPzxN2oEGp78gLzN97E';
-const TOSS_BILLING_SECRET_KEY = process.env.TOSS_BILLING_SECRET_KEY || 'test_sk_nRQoOaPz8LLyWBjEDwAe8y47BMw6';
+const TOSS_BILLING_CLIENT_KEY = process.env.TOSS_BILLING_CLIENT_KEY || '';
+const TOSS_BILLING_SECRET_KEY = process.env.TOSS_BILLING_SECRET_KEY || '';
 
 let mailTransporter = null;
 if (EMAIL_HOST && EMAIL_USER && EMAIL_PASS) {

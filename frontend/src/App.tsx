@@ -20,6 +20,7 @@ import TermsPage from './pages/TermsPage'
 import SharedChatPage from './pages/SharedChatPage'
 import OAuthCallbackPage from './pages/OAuthCallbackPage'
 import SchoolRecordEvalPage from './pages/SchoolRecordEvalPage'
+import { isCapacitorApp } from './config'
 import { useEffect } from 'react'
 import { initializeTracking, trackPageView } from './utils/tracking'
 
@@ -104,7 +105,7 @@ function App() {
             <Route path="/oauth-callback" element={<OAuthCallbackPage />} />
             <Route path="/policy" element={<PolicyPage />} />
             <Route path="/terms" element={<TermsPage />} />
-            <Route path="/" element={<Navigate to="/chat" replace />} />
+            <Route path="/" element={isCapacitorApp() ? <Navigate to="/chat" replace /> : <LandingPage />} />
             
             {/* 로그인 후 채팅 페이지 */}
             <Route
