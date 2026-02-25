@@ -16,6 +16,7 @@ import AdminAnalyticsConversion from './pages/AdminAnalyticsConversion'
 import AdminAnalyticsFunnel from './pages/AdminAnalyticsFunnel'
 import AgentTestPage from './pages/AgentTestPage'
 import PolicyPage from './pages/PolicyPage'
+import TermsPage from './pages/TermsPage'
 import SharedChatPage from './pages/SharedChatPage'
 import OAuthCallbackPage from './pages/OAuthCallbackPage'
 import SchoolRecordEvalPage from './pages/SchoolRecordEvalPage'
@@ -102,6 +103,7 @@ function App() {
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/oauth-callback" element={<OAuthCallbackPage />} />
             <Route path="/policy" element={<PolicyPage />} />
+            <Route path="/terms" element={<TermsPage />} />
             <Route path="/" element={<Navigate to="/chat" replace />} />
             
             {/* 로그인 후 채팅 페이지 */}

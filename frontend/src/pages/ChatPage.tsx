@@ -148,6 +148,7 @@ export default function ChatPage() {
   const [isPreregisterModalOpen, setIsPreregisterModalOpen] = useState(false)
   const [isProModalOpen, setIsProModalOpen] = useState(false)
   const [isBankTransferModalOpen, setIsBankTransferModalOpen] = useState(false)
+  const [isApprovalWidgetChoiceOpen, setIsApprovalWidgetChoiceOpen] = useState(false)
   const [bankTransferName, setBankTransferName] = useState('')
   const [bankTransferPhone, setBankTransferPhone] = useState('')
   const [bankTransferSubmitting, setBankTransferSubmitting] = useState(false)
@@ -251,6 +252,31 @@ export default function ChatPage() {
       return
     }
     setIsProModalOpen(false)
+  }
+  const openApprovalPaymentWidget = (fallbackUrl: string) => {
+    const widgetUrl = fallbackUrl.trim()
+    if (!widgetUrl) {
+      alert('승인용 간편결제 위젯 주소가 비어 있습니다.')
+      return
+    }
+
+    const opened = window.open(widgetUrl, '_blank', 'noopener,noreferrer')
+    if (!opened) {
+      window.location.href = widgetUrl
+    }
+  }
+  const openApprovalWidgetChoice = () => {
+    setIsApprovalWidgetChoiceOpen(true)
+  }
+  const openApprovalSimplePayWidget = () => {
+    const oneTimeWidgetUrl = import.meta.env.VITE_TOSS_WIDGET_APPROVAL_ONETIME_URL || 'http://localhost:3000/payments/checkout.html'
+    openApprovalPaymentWidget(oneTimeWidgetUrl)
+    setIsApprovalWidgetChoiceOpen(false)
+  }
+  const openApprovalBillingWidget = () => {
+    const billingWidgetUrl = import.meta.env.VITE_TOSS_WIDGET_APPROVAL_BILLING_URL || 'http://localhost:3000/payments/billing.html'
+    openApprovalPaymentWidget(billingWidgetUrl)
+    setIsApprovalWidgetChoiceOpen(false)
   }
   const subscribeByBankTransfer = () => {
     setBankTransferName(user?.name || '')
@@ -1624,6 +1650,13 @@ export default function ChatPage() {
                   )}
                 </div>
                 <div className="flex justify-center gap-3">
+                  <a
+                    href="/terms"
+                    className="text-[10px] sm:text-xs text-gray-500 hover:text-blue-500 hover:underline transition-colors"
+                  >
+                    이용약관
+                  </a>
+                  <span className="text-gray-300">|</span>
                   <a 
                     href="/policy" 
                     className="text-[10px] sm:text-xs text-gray-500 hover:text-blue-500 hover:underline transition-colors"
@@ -1645,6 +1678,13 @@ export default function ChatPage() {
             ) : (
               <div>
                 <div className="flex justify-center gap-3 mb-3 sm:mb-4">
+                  <a
+                    href="/terms"
+                    className="text-[10px] sm:text-xs text-gray-500 hover:text-blue-500 hover:underline transition-colors"
+                  >
+                    이용약관
+                  </a>
+                  <span className="text-gray-300">|</span>
                   <a 
                     href="/policy" 
                     className="text-[10px] sm:text-xs text-gray-500 hover:text-blue-500 hover:underline transition-colors"
@@ -2435,6 +2475,9 @@ export default function ChatPage() {
             </div>
           </div>
         )}
+        <p className="text-center text-[10px] text-gray-400 py-1 leading-tight" style={{ transform: 'translateY(-10px)' }}>
+          매장직결 | 사업자등록번호 140-29-01759 | 대표 김태훈 | 경기도 용인시 수지구 현암로125번길 11, 723동 704호 | 010-2808-9914 | rlaxogns100@snu.ac.kr | 통신판매업 신고 준비중
+        </p>
       </div>
 
       {/* Auto / Thinking 모드 선택 모달 - Auto 버튼 바로 위에 표시 */}
@@ -2678,6 +2721,48 @@ export default function ChatPage() {
                 className="w-full mt-3 py-3.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
               >
                 무통장입금으로 구독하기
+              </button>
+              <button
+                onClick={openApprovalWidgetChoice}
+                className="w-full mt-3 py-3.5 border border-indigo-300 text-indigo-700 rounded-xl font-semibold hover:bg-indigo-50 transition-colors"
+              >
+                결제위젯(승인용, 작동하지 않습니다.)
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 승인용 결제위젯 선택 모달 */}
+      {!isGalaxySession && isApprovalWidgetChoiceOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-gray-200">
+            <div className="p-5 border-b border-gray-100 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">결제 방식 선택</h3>
+                <p className="text-sm text-gray-600 mt-1">승인용 결제 위젯입니다. 실제 결제는 동작하지 않습니다.</p>
+              </div>
+              <button
+                onClick={() => setIsApprovalWidgetChoiceOpen(false)}
+                className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-5 space-y-3">
+              <button
+                onClick={openApprovalSimplePayWidget}
+                className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700 transition-colors"
+              >
+                간편결제
+              </button>
+              <button
+                onClick={openApprovalBillingWidget}
+                className="w-full py-3.5 border border-indigo-300 text-indigo-700 rounded-xl font-semibold hover:bg-indigo-50 transition-colors"
+              >
+                정기결제
               </button>
             </div>
           </div>
@@ -3040,6 +3125,7 @@ export default function ChatPage() {
           </div>
         </div>
       )}
+
       </div>
     </div>
   )

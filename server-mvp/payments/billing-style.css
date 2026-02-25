@@ -1,0 +1,143 @@
+body {
+  background-color: #e8f3ff;
+}
+.p {
+  padding: 0;
+  margin: 0;
+  font-family: Toss Product Sans, -apple-system, BlinkMacSystemFont, Bazier Square, Noto Sans KR, Segoe UI, Apple SD Gothic Neo, Roboto, Helvetica Neue, Arial, sans-serif, Apple Color Emoji,
+    Segoe UI Emoji, Segoe UI Symbol, Noto Color Emoji;
+  color: #4e5968;
+  word-break: keep-all;
+  word-wrap: break-word;
+}
+.wrapper {
+  max-width: 800px;
+  margin: 0 auto;
+}
+.title {
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 600;
+  color: #4e5968;
+}
+.box_section {
+  background-color: white;
+  border-radius: 10px;
+  box-shadow: 0 10px 20px rgb(0 0 0 / 1%), 0 6px 6px rgb(0 0 0 / 6%);
+  padding: 50px 50px 50px 50px;
+  margin-top: 30px;
+  margin-right: auto;
+  margin-left: auto;
+  color: #333d4b;
+  align-items: center;
+  text-align: center;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+::root {
+  --inverseGrey50: #202027;
+  --inverseGrey100: #2c2c35;
+  --inverseGrey200: #3c3c47;
+  --inverseGrey300: #4d4d59;
+  --inverseGrey400: #62626d;
+  --inverseGrey500: #7e7e87;
+  --inverseGrey600: #9e9ea4;
+  --inverseGrey700: #c3c3c6;
+  --inverseGrey800: #e4e4e5;
+  --inverseGrey900: #fff;
+  --background: #fff;
+  --darkBackground: #17171c;
+  --greyBackground: #f2f4f6;
+  --darkGreyBackground: #101013;
+  --layeredBackground: #fff;
+  --darkLayeredBackground: #202027;
+  --floatBackground: #fff;
+  --darkFloatBackground: #2c2c35;
+  --black: #000;
+  --grey50: #f9fafb;
+  --grey100: #f2f4f6;
+  --grey200: #e5e8eb;
+  --grey300: #d1d6db;
+  --grey400: #b0b8c1;
+  --grey500: #8b95a1;
+  --grey600: #6b7684;
+  --grey700: #4e5968;
+  --grey800: #333d4b;
+  --grey900: #191f28;
+  --greyOpacity50: rgba(0, 23, 51, 0.02);
+  --greyOpacity100: rgba(2, 32, 71, 0.05);
+  --greyOpacity200: rgba(0, 27, 55, 0.1);
+  --greyOpacity300: rgba(0, 29, 58, 0.18);
+  --greyOpacity400: rgba(0, 25, 54, 0.31);
+  --greyOpacity500: rgba(3, 24, 50, 0.46);
+  --greyOpacity600: rgba(0, 19, 43, 0.58);
+  --greyOpacity700: rgba(3, 18, 40, 0.7);
+  --greyOpacity800: rgba(0, 12, 30, 0.8);
+  --greyOpacity900: rgba(2, 9, 19, 0.91);
+  --white: #fff;
+  --blue50: #e8f3ff;
+  --blue100: #c9e2ff;
+  --blue200: #90c2ff;
+  --blue300: #61abff;
+  --blue400: #3182f6;
+  --blue500: #2563eb;
+  --blue600: #1d4ed8;
+  --blue700: #1e40af;
+  --blue800: #1e3a8a;
+  --blue900: #172554;
+  --tossBlue50: #e8f3ff;
+  --tossBlue100: #c9e2ff;
+  --tossBlue200: #90c2ff;
+  --tossBlue300: #61abff;
+  --tossBlue400: #3182f6;
+  --tossBlue500: #2563eb;
+  --tossBlue600: #1d4ed8;
+  --tossBlue700: #1e40af;
+  --tossBlue800: #1e3a8a;
+  --tossBlue900: #172554;
+}
+.button {
+  border-radius: 8px;
+  border: none;
+  padding: 11px 16px;
+  background-color: #3282f6;
+  color: #f9fcff;
+  cursor: pointer;
+  box-shadow: 0 12px 24px -8px rgba(50, 130, 246, 0.36);
+  font-size: 17px;
+  font-weight: 600;
+}
+.p-grid {
+  -webkit-box-flex: 1;
+  flex-grow: 1;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-column-gap: 10px;
+  grid-row-gap: 12px;
+  align-items: center;
+}
+.p-grid-col {
+  text-align: left;
+}
+.p-grid-col5 {
+  width: 50%;
+}
+.p-button {
+  width: 100%;
+  margin-top: 10px;
+}
+.p-field-label {
+  font-size: 14px;
+  color: #4e5968;
+}
+.input {
+  border-radius: 8px;
+  border: 1px solid #d1d6db;
+  padding: 11px 16px;
+  font-size: 17px;
+  font-weight: 500;
+  box-sizing: border-box;
+  width: 100%;
+}
+
+
