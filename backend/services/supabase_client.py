@@ -91,6 +91,36 @@ class SupabaseService:
             import traceback
             traceback.print_exc()
             return None
+
+    @classmethod
+    def upload_avatar_to_storage(cls, user_id: str, file_bytes: bytes, content_type: str) -> Optional[str]:
+        """
+        프로필 이미지를 Storage에 업로드 (document/avatars/).
+        Returns: public URL 또는 None
+        """
+        import uuid
+        client = cls.get_client()
+        ext = "jpg"
+        if "png" in content_type:
+            ext = "png"
+        elif "gif" in content_type:
+            ext = "gif"
+        elif "webp" in content_type:
+            ext = "webp"
+        storage_name = f"{user_id}_{uuid.uuid4().hex[:12]}.{ext}"
+        storage_path = f"avatars/{storage_name}"
+        try:
+            client.storage.from_("document").upload(
+                storage_path,
+                file_bytes,
+                file_options={"content-type": content_type, "x-upsert": "true"}
+            )
+            public_url = client.storage.from_("document").get_public_url(storage_path)
+            print(f"✅ Avatar Storage 업로드 완료: {storage_path}")
+            return public_url
+        except Exception as e:
+            print(f"❌ Avatar Storage 업로드 오류: {e}")
+            return None
     
     @classmethod
     async def insert_document_metadata(

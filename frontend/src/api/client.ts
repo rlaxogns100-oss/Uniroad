@@ -882,6 +882,11 @@ export interface UserProfile {
   scores: Record<string, ScoreEntry>
   created_at: string
   updated_at: string
+  image_url?: string | null
+  is_premium?: boolean
+  display_name?: string | null
+  bio?: string | null
+  description?: string | null
 }
 
 // 프로필 조회
@@ -890,6 +895,34 @@ export const getProfile = async (token: string): Promise<UserProfile> => {
     headers: { Authorization: `Bearer ${token}` }
   })
   return response.data
+}
+
+// 프로필 수정 (image_url, display_name, bio, description 등)
+export const updateProfile = async (
+  token: string,
+  payload: { image_url?: string; display_name?: string; bio?: string; description?: string }
+): Promise<UserProfile> => {
+  const response = await api.patch<UserProfile>('/profile/me', payload, {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return response.data
+}
+
+// 프로필 사진 업로드 (user_profiles.metadata.image_url 에 저장)
+export const uploadProfileAvatar = async (token: string, file: File): Promise<UserProfile> => {
+  const form = new FormData()
+  form.append('file', file)
+  const apiUrl = API_BASE ? `${API_BASE}/api` : '/api'
+  const res = await fetch(`${apiUrl}/profile/me/avatar`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || '업로드 실패')
+  }
+  return res.json()
 }
 
 // 프로필 저장/수정

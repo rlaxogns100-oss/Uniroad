@@ -410,6 +410,8 @@ async def chat(
                 message=message,
                 history=history,
                 school_record_context=school_record_report_context,
+                school_record=school_profile,
+                user_id=user_id,
             )
 
             final_answer = report_result.get("response", "생기부 분석 보고서를 생성하지 못했습니다.")
@@ -928,6 +930,8 @@ async def chat_stream_v2_with_image(
                     message=enhanced_message,
                     history=history,
                     school_record_context=school_record_report_context,
+                    school_record=school_profile,
+                    user_id=user_id,
                 )
                 if use_school_record
                 else run_orchestration_agent_stream(
@@ -1130,6 +1134,8 @@ async def chat_stream_v2(
                     message=message,
                     history=history,
                     school_record_context=school_record_report_context,
+                    school_record=school_profile,
+                    user_id=user_id,
                 ):
                     event_type = event.get("type")
 

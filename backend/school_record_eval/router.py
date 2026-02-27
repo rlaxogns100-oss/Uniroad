@@ -414,6 +414,18 @@ async def upload_school_record_pdf(
     school["parsedSchoolRecordSummary"] = full_summary
     await SupabaseService.update_user_profile_school_record(user_id, school)
 
+    # 매칭용 내부 요약 1회 생성 (적합 학교 추천 시 사용, 사용자 비노출)
+    try:
+        from school_record_eval.matching_summary import generate_matching_summary_from_school_record
+        matching_text = await generate_matching_summary_from_school_record(school)
+        if matching_text:
+            school["matchingSummary"] = matching_text
+            forms["matchingSummary"] = matching_text
+            school["forms"] = forms
+            await SupabaseService.update_user_profile_school_record(user_id, school)
+    except Exception as e:
+        print(f"⚠️ 매칭용 요약 생성 실패(무시, 최초 추천 요청 시 생성됨): {e}")
+
     return {
         "ok": True,
         "message": "생기부 PDF를 전체 파싱하여 연동했습니다.",

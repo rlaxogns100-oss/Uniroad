@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   sendMessageStream,
   sendMessageStreamWithImage,
@@ -13,6 +13,9 @@ import {
   resetSession,
   migrateMessages,
   listScoreSets,
+  getProfile,
+  uploadProfileAvatar,
+  updateProfile,
 } from '../api/client'
 import ChatMessage from '../components/ChatMessage'
 import ThinkingProcess from '../components/ThinkingProcess'
@@ -34,6 +37,7 @@ import { FrontendTimingLogger } from '../utils/timingLogger'
 import { API_BASE, isCapacitorApp, isGalaxyAppSession } from '../config'
 import { addLog } from '../utils/adminLogger'
 import { QUICK_EXAMPLE_RESPONSES } from '../data/quickExampleResponses'
+import { Menu, Search, Plus, FolderOpen, PenLine, Calculator, X, Trash2, GraduationCap, Sparkles, Heart, Copy, ArrowUpRight, Crown, User, Gem, Settings, Calendar } from 'lucide-react'
 
 interface UsedChunk {
   id: string
@@ -168,8 +172,12 @@ interface Announcement {
   updated_at: string
 }
 
+const SCHOOL_RECORD_MODE_PARAM = 'mode=school-record'
+
 export default function ChatPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const isSchoolRecordModeUrl = searchParams.get('mode') === 'school-record'
   const { user, signOut, isAuthenticated, accessToken } = useAuth()
   const {
     sessions,
@@ -245,7 +253,104 @@ export default function ChatPage() {
   const [searchQuery, setSearchQuery] = useState<string>('') // 채팅 검색어
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false) // 검색창 열림 상태
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null) // 카테고리 선택 상태
-  
+  const [exampleFaqModalIndex, setExampleFaqModalIndex] = useState<number | null>(null) // 예시 질문 모달 (0~12)
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  const userMenuRef = useRef<HTMLDivElement>(null)
+  const userMenuRefMobile = useRef<HTMLDivElement>(null)
+  const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null)
+  const [profileDisplayName, setProfileDisplayName] = useState<string | null>(null)
+  const [profileBio, setProfileBio] = useState<string | null>(null)
+  const [profileDescription, setProfileDescription] = useState<string | null>(null)
+  const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false)
+  const [editProfileUploading, setEditProfileUploading] = useState(false)
+  const [editDisplayName, setEditDisplayName] = useState('')
+  const [editBio, setEditBio] = useState('')
+  const [editDescription, setEditDescription] = useState('')
+  const [editProfileSaving, setEditProfileSaving] = useState(false)
+  const editProfileInputRef = useRef<HTMLInputElement>(null)
+  const [schoolRecordMenuTab, setSchoolRecordMenuTab] = useState<'school_record' | 'grade' | 'mock_exam'>('school_record')
+  const DEFAULT_BIO = '유니로드와 함께 입시를 준비해 보세요.'
+  const DEFAULT_DESCRIPTION = '생활기록부, 내신 성적, 모의고사 성적을 연동하면 개인 기록 기반으로 더 정밀한 답변을 받을 수 있어요.'
+
+  // 4개 카테고리 모달에 있는 질문 전부 + 하드코딩 답변 (합격예측 3, 생활기록부 3, 모집요강 4, 대학정보 3)
+  const exampleFaqItems: { question: string; answer: string }[] = [
+    // 합격 예측
+    {
+      question: '나 내신 2.5인데 교대 가고 싶어',
+      answer: '내신 2.5등급이면 교대(교육대학) 지원 가능 여부는 지역·대학별로 다릅니다. 교대는 학생부종합·학생부교과·정시 등 전형이 있고, 내신 반영비율과 최저학력기준이 있어요. 지역별 교대별 최근 합격 사례와 반영비는 매년 바뀌므로, 유니로드 채팅에서 "내신 2.5 교대 가능 대학" 또는 "OO교대 내신 반영"이라고 물어보시면 최신 데이터로 안내해 드립니다.',
+    },
+    {
+      question: '국수영탐 21111 어디 전자공학과 갈 수 있어?',
+      answer: '국수영탐 21111(등급)이면 전자공학과 지원 가능 대학은 수도권·지방국립·사립까지 다양합니다. 정시 가/나군, 반영과목·가산점에 따라 지원 전략이 달라져요. "21111 전자공학과 지원 가능 대학" 또는 "전자공학 정시 입결"이라고 채팅에서 물어보시면 점수대별로 추천해 드립니다.',
+    },
+    {
+      question: '백분위 80, 98, 1등급, 95, 95인데 대학 추천해줘',
+      answer: '국·수·영·탐 백분위와 등급을 함께 보면 지원 가능 구간을 짚을 수 있어요. 수학·탐구가 강점이면 공대·자연계, 균형이면 인문·상경도 고려할 수 있습니다. 정확한 대학·학과 추천은 반영비와 전년 입결을 함께 봐야 하므로, 위 점수를 그대로 채팅에 입력해 주시면 맞춤 추천해 드립니다.',
+    },
+    // 생활기록부
+    {
+      question: '내 생활기록부 바탕으로 가장 적합한 학교 어디야?',
+      answer: '학생의 생활기록부는 \'데이터 분석력을 탑재한 거시경제·정치 전문가\'의 표본입니다. 전반적인 교과 성적이 최상위권(전 과목 1등급대 수렴)일 뿐만 아니라, 사회 교과군(경제, 정치와 법, 세계사, 사회·문화)에서 모두 1등급을 획득하며 전공 적합성을 확고히 했습니다. 강점은 \'수학적 도구를 활용한 사회 현상의 논리적 재구성\'입니다.',
+    },
+    {
+      question: '덕성여대 기준으로 생기부 면접 질문 10개 만들어줘',
+      answer: '본 분석은 덕성여자대학교의 덕성인재전형Ⅱ(면접형) 평가 기준을 바탕으로 작성되었습니다. 덕성여대는 학생부종합전형에서 \'전공적합성\'이라는 용어 대신 \'자기주도성\'과 \'학업성취역량\'을 핵심 지표로 활용합니다. 덕성여자대학교는 학업역량에서 전공적합성을 평가하지 않고, 대학 입학 후 자기주도성을 기반으로 커리큘럼을 이해하고 활용할 수 있는 인재를 선발합니다.',
+    },
+    {
+      question: '최근 합격자 생기부랑 내 생기부 비교해줘',
+      answer: '현재 합격자 생기부와 비교했을때도, 국제 경제 질서의 변화를 거시적인 인과관계로 구조화하여 설명하는 능력이 탁월합니다. 플라자 합의가 일본 경제의 버블 형성과 붕괴에 미친 영향을 5단계로 분석하고, 이를 한국과 대만의 경제 성장과 연결하여 동아시아 국제 질서의 변화를 설명한 점은 전문가 수준의 분석력을 보여줍니다.',
+    },
+    {
+      question: '세특 내용을 3학년때 어떻게 보완하는게 좋을까?',
+      answer: '소설 \'관리자들\' 서평에서는 인간 존재의 이중성과 사회적 압박을 통찰력 있게 분석하여 문학적 감수성과 비판적 사고력을 증명하였습니다. 다만, 독서 활동이 주로 인문/사회 분야에 치중되어 있어 수리적/데이터 중심적 독서 이력 보완이 필요해 보입니다.',
+    },
+    // 모집요강
+    {
+      question: '경희대 빅데이터응용학과 학종으로 몇 명 뽑아?',
+      answer: '경희대 빅데이터응용학과 학생부종합 전형 모집인원은 매년 모집요강에 공지됩니다. 학종 내에서도 지역균형·일반 등 세부 전형별 인원이 나뉠 수 있어요. 정확한 인원은 "경희대 빅데이터응용학과 학종 모집인원"이라고 채팅에서 물어보시면 최신 모집요강 기준으로 안내해 드립니다.',
+    },
+    {
+      question: '성균관대 특성화고 전형에 대해 알려줘',
+      answer: '성균관대 특성화고(마이스터고 등) 전형은 전형명·지원자격·모집인원·선발방법이 매년 모집요강에 나옵니다. 서류·면접 비중과 반영요소를 확인하는 것이 중요해요. "성균관대 특성화고 전형" 또는 "성균관대 마이스터고"라고 질문하시면 요건과 일정을 요약해 드립니다.',
+    },
+    {
+      question: '중앙대랑 이화여대 수능 최저 기준 어떻게 돼?',
+      answer: '중앙대·이화여대 모두 전형별로 수능 최저학력기준(국·수·영·탐 등급 조합)이 있을 수 있습니다. 학과·전형마다 기준이 다르고 해마다 바뀌므로, "중앙대 수능 최저" "이화여대 수능 최저"라고 채팅에서 물어보시면 최신 모집요강 기준으로 안내해 드립니다.',
+    },
+    {
+      question: '부산대랑 경북대 지역인재 전형 조건 알려줘',
+      answer: '부산대·경북대 지역인재전형은 해당 지역(출신 고교·거주지 등) 요건을 만족해야 지원할 수 있습니다. 전형별로 서류·면접 비중과 모집인원이 다릅니다. "부산대 지역인재 조건", "경북대 지역인재 전형"이라고 질문하시면 요건·일정·반영방법을 요약해 드립니다.',
+    },
+    // 대학 정보
+    {
+      question: '서울대학교 기계공학부 정시 입결 알려줘',
+      answer: '서울대학교 기계공학부 정시는 수능 100% 반영입니다. 2025학년도 기준 가군·나군 모집이며, 공통으로 국·수·영·탐(2과목) 반영합니다. 작년도 합격자 평균 백분위는 국어·수학 상위권, 탐구는 과목별 차이가 있으니 최신 모집요강과 대학별 공지로 확인하세요. 정확한 입결은 유니로드 채팅에서 "서울대 기계공학부 정시 입결"이라고 물어보시면 최신 데이터를 바탕으로 안내해 드립니다.',
+    },
+    {
+      question: '연세대학교 농어촌 가능해?',
+      answer: '네, 연세대학교는 농어촌전형을 실시합니다. 지역·출신학교 요건을 만족하면 지원할 수 있으며, 전형별로 모집인원과 반영방식이 다릅니다. 정확한 요건·일정·반영비율은 매년 모집요강이 갱신되므로, 유니로드에서 "연세대 농어촌 전형 조건" 또는 "연세대 농어촌 모집인원"이라고 질문하시면 최신 정보를 알려 드립니다.',
+    },
+    {
+      question: '고려대학교 경영학과 작년 컷 알려줘',
+      answer: '고려대 경영학과 정시(가/나군) 작년도 합격 컷은 수능 백분위·등급으로 공개되는 경우가 많습니다. 정시는 국·수·영·탐 반영비율과 가산점 여부를 반드시 확인해야 하며, 연도별로 소폭 변동될 수 있습니다. 정확한 수치와 전년 대비 변화는 "고려대 경영학과 작년 컷" 또는 "고려대 경영 정시 입결"이라고 채팅에서 물어보시면 최신 데이터 기준으로 안내해 드립니다.',
+    },
+  ]
+
+  const getExampleFaqCategory = (i: number): string =>
+    i <= 2 ? '합격 예측' : i <= 6 ? '생활기록부' : i <= 10 ? '모집요강' : '대학 정보'
+
+  const getExampleFaqModel = (_i: number): string => 'uniroad'
+
+  // 최근 컨텐츠 카드 순서 섞기 (고정 셔플로 매 로드 동일)
+  const exampleFaqShuffledIndices = useState(() => {
+    const arr = Array.from({ length: exampleFaqItems.length }, (_, i) => i)
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]]
+    }
+    return arr
+  })[0]
+
   // 관리자 전용 테스트 설정
   const [testRunCount, setTestRunCount] = useState<number>(1) // 시행 횟수
   const [testRunMode, setTestRunMode] = useState<'sequential' | 'parallel'>('sequential') // 순차/병렬
@@ -257,6 +362,8 @@ export default function ChatPage() {
   const [lockReason, setLockReason] = useState<'guest_masked' | 'auth_expired' | null>(null)
   const SCHOOL_RECORD_TOOL_SKIP_KEY = 'uniroad_skip_school_record_tool_confirm'
   const [schoolRecordToolEnabled, setSchoolRecordToolEnabled] = useState(false)
+  // 생활기록부 분석하기에서 시작된 채팅 모드 추적 (새 채팅 시에도 유지)
+  const schoolRecordModeRef = useRef(false)
   const [isSchoolRecordToolModalOpen, setIsSchoolRecordToolModalOpen] = useState(false)
   const [isSchoolGradeInputModalOpen, setIsSchoolGradeInputModalOpen] = useState(false)
   /** 오른쪽 패널 전환: 채팅 | 성적입력 | 입시기록 메뉴 | 생기부 연동 (사이드 네비 유지) */
@@ -286,6 +393,8 @@ export default function ChatPage() {
   const [isScorePredictionStartModalOpen, setIsScorePredictionStartModalOpen] = useState(false)
   const [scorePredictionScoreSets, setScorePredictionScoreSets] = useState<Array<{ id: string; name: string }>>([])
   const [scorePredictionScoreSetsLoading, setScorePredictionScoreSetsLoading] = useState(false)
+  /** 내 점수로 어디 갈 수 있을까 전용 채팅일 때 true (RollingPlaceholder·최근 컨텐츠 숨김) */
+  const [scorePredictionMode, setScorePredictionMode] = useState(false)
   const isGalaxySession = isGalaxyAppSession()
   const hasProAccess = !!user?.is_premium || isGalaxySession
   const isInputLocked = sessionLockedByMasking && !isAuthenticated
@@ -344,7 +453,13 @@ export default function ChatPage() {
 
   const handleConfirmScorePredictionStart = async () => {
     setIsScorePredictionStartModalOpen(false)
-    await startNewChat()
+    // 모의고사 성적이 연동되어 있으면 새 채팅, 없으면 성적 연동(모의고사 성적 관리 모달)으로 이동
+    const hasScoreSets = scorePredictionScoreSets.length > 0
+    if (hasScoreSets) {
+      await startNewChat()
+    } else {
+      setIsScoreSetManagerOpen(true)
+    }
   }
 
   useEffect(() => {
@@ -356,11 +471,24 @@ export default function ChatPage() {
       .finally(() => setScorePredictionScoreSetsLoading(false))
   }, [isScorePredictionStartModalOpen, sessionId])
 
+  // URL /chat?mode=school-record → 생기부 채팅 전용 모드
+  useEffect(() => {
+    if (isSchoolRecordModeUrl) {
+      setSchoolRecordToolEnabled(true)
+      schoolRecordModeRef.current = true
+    }
+  }, [isSchoolRecordModeUrl])
+
   const handleSelectScoreSetForPrediction = (item: { id: string; name: string }) => {
     setIsScorePredictionStartModalOpen(false)
     const nameForQuery = item.name.startsWith('@') ? item.name : `@${item.name}`
     startNewChat()
+    // 점수 예측만 보이게 — 생기부 분석 끄기
+    setSchoolRecordToolEnabled(false)
+    schoolRecordModeRef.current = false
+    setScorePredictionMode(true)
     setInput(`${nameForQuery}으로 갈 수 있는 대학 알려줘`)
+    if (isSchoolRecordModeUrl) navigate('/chat', { replace: true })
   }
 
   const activateSchoolRecordTool = async () => {
@@ -375,7 +503,12 @@ export default function ChatPage() {
     }
 
     await startNewChat()
+    // 생기부만 보이게 — 점수 예측 모드 끄기
+    setScorePredictionMode(false)
     setSchoolRecordToolEnabled(true)
+    schoolRecordModeRef.current = true
+    // 생기부 채팅 전용 URL로 이동 (새 채팅 눌러도 이 모드 유지)
+    navigate(`/chat?${SCHOOL_RECORD_MODE_PARAM}`, { replace: true })
   }
 
   const handleConfirmSchoolRecordToolStart = async () => {
@@ -556,6 +689,38 @@ export default function ChatPage() {
       }
     }
   }, [isAuthenticated])
+
+  // 사용자 메뉴: 바깥 클릭 시 닫기
+  useEffect(() => {
+    if (!isUserMenuOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (userMenuRef.current?.contains(target) || userMenuRefMobile.current?.contains(target)) return
+      setIsUserMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [isUserMenuOpen])
+
+  // 입시 기록 연동 패널 열릴 때 프로필 조회
+  useEffect(() => {
+    if (rightPanelView !== 'school_record_menu' || !isAuthenticated) return
+    const token = getRequestToken()
+    if (!token) return
+    getProfile(token)
+      .then((p) => {
+        setProfileImageUrl(p.image_url ?? null)
+        setProfileDisplayName(p.display_name ?? null)
+        setProfileBio(p.bio ?? null)
+        setProfileDescription(p.description ?? null)
+      })
+      .catch(() => {
+        setProfileImageUrl(null)
+        setProfileDisplayName(null)
+        setProfileBio(null)
+        setProfileDescription(null)
+      })
+  }, [rightPanelView, isAuthenticated])
 
   // 모바일 화면 복귀 시 채팅 상태 유지 (sessionStorage 활용)
   useEffect(() => {
@@ -746,7 +911,7 @@ export default function ChatPage() {
   }, [isSearchOpen])
 
   // 새 채팅 시작 핸들러
-  const handleNewChat = async () => {
+  const handleNewChat = async (keepSchoolRecordMode = false) => {
     // 진행 중인 요청 취소
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
@@ -761,6 +926,9 @@ export default function ChatPage() {
         console.log('세션 리셋 실패 (무시):', e)
       }
     }
+    
+    // 생활기록부 분석 모드 유지 여부 확인
+    const shouldKeepSchoolRecordMode = keepSchoolRecordMode || schoolRecordModeRef.current
     
     // 모든 상태 초기화
     setMessages([])
@@ -780,6 +948,16 @@ export default function ChatPage() {
     
     // 새 채팅 시작
     startNewChat()
+    
+    // 생활기록부 분석 모드 유지
+    if (shouldKeepSchoolRecordMode) {
+      setSchoolRecordToolEnabled(true)
+      schoolRecordModeRef.current = true
+    } else {
+      setSchoolRecordToolEnabled(false)
+      schoolRecordModeRef.current = false
+    }
+    setScorePredictionMode(false)
     
     // 이미지 상태 초기화
     setSelectedImage(null)
@@ -1731,25 +1909,20 @@ export default function ChatPage() {
           } sm:fixed sm:z-40 bg-gray-50`}
         >
         <div className="h-full flex flex-col">
-          {/* 상단: 닫기(왼쪽) + 채팅 기록 검색(오른쪽) */}
+          {/* 상단: 로고 + UNIROAD(왼쪽) + 사이드바 닫기(오른쪽) */}
           <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200 bg-gray-50">
+            <div className="flex items-center gap-2.5">
+              <div className="flex items-center justify-center w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 shadow-md shrink-0">
+                <GraduationCap className="w-3.5 h-3.5 text-white" strokeWidth={2} />
+              </div>
+              <span className="text-lg font-extrabold text-black tracking-tighter uppercase">UNIROAD</span>
+            </div>
             <button
               onClick={() => setIsSideNavOpen(false)}
-              className="p-2 -ml-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+              className="p-2 -mr-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
               title="사이드바 닫기"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
-            <button
-              onClick={() => setIsSearchOpen(!isSearchOpen)}
-              className="p-2 -mr-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-              title="채팅 기록 검색"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
+              <Menu className="w-5 h-5" />
             </button>
           </div>
 
@@ -1762,12 +1935,10 @@ export default function ChatPage() {
               }}
               className="w-full flex items-center gap-3 px-2 py-3 rounded-lg transition-colors text-left text-gray-800 hover:bg-gray-100/80"
             >
-              <span className="flex items-center justify-center w-5 h-5 text-gray-600">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
+              <span className="flex items-center justify-center w-5 h-5 text-gray-800">
+                <Plus className="w-5 h-5" />
               </span>
-              <span className="text-xs font-medium text-gray-800">새 채팅</span>
+              <span className="text-sm font-semibold text-black">새 채팅</span>
             </button>
             <button
               onClick={() => {
@@ -1782,26 +1953,26 @@ export default function ChatPage() {
               }}
               className="w-full flex items-center gap-3 px-2 py-3 rounded-lg transition-colors text-left text-gray-800 hover:bg-gray-100/80"
             >
-              <span className="flex items-center justify-center w-5 h-5 shrink-0">
-                <img src="/folder-icon.png" alt="" className="w-5 h-5 object-contain" />
+              <span className="flex items-center justify-center w-5 h-5 shrink-0 text-gray-800">
+                <FolderOpen className="w-5 h-5" />
               </span>
-              <span className="text-xs font-medium text-gray-800">내 입시 기록 연동하기</span>
+              <span className="text-sm font-semibold text-black">내 입시 기록 연동하기</span>
             </button>
           </nav>
 
           {/* 분석 */}
           <div className="px-4 sm:px-6 pt-2 pb-2">
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xs font-bold text-gray-900">분석</h2>
+              <h2 className="text-xs font-extrabold text-black">분석</h2>
             </div>
             <button
               onClick={() => handleSchoolRecordShortcut()}
               className="w-full flex items-center justify-start gap-3 pl-0 pr-2 py-3 rounded-lg transition-colors text-left text-gray-800 hover:bg-gray-100/80"
             >
-              <span className="flex items-center justify-center w-6 h-6 shrink-0">
-                <img src="/pen-icon.png" alt="" className="w-6 h-6 object-contain" />
+              <span className="flex items-center justify-center w-5 h-5 shrink-0 text-gray-800">
+                <PenLine className="w-5 h-5" />
               </span>
-              <span className="text-xs font-medium text-gray-800">내 생활기록부 분석하기</span>
+              <span className="text-sm font-semibold text-black">내 생활기록부 분석하기</span>
             </button>
             <button
               onClick={() => {
@@ -1820,10 +1991,10 @@ export default function ChatPage() {
               }}
               className="w-full flex items-center justify-start gap-3 pl-0 pr-2 py-3 rounded-lg transition-colors text-left text-gray-800 hover:bg-gray-100/80"
             >
-              <span className="flex items-center justify-center w-6 h-6 shrink-0 -ml-0.5">
-                <img src="/calculator-icon.png" alt="" className="w-6 h-6 object-contain object-left" />
+              <span className="flex items-center justify-center w-5 h-5 shrink-0 -ml-0.5 text-gray-800">
+                <Calculator className="w-5 h-5" />
               </span>
-              <span className="text-xs font-medium text-gray-800">내 점수로 어디 갈 수 있을까?</span>
+              <span className="text-sm font-semibold text-black">내 점수로 어디 갈 수 있을까?</span>
             </button>
           </div>
 
@@ -1831,7 +2002,14 @@ export default function ChatPage() {
           {isAuthenticated && (
             <div className="flex-1 px-4 sm:px-6 pb-4 overflow-y-auto custom-scrollbar">
               <div className="flex items-center justify-between mb-3">
-                <h2 className="text-xs font-bold text-gray-900">기록</h2>
+                <h2 className="text-xs font-extrabold text-black">기록</h2>
+                <button
+                  onClick={() => setIsSearchOpen(!isSearchOpen)}
+                  className="p-1.5 text-gray-800 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+                  title="채팅 기록 검색"
+                >
+                  <Search className="w-4 h-4" />
+                </button>
               </div>
               
               {/* 검색창 (토글) */}
@@ -1845,17 +2023,13 @@ export default function ChatPage() {
                     autoFocus
                     className="w-full px-3 py-2 pl-9 text-xs bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
-                  <svg className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                  </svg>
+                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
                   {searchQuery && (
                     <button
                       onClick={() => setSearchQuery('')}
                       className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600"
                     >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                      </svg>
+                      <X className="w-5 h-5" />
                     </button>
                   )}
                 </div>
@@ -1920,9 +2094,7 @@ export default function ChatPage() {
                         className="opacity-0 group-hover:opacity-100 text-red-500 hover:text-red-700 p-1 transition-opacity"
                         title="삭제"
                       >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
+                        <Trash2 className="w-5 h-5" />
                       </button>
                     </div>
                   ))
@@ -1945,45 +2117,9 @@ export default function ChatPage() {
                     <span className="text-xs font-semibold text-gray-900">Basic</span>
                   )}
                 </div>
-                <div className="flex justify-center gap-3">
-                  <a 
-                    href="/policy" 
-                    className="text-[10px] sm:text-xs text-gray-500 hover:text-blue-500 hover:underline transition-colors"
-                  >
-                    개인정보처리방침
-                  </a>
-                  <span className="text-gray-300">|</span>
-                  <a 
-                    href="/delete.html" 
-                    className="text-[10px] sm:text-xs text-gray-500 hover:text-blue-500 hover:underline transition-colors"
-                  >
-                    회원 탈퇴
-                  </a>
-                </div>
-                <p className="mt-2 text-center text-[10px] sm:text-xs text-gray-500">
-                  문의: <a href="mailto:ceo@uni2road.com" className="hover:text-blue-500 hover:underline">ceo@uni2road.com</a>
-                </p>
               </div>
             ) : (
               <div>
-                <div className="flex justify-center gap-3 mb-3 sm:mb-4">
-                  <a 
-                    href="/policy" 
-                    className="text-[10px] sm:text-xs text-gray-500 hover:text-blue-500 hover:underline transition-colors"
-                  >
-                    개인정보처리방침
-                  </a>
-                  <span className="text-gray-300">|</span>
-                  <a 
-                    href="/delete.html" 
-                    className="text-[10px] sm:text-xs text-gray-500 hover:text-blue-500 hover:underline transition-colors"
-                  >
-                    회원 탈퇴
-                  </a>
-                </div>
-                <p className="mb-3 sm:mb-4 text-center text-[10px] sm:text-xs text-gray-500">
-                  문의: <a href="mailto:ceo@uni2road.com" className="hover:text-blue-500 hover:underline">ceo@uni2road.com</a>
-                </p>
                 <button
                   onClick={() => {
                     trackUserAction('login_modal_open', 'sidebar_login_button')
@@ -2029,26 +2165,88 @@ export default function ChatPage() {
               </svg>
             </button>
             )}
-              <img
-                src="/로고.png"
-                alt="유니로드"
-                className="h-5 cursor-pointer"
-                onClick={handleNewChat}
-              />
             </div>
             
             <div className="flex items-center gap-2">
               {isAuthenticated ? (
-                <button
-                  onClick={() => {
-                    if (confirm('로그아웃 하시겠습니까?')) {
-                      signOut()
-                    }
-                  }}
-                  className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 active:text-gray-900 transition-colors"
-                >
-                  로그아웃
-                </button>
+                <div className="relative sm:hidden" ref={userMenuRefMobile}>
+                  <button
+                    type="button"
+                    onClick={() => setIsUserMenuOpen((v) => !v)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50/90 text-gray-800 hover:bg-amber-100/90 transition-colors"
+                    aria-expanded={isUserMenuOpen}
+                    aria-haspopup="true"
+                  >
+                    <User className="w-4 h-4" strokeWidth={2} />
+                  </button>
+                  {isUserMenuOpen && (
+                    <div className="absolute right-0 top-full mt-2 w-72 rounded-xl border border-gray-200 bg-white shadow-xl py-2 z-50">
+                      <div className="px-4 pt-3 pb-3 flex items-center gap-3">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-700">
+                          <User className="w-5 h-5" strokeWidth={2} />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-black truncate">{user?.name || '회원'}</p>
+                          <p className="text-xs text-gray-600 truncate">{user?.email || ''}</p>
+                        </div>
+                      </div>
+                      <div className="h-px bg-gray-100 mx-2" />
+                      <div className="px-4 py-2 flex items-center gap-2">
+                        <Gem className="w-4 h-4 text-blue-500 shrink-0" />
+                        <span className="text-sm font-bold text-black">{hasProAccess ? 'Pro' : 'Basic'}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRightPanelView('school_record_menu')
+                          setIsSideNavOpen(true)
+                          setIsUserMenuOpen(false)
+                        }}
+                        className="w-full px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
+                      >
+                        프로필
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsUserMenuOpen(false)
+                          openProModal()
+                        }}
+                        className="w-full px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
+                      >
+                        구독 관리
+                      </button>
+                      <div className="h-px bg-gray-100 mx-2" />
+                      <button
+                        type="button"
+                        onClick={() => { setIsUserMenuOpen(false); navigate('/') }}
+                        className="w-full px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
+                      >
+                        소개
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setIsUserMenuOpen(false); navigate('/policy') }}
+                        className="w-full px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
+                      >
+                        약관 및 정책
+                      </button>
+                      <div className="h-px bg-gray-100 mx-2" />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (confirm('로그아웃 하시겠습니까?')) {
+                            signOut()
+                            setIsUserMenuOpen(false)
+                          }
+                        }}
+                        className="w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50"
+                      >
+                        로그아웃
+                      </button>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <button
                   onClick={() => {
@@ -2079,12 +2277,6 @@ export default function ChatPage() {
                   </svg>
                 </button>
               )}
-              <img
-                src="/로고.png"
-                alt="유니로드"
-                className="h-6 cursor-pointer"
-                onClick={handleNewChat}
-              />
             </div>
             
             <div className="flex items-center gap-3">
@@ -2171,16 +2363,84 @@ export default function ChatPage() {
               )}
             
               {isAuthenticated ? (
-            <button
-              onClick={() => {
-                if (confirm('로그아웃 하시겠습니까?')) {
-                  signOut()
-                    }
-                  }}
-                  className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 transition-colors font-medium"
-                >
-                  로그아웃
-                </button>
+                <div className="relative" ref={userMenuRef}>
+                  <button
+                    type="button"
+                    onClick={() => setIsUserMenuOpen((v) => !v)}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-amber-50/90 text-gray-800 hover:bg-amber-100/90 transition-colors"
+                    aria-expanded={isUserMenuOpen}
+                    aria-haspopup="true"
+                  >
+                    <User className="w-5 h-5" strokeWidth={2} />
+                  </button>
+                  {isUserMenuOpen && (
+                    <div className="absolute right-0 top-full mt-2 w-72 rounded-xl border border-gray-200 bg-white shadow-xl py-2 z-50">
+                      <div className="px-4 pt-3 pb-3 flex items-center gap-3">
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-700">
+                          <User className="w-5 h-5" strokeWidth={2} />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-black truncate">{user?.name || '회원'}</p>
+                          <p className="text-xs text-gray-600 truncate">{user?.email || ''}</p>
+                        </div>
+                      </div>
+                      <div className="h-px bg-gray-100 mx-2" />
+                      <div className="px-4 py-2 flex items-center gap-2">
+                        <Gem className="w-4 h-4 text-blue-500 shrink-0" />
+                        <span className="text-sm font-bold text-black">{hasProAccess ? 'Pro' : 'Basic'}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRightPanelView('school_record_menu')
+                          setIsSideNavOpen(true)
+                          setIsUserMenuOpen(false)
+                        }}
+                        className="w-full px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
+                      >
+                        프로필
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsUserMenuOpen(false)
+                          openProModal()
+                        }}
+                        className="w-full px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
+                      >
+                        구독 관리
+                      </button>
+                      <div className="h-px bg-gray-100 mx-2" />
+                      <button
+                        type="button"
+                        onClick={() => { setIsUserMenuOpen(false); navigate('/') }}
+                        className="w-full px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
+                      >
+                        소개
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setIsUserMenuOpen(false); navigate('/policy') }}
+                        className="w-full px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
+                      >
+                        약관 및 정책
+                      </button>
+                      <div className="h-px bg-gray-100 mx-2" />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (confirm('로그아웃 하시겠습니까?')) {
+                            signOut()
+                            setIsUserMenuOpen(false)
+                          }
+                        }}
+                        className="w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50"
+                      >
+                        로그아웃
+                      </button>
+                    </div>
+                  )}
+                </div>
               ) : (
                 <button
                   onClick={() => {
@@ -2188,114 +2448,120 @@ export default function ChatPage() {
                     sessionStorage.setItem('uniroad_login_modal_source', 'header_login_button')
                     setIsAuthModalOpen(true)
                   }}
-                  className="px-4 py-2 text-sm text-blue-600 hover:text-blue-700 transition-colors font-medium"
+                  className="px-5 py-2.5 rounded-full bg-black text-white text-sm font-medium hover:bg-gray-800 transition-colors"
                 >
                   로그인
-            </button>
+                </button>
               )}
             </div>
           </div>
         </header>
 
         {/* 채팅 영역 */}
-        <div className={`flex-1 py-4 ${messages.length === 0 ? 'overflow-hidden flex flex-col justify-start px-2 sm:px-4' : 'overflow-y-auto px-[17px] sm:px-6'}`}>
-          <div className={`mx-auto w-full ${messages.length === 0 ? 'max-w-[600px]' : 'max-w-[600px]'}`}>
+        <div className={`flex-1 min-h-0 py-4 flex flex-col ${messages.length === 0 ? 'overflow-y-auto px-2 sm:px-4' : 'overflow-y-auto px-[17px] sm:px-6'}`}>
+          <div className={`mx-auto w-full ${messages.length === 0 ? 'max-w-6xl' : 'max-w-[600px]'}`}>
             {messages.length === 0 ? (
               <>
-              <div className="flex flex-col items-center w-full pt-5 pb-4 mx-auto px-1 sm:px-2">
-                {/* 레이아웃: 제목 → 큰 입력 카드 → 하단 4개 버튼 */}
-                <h2 className="text-xl sm:text-2xl font-semibold text-gray-900 text-center mb-1">
-                  입시에 대한 궁금한 점을 물어보세요
-                </h2>
-                <p className="text-xs sm:text-sm text-gray-500 text-center mb-6">
-                  출처 기반의 정확한 입시 정보를 전달해드립니다
-                </p>
-                {/* 빈 화면: 실제 채팅 입력창 */}
-                <div className="w-full mx-auto px-1 sm:px-2 mt-6 mb-6">
-                  <div className="bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.08)] focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.12)] px-4 py-2 transition-shadow duration-200">
-                    <textarea
-                      ref={inputTextareaRef}
-                      value={input}
-                      onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
-                      onKeyDown={handleInputKeyDown}
-                      placeholder="입시에 대한 궁금한 점을 물어보세요"
-                      disabled={isLoading || isInputLocked}
-                      rows={1}
-                      className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
-                      style={{ height: 'auto' }}
-                      onInput={(e) => {
-                        const target = e.target as HTMLTextAreaElement
-                        target.style.height = 'auto'
-                        target.style.height = Math.min(target.scrollHeight, 200) + 'px'
-                      }}
-                    />
-                    {isScoreSuggestOpen && scoreSuggestItems.length > 0 && (
-                      <div className="mt-2 bg-white border border-gray-200 rounded-xl shadow-lg py-1 max-h-48 overflow-y-auto w-48">
-                        {scoreSuggestItems.map((item, idx) => (
-                          <button
-                            key={`${item.id}-${item.name}`}
-                            type="button"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => applyScoreSuggestion(item)}
-                            className={`w-full text-left px-3 py-2 text-sm transition-colors ${
-                              idx === scoreSuggestIndex ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50 text-gray-700'
-                            }`}
-                          >
-                            {item.name.startsWith('@') ? item.name : `@${item.name}`}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                    <div className="flex items-center justify-between mt-2">
-                      <div className="flex items-center gap-2">
-                        {schoolRecordToolEnabled && (
-                          <div className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 rounded-full px-3 py-1 text-sm font-medium">
-                            <span>생기부 분석</span>
+              <div className="flex flex-col items-center w-full pt-12 sm:pt-16 pb-2 mx-auto">
+                <div className="w-full max-w-[640px] px-1 sm:px-2">
+                  {/* 레이아웃: 제목 → 입력창 → 바로 아래 4개 카드 (이미지 참고) */}
+                  <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 text-center mb-1">
+                    입시 상담의 모든 것
+                  </h2>
+                  <p className="text-xs sm:text-sm text-gray-500 text-center mb-6 sm:mb-8">
+                    출처 기반의 정확한 입시 정보를 전달해드립니다
+                  </p>
+                  {/* 입력창 */}
+                  <div className="w-full mx-auto mb-4 mt-2">
+                    <div className="bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.08)] focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.12)] px-4 py-2 transition-shadow duration-200">
+                      <textarea
+                        ref={inputTextareaRef}
+                        value={input}
+                        onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
+                        onKeyDown={handleInputKeyDown}
+                        placeholder="입시에 대한 궁금한 점을 물어보세요"
+                        disabled={isLoading || isInputLocked}
+                        rows={1}
+                        className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                        style={{ height: 'auto' }}
+                        onInput={(e) => {
+                          const target = e.target as HTMLTextAreaElement
+                          target.style.height = 'auto'
+                          target.style.height = Math.min(target.scrollHeight, 200) + 'px'
+                        }}
+                      />
+                      {isScoreSuggestOpen && scoreSuggestItems.length > 0 && (
+                        <div className="mt-2 bg-white border border-gray-200 rounded-xl shadow-lg py-1 max-h-48 overflow-y-auto w-48">
+                          {scoreSuggestItems.map((item, idx) => (
                             <button
-                              onClick={() => setSchoolRecordToolEnabled(false)}
-                              className="hover:bg-amber-200 rounded-full transition-colors"
-                              title="도구 끄기"
+                              key={`${item.id}-${item.name}`}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => applyScoreSuggestion(item)}
+                              className={`w-full text-left px-3 py-2 text-sm transition-colors ${
+                                idx === scoreSuggestIndex ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50 text-gray-700'
+                              }`}
                             >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
+                              {item.name.startsWith('@') ? item.name : `@${item.name}`}
                             </button>
-                          </div>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={(e) => openThinkingModeModal(e)}
-                          disabled={isLoading || isInputLocked}
-                          className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-2 ${
-                            'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
-                          } disabled:opacity-50`}
-                          title={thinkingMode ? 'Thinking 모드' : 'Auto 모드'}
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                          </svg>
-                          <span className="text-sm">{thinkingMode ? 'Thinking' : 'Auto'}</span>
-                          <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => handleSend()}
-                          disabled={isLoading || isInputLocked || (!input.trim() && !selectedImage)}
-                          className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                        >
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-                          </svg>
-                        </button>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between mt-2">
+                        <div className="flex items-center gap-2">
+                          {schoolRecordToolEnabled && (
+                            <div className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 rounded-full px-3 py-1 text-sm font-medium">
+                              <span>생기부 분석</span>
+                              <button
+                                onClick={() => {
+                                  setSchoolRecordToolEnabled(false)
+                                  schoolRecordModeRef.current = false
+                                  if (isSchoolRecordModeUrl) navigate('/chat', { replace: true })
+                                }}
+                                className="hover:bg-amber-200 rounded-full transition-colors"
+                                title="도구 끄기"
+                              >
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 ml-3">
+                          <button
+                            onClick={(e) => openThinkingModeModal(e)}
+                            disabled={isLoading || isInputLocked}
+                            className={`px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-2 ${
+                              'bg-white text-gray-600 border border-transparent hover:bg-gray-100 hover:text-gray-700'
+                            } disabled:opacity-50`}
+                            title={thinkingMode ? 'Thinking 모드' : 'Auto 모드'}
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                            </svg>
+                            <span className="text-sm">{thinkingMode ? 'Thinking' : 'Auto'}</span>
+                            <svg className="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </button>
+                          <button
+                            onClick={() => handleSend()}
+                            disabled={isLoading || isInputLocked || (!input.trim() && !selectedImage)}
+                            className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                            </svg>
+                          </button>
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-                {/* 하단 4개 액션 버튼 */}
-                <div className="w-full mb-6 sm:mb-10">
-                  <RollingPlaceholder
+                  {/* 입력창 바로 아래 4개 카드: 생기부/점수예측 전용 채팅일 때 숨김 */}
+                  {!schoolRecordToolEnabled && !scorePredictionMode && (
+                  <div className="w-full flex justify-center mb-2 sm:mb-3">
+                    <RollingPlaceholder
                       onQuestionClick={(question) => {
                         setSelectedCategory(null) // 질문 클릭 시 카테고리 초기화
                         handleSend(question)
@@ -2315,6 +2581,64 @@ export default function ChatPage() {
                       onSchoolRecordClick={handleSchoolRecordShortcut}
                     />
                   </div>
+                  )}
+                </div>
+
+                  {/* 예시 질문 카드: 카테고리 선택 시·생기부/점수예측 전용 채팅일 때 숨김 */}
+                  {!selectedCategory && !schoolRecordToolEnabled && !scorePredictionMode && (
+                  <div className="w-full max-w-6xl mx-auto px-2 sm:px-4 mt-4 sm:mt-6 mb-6 sm:mb-8">
+                    <div className="flex items-center gap-3 w-full mb-6">
+                      <span className="flex-1 h-px bg-gradient-to-r from-gray-300 to-gray-100" aria-hidden />
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide shrink-0">최근 컨텐츠</span>
+                      <span className="flex-1 h-px bg-gradient-to-l from-gray-300 to-gray-100" aria-hidden />
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+                      {exampleFaqShuffledIndices.map((realIdx) => {
+                        const item = exampleFaqItems[realIdx]
+                        const category = getExampleFaqCategory(realIdx)
+                        const isPremium = category === '생활기록부'
+                        const badgeLabel = isPremium ? 'Premium' : 'Basic'
+                        const duplicateCount = realIdx % 3 === 0 ? 1 : 2
+                        return (
+                          <button
+                            key={realIdx}
+                            type="button"
+                            onClick={() => handleSend(item.question)}
+                            className="text-left rounded-2xl border border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm transition-all w-full p-4 min-h-[220px] flex flex-col"
+                          >
+                            <div className="flex items-start justify-between gap-3 mb-3">
+                              <span className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-xs font-semibold shrink-0 ${isPremium ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-800'}`}>
+                                {isPremium ? <Crown className="w-3.5 h-3.5 text-amber-500" /> : <Sparkles className="w-3.5 h-3.5 text-blue-500" />}
+                                {badgeLabel}
+                              </span>
+                              <div className="inline-flex items-center gap-3 text-xs text-gray-700 shrink-0">
+                                <span className="inline-flex items-center gap-1">
+                                  <Heart className="w-3.5 h-3.5" />
+                                  0
+                                </span>
+                                <span className="inline-flex items-center gap-1">
+                                  <Copy className="w-3.5 h-3.5" />
+                                  {duplicateCount}
+                                </span>
+                              </div>
+                            </div>
+
+                            <p className="text-sm sm:text-base leading-[1.35] font-semibold text-gray-900 line-clamp-2 mb-2">{item.question}</p>
+                            <p className="text-xs text-gray-600 leading-relaxed line-clamp-3 mb-4">{item.answer}</p>
+
+                            <div className="mt-auto flex items-center justify-between text-sm">
+                              <span className="text-gray-500">@{category.replace(/\s/g, '').toLowerCase()}</span>
+                              <span className="inline-flex items-center gap-1 font-medium">
+                                {isPremium ? <span className="text-amber-600">Premium</span> : <span className="text-gray-700">Free</span>}
+                                <ArrowUpRight className="w-3.5 h-3.5 text-gray-700" />
+                              </span>
+                            </div>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  )}
 
                   {schoolRecordToolEnabled && (
                     <div className="w-full mb-6 sm:mb-10 max-w-3xl mx-auto px-2 sm:px-4">
@@ -2704,7 +3028,7 @@ export default function ChatPage() {
                     </div>
                     
                     {/* 응답 모드 선택(Auto/Thinking) + 전송 버튼 */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 ml-3">
                       <button
                         onClick={(e) => openThinkingModeModal(e)}
                         disabled={isLoading || isInputLocked}
@@ -2782,66 +3106,257 @@ export default function ChatPage() {
                 />
               )}
               {rightPanelView === 'school_record_menu' && (
-                <div className="p-6 max-w-2xl mx-auto">
-                  <h1 className="text-xl font-bold text-gray-900 mb-6">입시 기록 연동</h1>
-                  <div className="rounded-2xl bg-blue-50/80 border border-blue-100 p-5 sm:p-6 mb-8">
-                    <p className="font-semibold text-gray-900 mb-1">신뢰할 수 있는 자료를 한 곳에 모아, 더 깊이 있는 답변을 받아보세요.</p>
-                    <p className="text-sm text-gray-600">생활기록부, 내신 성적, 모의고사 성적을 연동할 수 있어요.</p>
-                    <div className="mt-4 flex flex-wrap gap-2 justify-end opacity-70">
-                      <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-700 text-xs font-medium">W</span>
-                      <span className="inline-flex items-center justify-center w-8 h-8 rounded bg-blue-200 text-blue-700 text-xs font-medium">X</span>
-                      <span className="inline-flex items-center justify-center w-8 h-8 rounded bg-blue-100 text-blue-700 text-xs font-medium">PDF</span>
-                      <svg className="w-8 h-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" /></svg>
+                <div className="max-w-2xl mx-auto overflow-x-hidden px-6 pb-6">
+                  {/* 커버 배너 - 화면 전체 너비 */}
+                  <div className="h-32 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 relative left-1/2 ml-[calc(-50vw+50%)] w-screen max-w-none rounded-t-2xl" />
+                  {/* 프로필 카드 */}
+                  <div className="rounded-b-2xl border-0 bg-white mb-6 shadow-none -mt-px">
+                    <div className="px-5 sm:px-6 pb-0 relative">
+                      <div className="flex items-end justify-between -mt-14 mb-3">
+                        <span className="inline-flex h-24 w-24 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-500 border-4 border-white shadow-lg overflow-hidden">
+                          {profileImageUrl ? (
+                            <img src={profileImageUrl} alt="프로필" className="h-full w-full object-cover" />
+                          ) : (
+                            <User className="w-12 h-12" strokeWidth={2} />
+                          )}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditDisplayName(profileDisplayName ?? user?.name ?? '')
+                            setEditBio(profileBio ?? DEFAULT_BIO)
+                            setEditDescription(profileDescription ?? DEFAULT_DESCRIPTION)
+                            setIsEditProfileModalOpen(true)
+                          }}
+                          className="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+                        >
+                          <Settings className="w-4 h-4 text-gray-500" />
+                          프로필 수정
+                        </button>
+                      </div>
+                      <p className="text-2xl font-bold text-gray-900">{profileDisplayName ?? user?.name ?? '회원'}</p>
+                      <p className="text-sm text-gray-500 mt-0.5">@{(user?.email || 'uniroad').split('@')[0]}</p>
+                      <p className="mt-2 text-sm text-gray-800">{profileBio ?? DEFAULT_BIO}</p>
+                      <div className="mt-2 flex items-center gap-1.5 text-sm text-gray-500">
+                        <Calendar className="w-4 h-4 shrink-0" />
+                        <span>가입일</span>
+                      </div>
+                      <div className="mt-3 flex items-center gap-4 text-sm flex-wrap">
+                        <span className="font-semibold text-gray-900">0</span>
+                        <span className="text-gray-500">연동 완료</span>
+                        <span className="font-semibold text-gray-900">—</span>
+                        <span className="text-gray-500">입력 완료</span>
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-0.5">
+                          <Gem className="w-3.5 h-3.5 text-blue-500" />
+                          <span className="text-xs font-semibold text-gray-800">{hasProAccess ? 'Pro' : 'Basic'}</span>
+                        </span>
+                      </div>
+                      {/* 탭 네비게이션 */}
+                      <nav className="mt-4 flex gap-6" aria-label="입시 기록 탭">
+                        <button
+                          type="button"
+                          onClick={() => setSchoolRecordMenuTab('school_record')}
+                          className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+                            schoolRecordMenuTab === 'school_record'
+                              ? 'border-blue-600 text-blue-600'
+                              : 'border-transparent text-gray-500 hover:text-gray-700'
+                          }`}
+                        >
+                          생활기록부
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSchoolRecordMenuTab('grade')}
+                          className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+                            schoolRecordMenuTab === 'grade'
+                              ? 'border-blue-600 text-blue-600'
+                              : 'border-transparent text-gray-500 hover:text-gray-700'
+                          }`}
+                        >
+                          내신 성적
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSchoolRecordMenuTab('mock_exam')}
+                          className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
+                            schoolRecordMenuTab === 'mock_exam'
+                              ? 'border-blue-600 text-blue-600'
+                              : 'border-transparent text-gray-500 hover:text-gray-700'
+                          }`}
+                        >
+                          모의고사
+                        </button>
+                      </nav>
                     </div>
                   </div>
-                  <div className="space-y-3">
-                    <div className="relative group">
-                      <button
-                        type="button"
-                        onClick={() => setRightPanelView('school_record_link')}
-                        className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 bg-white hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left"
-                      >
-                        <span className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600">
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                  {/* 탭별 콘텐츠 */}
+                  <div className="rounded-2xl border-0 bg-white overflow-hidden shadow-none">
+                    {schoolRecordMenuTab === 'school_record' && (
+                      <div className="p-5 sm:p-6">
+                        <p className="text-sm text-gray-600 mb-4">{profileDescription ?? DEFAULT_DESCRIPTION}</p>
+                        <div className="relative group">
+                          <button
+                            type="button"
+                            onClick={() => setRightPanelView('school_record_link')}
+                            className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 bg-white hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left"
+                          >
+                            <span className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                            </span>
+                            <span className="font-medium text-gray-900">생활기록부 연동하기</span>
+                          </button>
+                          <div className="absolute top-full left-0 right-0 mt-2 px-4 py-3 rounded-xl border border-blue-200 bg-white shadow-md text-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity z-10 pointer-events-none">
+                            <p className="font-medium text-gray-900">생활기록부를 연동하고 더 많은 기능을 즐겨보세요</p>
+                            <p className="text-xs text-gray-600 mt-1">연동하는 법을 할 줄 몰라도 좋아요 차근차근 알려줄게요</p>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {schoolRecordMenuTab === 'grade' && (
+                      <div className="p-5 sm:p-6">
+                        <p className="text-sm text-gray-600 mb-4">고등학교 내신을 입력하고 더 많은 기능을 즐겨보세요. 생활기록부를 연동하면 자동으로 입력돼요.</p>
+                        <div className="relative group">
+                          <button
+                            type="button"
+                            onClick={() => setRightPanelView('grade_input')}
+                            className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 bg-white hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left"
+                          >
+                            <span className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                            </span>
+                            <span className="font-medium text-gray-900">내신 성적 입력하기</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {schoolRecordMenuTab === 'mock_exam' && (
+                      <div className="p-5 sm:p-6">
+                        <p className="text-sm text-gray-600 mb-4">모의고사 성적을 입력하고 더 많은 기능을 즐겨보세요. 몇 개만 알려주어도 AI가 자동으로 채워서 분석해드려요.</p>
+                        <div className="relative group">
+                          <button
+                            type="button"
+                            onClick={() => setRightPanelView('mock_exam_input')}
+                            className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 bg-white hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left"
+                          >
+                            <span className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600">
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                            </span>
+                            <span className="font-medium text-gray-900">모의고사 성적 입력하기</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              {isEditProfileModalOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setIsEditProfileModalOpen(false)}>
+                  <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+                    <h2 className="text-lg font-bold text-gray-900 mb-4">프로필 수정</h2>
+                    <div className="flex flex-col gap-4">
+                      <div className="flex flex-col items-center gap-2">
+                        <span className="inline-flex h-20 w-20 items-center justify-center rounded-full bg-gray-100 text-gray-500 overflow-hidden">
+                          {profileImageUrl ? (
+                            <img src={profileImageUrl} alt="프로필" className="h-full w-full object-cover" />
+                          ) : (
+                            <User className="w-10 h-10" strokeWidth={2} />
+                          )}
                         </span>
-                        <span className="font-medium text-gray-900">생활기록부 연동하기</span>
-                      </button>
-                      <div className="absolute top-full left-0 right-0 mt-2 px-4 py-3 rounded-xl border border-blue-200 bg-white shadow-md text-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity z-10 pointer-events-none">
-                        <p className="font-medium text-gray-900">생활기록부를 연동하고 더 많은 기능을 즐겨보세요</p>
-                        <p className="text-xs text-gray-600 mt-1">연동하는 법을 할 줄 몰라도 좋아요 차근차근 알려줄게요</p>
+                        <input
+                          ref={editProfileInputRef}
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0]
+                            if (!file) return
+                            const token = getRequestToken()
+                            if (!token) return
+                            setEditProfileUploading(true)
+                            uploadProfileAvatar(token, file)
+                              .then((p) => {
+                                setProfileImageUrl(p.image_url ?? null)
+                              })
+                              .catch(() => {})
+                              .finally(() => {
+                                setEditProfileUploading(false)
+                                e.target.value = ''
+                              })
+                            }}
+                        />
+                        <button
+                          type="button"
+                          disabled={editProfileUploading}
+                          onClick={() => editProfileInputRef.current?.click()}
+                          className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+                        >
+                          {editProfileUploading ? '업로드 중…' : '프로필 사진 변경'}
+                        </button>
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">이름</label>
+                        <input
+                          type="text"
+                          value={editDisplayName}
+                          onChange={(e) => setEditDisplayName(e.target.value)}
+                          placeholder="이름"
+                          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">자기소개</label>
+                        <textarea
+                          value={editBio}
+                          onChange={(e) => setEditBio(e.target.value)}
+                          placeholder="유니로드와 함께 입시를 준비해 보세요."
+                          rows={2}
+                          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">설명</label>
+                        <textarea
+                          value={editDescription}
+                          onChange={(e) => setEditDescription(e.target.value)}
+                          placeholder="생활기록부, 내신 성적, 모의고사 성적을 연동하면..."
+                          rows={3}
+                          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
+                        />
                       </div>
                     </div>
-                    <div className="relative group">
+                    <div className="mt-5 flex justify-end gap-2">
                       <button
                         type="button"
-                        onClick={() => setRightPanelView('grade_input')}
-                        className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 bg-white hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left"
+                        onClick={() => setIsEditProfileModalOpen(false)}
+                        className="rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
                       >
-                        <span className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600">
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                        </span>
-                        <span className="font-medium text-gray-900">내신 성적 입력하기</span>
+                        닫기
                       </button>
-                      <div className="absolute top-full left-0 right-0 mt-2 px-4 py-3 rounded-xl border border-blue-200 bg-white shadow-md text-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity z-10 pointer-events-none">
-                        <p className="font-medium text-gray-900">고등학교 내신을 입력하고 더 많은 기능을 즐겨보세요</p>
-                        <p className="text-xs text-gray-600 mt-1">생활기록부를 연동하면 자동으로 입력돼요</p>
-                      </div>
-                    </div>
-                    <div className="relative group">
                       <button
                         type="button"
-                        onClick={() => setRightPanelView('mock_exam_input')}
-                        className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 bg-white hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left"
+                        disabled={editProfileSaving}
+                        onClick={() => {
+                          const token = getRequestToken()
+                          if (!token) return
+                          setEditProfileSaving(true)
+                          updateProfile(token, {
+                            display_name: editDisplayName,
+                            bio: editBio,
+                            description: editDescription,
+                          })
+                            .then((p) => {
+                              setProfileDisplayName(p.display_name ?? null)
+                              setProfileBio(p.bio ?? null)
+                              setProfileDescription(p.description ?? null)
+                              setIsEditProfileModalOpen(false)
+                            })
+                            .catch(() => {})
+                            .finally(() => setEditProfileSaving(false))
+                        }}
+                        className="rounded-xl bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
                       >
-                        <span className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600">
-                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                        </span>
-                        <span className="font-medium text-gray-900">모의고사 성적 입력하기</span>
+                        {editProfileSaving ? '저장 중…' : '저장'}
                       </button>
-                      <div className="absolute top-full left-0 right-0 mt-2 px-4 py-3 rounded-xl border border-blue-200 bg-white shadow-md text-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity z-10 pointer-events-none">
-                        <p className="font-medium text-gray-900">모의고사 성적을 입력하고 더 많은 기능을 즐겨보세요</p>
-                        <p className="text-xs text-gray-600 mt-1">모의고사 성적을 몇개만 알려주어도, AI가 자동으로 채워서 분석해드려요</p>
-                      </div>
                     </div>
                   </div>
                 </div>
@@ -3153,6 +3668,70 @@ export default function ChatPage() {
         </div>
       )}
 
+      {/* 예시 질문 Q&A 모달 (카드 스타일: 카테고리 뱃지 + 제목 + 본문 답변) */}
+      {exampleFaqModalIndex !== null && exampleFaqItems[exampleFaqModalIndex] && (() => {
+        const item = exampleFaqItems[exampleFaqModalIndex]
+        const category = getExampleFaqCategory(exampleFaqModalIndex)
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn"
+            onClick={() => setExampleFaqModalIndex(null)}
+          >
+            <div
+              className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col animate-slideUp border border-gray-100"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* 상단: 카테고리 뱃지(좌) + 닫기(우) */}
+              <div className="flex items-center justify-between px-5 pt-5 pb-2 flex-none">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-700">
+                  <Sparkles className="w-3.5 h-3.5 text-blue-500" />
+                  {category}
+                </span>
+                <button
+                  onClick={() => setExampleFaqModalIndex(null)}
+                  className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                >
+                  <X className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+              {/* 제목(질문): 크고 굵게 */}
+              <div className="px-5 pb-3 flex-none">
+                <h2 className="text-lg sm:text-xl font-bold text-gray-900 leading-snug pr-8">
+                  {item.question}
+                </h2>
+              </div>
+              {/* 본문(답변): 일반 텍스트 */}
+              <div className="px-5 py-2 overflow-y-auto flex-1 min-h-0">
+                <p className="text-sm text-gray-700 leading-relaxed whitespace-pre-line">
+                  {item.answer}
+                </p>
+              </div>
+              {/* 하단: 유니로드 + 액션 버튼 */}
+              <div className="px-5 py-4 border-t border-gray-100 flex-none flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                <span className="text-xs text-gray-500 hidden sm:inline">유니로드 · 무료</span>
+                <div className="flex gap-2 w-full sm:w-auto">
+                  <button
+                    onClick={() => setExampleFaqModalIndex(null)}
+                    className="flex-1 px-4 py-2.5 rounded-xl border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors text-sm font-medium"
+                  >
+                    닫기
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleSend(item.question)
+                      setExampleFaqModalIndex(null)
+                    }}
+                    className="flex-1 px-4 py-2.5 rounded-xl bg-black text-white hover:bg-black/90 transition-colors text-sm font-medium"
+                  >
+                    채팅에서 물어보기
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* 의견 보내기 모달 */}
       {isFeedbackModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
@@ -3402,10 +3981,14 @@ export default function ChatPage() {
 
       <SchoolRecordToolStartModal
         isOpen={isScorePredictionStartModalOpen}
-        linked={true}
+        linked={!scorePredictionScoreSetsLoading && scorePredictionScoreSets.length > 0}
         loading={scorePredictionScoreSetsLoading}
         dontAskAgain={skipScorePredictionConfirm}
-        confirmLabel="새 채팅"
+        confirmLabel={
+          !scorePredictionScoreSetsLoading && scorePredictionScoreSets.length > 0
+            ? '새 채팅'
+            : '성적 연동하기'
+        }
         title="합격 예측을 시작하시겠습니까?"
         description="연동된 성적을 읽어 더 정확하게 답합니다."
         statusText={

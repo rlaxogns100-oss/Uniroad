@@ -80,7 +80,7 @@ export default function AuthPage() {
           </div>
           
           {/* 데스크톱: 작은 탭 버튼 */}
-          <div className="hidden sm:flex gap-2 mb-8 border-b border-gray-200">
+          <div className="hidden sm:flex gap-2 mb-8">
             <button
               onClick={() => setIsSignUp(false)}
               className={`flex-1 py-3 px-4 rounded-t-lg font-medium transition-colors text-base ${
@@ -188,7 +188,7 @@ export default function AuthPage() {
           )}
 
           {/* 빠른 로그인 (테스트용) */}
-          <div className="mt-8 pt-6 border-t border-gray-200">
+          <div className="mt-8 pt-6">
             <p className="text-sm text-gray-500 text-center mb-4">⚡ 빠른 로그인 (테스트용)</p>
             <div className="flex gap-2">
               <input

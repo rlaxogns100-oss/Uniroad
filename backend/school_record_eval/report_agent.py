@@ -5,7 +5,7 @@ import ast
 import json
 import re
 import time
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import google.generativeai as genai
 from google.generativeai.types import HarmBlockThreshold, HarmCategory
@@ -14,6 +14,7 @@ from config.config import settings
 from config.constants import GEMINI_FLASH_MODEL
 from services.multi_agent.functions import execute_function_calls
 from services.multi_agent.router_agent import RouterAgent
+from school_record_eval.matching_summary import ensure_matching_summary
 
 genai.configure(api_key=settings.GEMINI_API_KEY)
 
@@ -145,6 +146,135 @@ UNIVERSITY_ALIAS_MAP: Dict[str, List[str]] = {
     "한국외국어대학교": ["한국외국어대학교", "한국외대", "외대"],
     "서울시립대학교": ["서울시립대학교", "시립대", "서울시립대"],
 }
+
+# 생기부 기반 적합 학교 추천 시 순회할 후보 대학 목록
+CANDIDATE_UNIVERSITIES: List[str] = list(UNIVERSITY_ALIAS_MAP.keys())
+MAX_MATCHING_SCHOOLS = 8
+MATCHING_CRITERIA_QUERY = "학생부종합전형 인재상 서류평가기준 평가요소"
+
+
+def _is_school_recommendation_request(message: str) -> bool:
+    """생기부 기반으로 적합한 학교/전공 추천을 요청하는 쿼리인지 판별."""
+    text = _clean_text(message)
+    if not text or len(text) < 3:
+        return False
+    # 추천 요청 의도: 학교/대학/전공 + 추천·적합 관련 표현
+    school_related = any(s in text for s in ("학교", "대학", "전공", "학과"))
+    recommendation_signals = [
+        "적합한 학교",
+        "적합한 대학",
+        "맞는 학교",
+        "맞는 대학",
+        "어울리는 학교",
+        "어울리는 대학",
+        "추천해줘",
+        "추천해 주세요",
+        "추천해주세요",
+        "추천해줘요",
+        "학교 추천",
+        "대학 추천",
+        "전공 추천",
+        "어떤 학교",
+        "어떤 대학",
+        "갈 만한",
+        "갈만한",
+        "지원할 만한",
+    ]
+    if any(s in text for s in recommendation_signals):
+        return True
+    if school_related and ("추천" in text or "적합" in text):
+        return True
+    return False
+
+
+async def _find_matching_schools(
+    matching_summary: str,
+    candidate_schools: List[str],
+) -> List[str]:
+    """
+    매칭용 요약과 후보 대학 목록으로, 각 대학의 평가기준을 RAG로 가져온 뒤
+    LLM으로 적합한 학교를 선정하여 반환. (기존 방식으로 상세 분석할 target_universities)
+    """
+    if not matching_summary or not candidate_schools:
+        return []
+
+    # 1) 각 후보 대학별로 평가기준 RAG 1회씩 호출
+    calls = [
+        {
+            "function": "univ",
+            "params": {
+                "university": uni,
+                "query": f"2026학년도 {uni} {MATCHING_CRITERIA_QUERY}",
+            },
+        }
+        for uni in candidate_schools[:12]
+    ]
+    try:
+        results = await execute_function_calls(calls)
+    except Exception as e:
+        print(f"⚠️ _find_matching_schools RAG 실패: {e}")
+        return []
+
+    # 2) 대학별로 청크 텍스트 합치기 (최대 N자)
+    per_school_max_chars = 1200
+    school_to_criteria: Dict[str, str] = {}
+    for idx, uni in enumerate(candidate_schools[:12]):
+        key = f"univ_{idx}"
+        data = results.get(key) if isinstance(results, dict) else {}
+        chunks = (data.get("chunks") or []) if isinstance(data, dict) else []
+        parts = []
+        total = 0
+        for c in chunks:
+            if isinstance(c, dict) and c.get("content"):
+                part = (c.get("content") or "").strip()
+                if part and total + len(part) <= per_school_max_chars:
+                    parts.append(part)
+                    total += len(part)
+        school_to_criteria[uni] = "\n".join(parts).strip() or "(해당 대학 평가기준 자료 없음)"
+
+    # 3) LLM: 요약 + 대학별 기준을 보고 적합한 학교만 JSON 배열로 반환
+    model = genai.GenerativeModel(model_name=GEMINI_FLASH_MODEL)
+    criteria_block = "\n\n".join(
+        f"[{uni}]\n{text[:800]}" for uni, text in school_to_criteria.items()
+    )
+    prompt = f"""다음은 한 학생의 생기부 매칭용 요약과, 여러 대학의 학생부종합 평가기준 요약입니다.
+이 학생에게 **가장 적합한 대학**을 최대 {MAX_MATCHING_SCHOOLS}개 골라, 대학명만 JSON 배열로 출력하세요.
+반드시 아래 [대학 목록]에 있는 정확한 대학명만 사용하고, 다른 텍스트는 출력하지 마세요.
+
+[학생 생기부 매칭용 요약]
+{matching_summary[:2000]}
+
+[대학별 평가기준 요약]
+{criteria_block[:12000]}
+
+[대학 목록] (이 이름만 사용)
+{json.dumps(candidate_schools[:12], ensure_ascii=False)}
+
+[출력 형식] JSON 배열만, 예: ["연세대학교", "고려대학교", "중앙대학교"]
+"""
+
+    try:
+        response = await asyncio.to_thread(
+            model.generate_content,
+            prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.2,
+                max_output_tokens=256,
+            ),
+            safety_settings=_SAFETY_SETTINGS,
+        )
+        raw = (getattr(response, "text", None) or "").strip()
+        # JSON 배열 추출
+        start = raw.find("[")
+        end = raw.rfind("]") + 1
+        if start >= 0 and end > start:
+            arr = json.loads(raw[start:end])
+            if isinstance(arr, list):
+                out = [x for x in arr if isinstance(x, str) and x.strip() and x in candidate_schools]
+                return out[:MAX_MATCHING_SCHOOLS]
+    except Exception as e:
+        print(f"⚠️ _find_matching_schools LLM 파싱 실패: {e}")
+    return []
 
 
 def _clean_text(text: Any) -> str:
@@ -642,6 +772,7 @@ def _build_university_focus_instruction(target_universities: List[str], mode: st
     base = (
         "\n[대학별 집중 분석 지시 - 최우선]\n"
         f"- 이번 답변의 핵심 대학: {uni_text}\n"
+        "- **절대** '#0-2 학교별 기준 설명'에 '학교별 기준 미적용(요청 없음 또는 근거 문서 없음)'을 출력하지 마라. 반드시 [외부 참고자료(RAG)]에서 위 대학별 평가기준을 인용하여 #0-2와 #1을 작성한다.\n"
         "- 공통 기준 설명은 출력하지 않는다.\n"
         "- 본문 대부분은 대학별 기준 적용 평가에 배정한다.\n"
         "- '# 1. 대학별 기준 적용 평가' 섹션에서 대학별 근거를 반드시 제시한다.\n"
@@ -1328,9 +1459,36 @@ async def generate_school_record_report(
     message: str,
     history: List[Dict[str, Any]] | None,
     school_record_context: str,
+    school_record: Optional[Dict[str, Any]] = None,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     report_mode = _detect_report_mode(message)
     target_universities = _extract_target_universities(message)
+
+    # 생기부 기반 적합 학교 추천 요청인데 대학명이 없으면: 매칭용 요약으로 적합 학교 선정 후 기존 방식으로 상세 분석
+    if (
+        not target_universities
+        and school_record
+        and user_id
+        and _is_school_recommendation_request(message)
+    ):
+        try:
+            matching_summary = await ensure_matching_summary(user_id, school_record)
+            if matching_summary:
+                target_universities = await _find_matching_schools(
+                    matching_summary, CANDIDATE_UNIVERSITIES
+                )
+                print(f"📋 [적합학교추천] matching_summary_len={len(matching_summary)}, target_universities={target_universities}")
+                if not target_universities:
+                    target_universities = CANDIDATE_UNIVERSITIES[:5]
+                    print(f"📋 [적합학교추천] 매칭 결과 없음 → fallback 대학 사용: {target_universities}")
+            else:
+                target_universities = CANDIDATE_UNIVERSITIES[:5]
+                print(f"📋 [적합학교추천] 매칭용 요약 없음 → fallback 대학 사용: {target_universities}")
+        except Exception as e:
+            print(f"⚠️ [적합학교추천] 매칭 단계 예외: {e}")
+            target_universities = CANDIDATE_UNIVERSITIES[:5]
+
     focus_instruction = _build_university_focus_instruction(target_universities, report_mode)
     retrieval_result = await _run_multi_round_retrieval(
         message=message,
@@ -1418,13 +1576,61 @@ def generate_school_record_report_stream(
     message: str,
     history: List[Dict[str, Any]] | None,
     school_record_context: str,
+    school_record: Optional[Dict[str, Any]] = None,
+    user_id: Optional[str] = None,
 ):
     report_mode = _detect_report_mode(message)
     target_universities = _extract_target_universities(message)
+
     focus_instruction = _build_university_focus_instruction(target_universities, report_mode)
     started_at = time.perf_counter()
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+
+    # 생기부 기반 적합 학교 추천 요청: 매칭용 요약으로 적합 학교 선정
+    if (
+        not target_universities
+        and school_record
+        and user_id
+        and _is_school_recommendation_request(message)
+    ):
+        yield {
+            "type": "status",
+            "step": "school_record_matching",
+            "message": "📋 생기부 요약으로 적합한 대학을 찾는 중...",
+            "detail": {},
+        }
+        try:
+            matching_summary = loop.run_until_complete(
+                ensure_matching_summary(user_id, school_record)
+            )
+            if matching_summary:
+                target_universities = loop.run_until_complete(
+                    _find_matching_schools(matching_summary, CANDIDATE_UNIVERSITIES)
+                )
+                print(f"📋 [적합학교추천/스트림] matching_summary_len={len(matching_summary)}, target_universities={target_universities}")
+                if not target_universities:
+                    target_universities = CANDIDATE_UNIVERSITIES[:5]
+                    print(f"📋 [적합학교추천/스트림] 매칭 결과 없음 → fallback: {target_universities}")
+            else:
+                target_universities = CANDIDATE_UNIVERSITIES[:5]
+                print(f"📋 [적합학교추천/스트림] 매칭용 요약 없음 → fallback: {target_universities}")
+            focus_instruction = _build_university_focus_instruction(
+                target_universities, report_mode
+            )
+            if target_universities:
+                yield {
+                    "type": "status",
+                    "step": "school_record_matching_done",
+                    "message": f"✅ 적합 대학 {len(target_universities)}개 선정됨. 해당 대학 기준으로 상세 분석합니다.",
+                    "detail": {"target_universities": target_universities},
+                }
+        except Exception as e:
+            print(f"⚠️ 스트림 매칭 단계 실패(무시): {e}")
+            target_universities = CANDIDATE_UNIVERSITIES[:5]
+            focus_instruction = _build_university_focus_instruction(
+                target_universities, report_mode
+            )
 
     try:
         yield {

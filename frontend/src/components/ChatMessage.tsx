@@ -453,10 +453,10 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
     const { bodyText, questions: followUpQuestions } = extractFollowUpSection(cleanedMessage)
     cleanedMessage = bodyText
 
-    // 화면에 그대로 노출되면 안 되는 raw 태그/마크다운 제거 (미완성 cite, 줄선두 # 제거)
+    // 화면에 그대로 노출되면 안 되는 raw 태그/마크다운 제거 (모든 <cite ...> 제거, 절대 raw 노출 방지)
     const stripRawCiteAndHeadingSyntax = (raw: string) => {
       let s = raw
-        .replace(/<cite\s+data-source="[^"]*"(?:\s+data-url="[^"]*")?\s*>/g, '')
+        .replace(/<cite\s+[^>]*>/g, '')  // 속성 순서 무관하게 여는 태그 제거
         .replace(/<\/cite>/g, '')
       return s
     }
@@ -500,23 +500,40 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
       }
     }
 
-    // 2. 새로운 cite 형식 파싱: <cite data-source="..." data-url="...">...</cite>
+    // 2. 새로운 cite 형식 파싱: <cite data-source="..." data-url="...">...</cite> (속성 순서 무관)
     const parts: React.ReactNode[] = []
     let lastIndex = 0
-    
-    // 새로운 형식: <cite data-source="..." data-url="...">...</cite>
-    const newCiteRegex = /<cite\s+data-source="([^"]*)"(?:\s+data-url="([^"]*)")?\s*>([\s\S]*?)<\/cite>/g
+
+    // data-source/data-url 순서 무관, 속성 사이 공백/줄바꿈 허용
+    const newCiteRegex = /<cite\s+[^>]*data-source="([^"]*)"[^>]*(?:data-url="([^"]*)")?[^>]*>([\s\S]*?)<\/cite>/g
+    const newCiteRegexAlt = /<cite\s+[^>]*data-url="([^"]*)"[^>]*data-source="([^"]*)"[^>]*>([\s\S]*?)<\/cite>/g
     // 기존 형식: <cite>...</cite>
     const oldCiteRegex = /<cite>(.*?)<\/cite>/g
-    
-    // 새 형식이 있는지 먼저 확인
-    const hasNewFormat = newCiteRegex.test(cleanedMessage)
-    newCiteRegex.lastIndex = 0 // reset regex
+
+    const tryMatchNewCite = (str: string, startIndex: number): { match: RegExpExecArray; source: string; url: string; content: string } | null => {
+      let best: { match: RegExpExecArray; source: string; url: string; content: string } | null = null
+      newCiteRegex.lastIndex = startIndex
+      let m = newCiteRegex.exec(str)
+      if (m && m.index >= startIndex) best = { match: m, source: m[1], url: (m[2] || '').trim(), content: (m[3] || '').trim() }
+      newCiteRegexAlt.lastIndex = startIndex
+      m = newCiteRegexAlt.exec(str)
+      if (m && m.index >= startIndex) {
+        const cur = { match: m, source: m[2], url: (m[1] || '').trim(), content: (m[3] || '').trim() }
+        if (!best || m.index < best.match.index) best = cur
+      }
+      return best
+    }
+
+    // 새 형식이 있는지 먼저 확인 (두 패턴 모두)
+    const hasNewFormat = newCiteRegex.test(cleanedMessage) || newCiteRegexAlt.test(cleanedMessage)
+    newCiteRegex.lastIndex = 0
+    newCiteRegexAlt.lastIndex = 0
     
     if (hasNewFormat) {
-      // 새로운 형식으로 파싱
-      let match
-      while ((match = newCiteRegex.exec(cleanedMessage)) !== null) {
+      // 새로운 형식으로 파싱 (data-source/data-url 순서 무관)
+      let parsed: ReturnType<typeof tryMatchNewCite>
+      while ((parsed = tryMatchNewCite(cleanedMessage, lastIndex)) !== null) {
+        const { match, source: sourceText, url: sourceUrl, content: citedContentRaw } = parsed
         // cite 이전 텍스트 (raw cite 태그 제거 후 파싱)
         if (match.index > lastIndex) {
           const textBefore = stripRawCiteAndHeadingSyntax(cleanedMessage.substring(lastIndex, match.index))
@@ -529,10 +546,7 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
           }
         }
 
-        const sourceText = match[1]  // data-source 값 (문서명 + 페이지)
-        const sourceUrl = match[2]   // data-url 값 (PDF URL)
-        let citedContent = match[3] // 인용 내용 (줄선두 #### 등 제거)
-        citedContent = citedContent.replace(/^#+\s*/, '').trim() || citedContent
+        let citedContent = citedContentRaw.replace(/^#+\s*/, '').trim() || citedContentRaw
 
         const matchedChunk = isSchoolRecordReport ? findChunkBySource(sourceText) : null
 
@@ -568,7 +582,7 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
           </span>
         )
 
-        lastIndex = newCiteRegex.lastIndex
+        lastIndex = match.index + match[0].length
       }
 
       // 마지막 남은 텍스트 (raw cite 태그 제거 후 파싱)
