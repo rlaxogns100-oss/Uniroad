@@ -21,6 +21,7 @@ interface SchoolGradeInputModalProps {
 type ModalStep = 'menu' | 'semester' | 'extracurricular' | 'record_upload'
 type SemesterKey = '1-1' | '1-2' | '2-1' | '2-2' | '3-1' | '3-2'
 type GradeKey = '1' | '2' | '3'
+type GradeAverageFieldKey = 'overall' | 'core'
 
 interface SemesterRow {
   id: string
@@ -51,9 +52,16 @@ interface ExtracurricularData {
   volunteerHours: Record<GradeKey, string>
 }
 
+interface GradeSummaryData {
+  overallAverage: string
+  coreAverage: string
+  semesterAverages: Record<SemesterKey, Record<GradeAverageFieldKey, string>>
+}
+
 interface SchoolGradeInputData {
   semesters: Record<SemesterKey, SemesterRow[]>
   extracurricular: ExtracurricularData
+  gradeSummary: GradeSummaryData
   recordUpload: {
     fileName: string
     summary: string
@@ -70,12 +78,8 @@ const semesterLabels: Record<SemesterKey, string> = {
   '3-1': '3학년 1학기',
   '3-2': '3학년 2학기',
 }
+const semesterKeys: SemesterKey[] = ['1-1', '1-2', '2-1', '2-2', '3-1', '3-2']
 
-const semesterSections: Array<{ title: string; semesters: SemesterKey[] }> = [
-  { title: '1학년', semesters: ['1-1', '1-2'] },
-  { title: '2학년', semesters: ['2-1', '2-2'] },
-  { title: '3학년', semesters: ['3-1', '3-2'] },
-]
 const gradeKeys: GradeKey[] = ['1', '2', '3']
 
 const schoolYearOptions = [...ADIGA_SCHOOL_YEAR_OPTIONS]
@@ -147,6 +151,19 @@ const createEmptyExtracurricularData = (): ExtracurricularData => ({
   },
 })
 
+const createEmptyGradeSummaryData = (): GradeSummaryData => ({
+  overallAverage: '',
+  coreAverage: '',
+  semesterAverages: {
+    '1-1': { overall: '', core: '' },
+    '1-2': { overall: '', core: '' },
+    '2-1': { overall: '', core: '' },
+    '2-2': { overall: '', core: '' },
+    '3-1': { overall: '', core: '' },
+    '3-2': { overall: '', core: '' },
+  },
+})
+
 const buildDefaultData = (): SchoolGradeInputData => ({
   semesters: {
     '1-1': [createEmptyRow()],
@@ -157,6 +174,7 @@ const buildDefaultData = (): SchoolGradeInputData => ({
     '3-2': [createEmptyRow()],
   },
   extracurricular: createEmptyExtracurricularData(),
+  gradeSummary: createEmptyGradeSummaryData(),
   recordUpload: {
     fileName: '',
     summary: '',
@@ -203,7 +221,9 @@ const normalizeSchoolGradeInputData = (rawData: unknown): SchoolGradeInputData =
       ? (semestersRaw as Partial<Record<SemesterKey, unknown>>)
       : {}
   const extracurricularRaw = parsedRecord.extracurricular
+  const gradeSummaryRaw = parsedRecord.gradeSummary
   const fallbackExtracurricular = createEmptyExtracurricularData()
+  const fallbackGradeSummary = createEmptyGradeSummaryData()
   const extracurricularRecord =
     extracurricularRaw && typeof extracurricularRaw === 'object'
       ? (extracurricularRaw as Record<string, unknown>)
@@ -215,6 +235,14 @@ const normalizeSchoolGradeInputData = (rawData: unknown): SchoolGradeInputData =
   const volunteerHoursRecordRaw =
     extracurricularRecord?.volunteerHours && typeof extracurricularRecord.volunteerHours === 'object'
       ? (extracurricularRecord.volunteerHours as Record<string, unknown>)
+      : {}
+  const gradeSummaryRecord =
+    gradeSummaryRaw && typeof gradeSummaryRaw === 'object'
+      ? (gradeSummaryRaw as Record<string, unknown>)
+      : null
+  const semesterAveragesRaw =
+    gradeSummaryRecord?.semesterAverages && typeof gradeSummaryRecord.semesterAverages === 'object'
+      ? (gradeSummaryRecord.semesterAverages as Record<string, unknown>)
       : {}
 
   const readAttendanceField = (grade: GradeKey, field: keyof ExtracurricularAttendanceRow): string => {
@@ -253,6 +281,44 @@ const normalizeSchoolGradeInputData = (rawData: unknown): SchoolGradeInputData =
           },
         }
       : fallbackExtracurricular
+  const readSemesterAverageField = (semester: SemesterKey, field: GradeAverageFieldKey): string => {
+    const semesterRecord = semesterAveragesRaw[semester]
+    if (!semesterRecord || typeof semesterRecord !== 'object') return ''
+    return String((semesterRecord as Record<string, unknown>)[field] || '')
+  }
+  const gradeSummary =
+    gradeSummaryRecord
+      ? {
+          overallAverage: String(gradeSummaryRecord.overallAverage || ''),
+          coreAverage: String(gradeSummaryRecord.coreAverage || ''),
+          semesterAverages: {
+            '1-1': {
+              overall: readSemesterAverageField('1-1', 'overall'),
+              core: readSemesterAverageField('1-1', 'core'),
+            },
+            '1-2': {
+              overall: readSemesterAverageField('1-2', 'overall'),
+              core: readSemesterAverageField('1-2', 'core'),
+            },
+            '2-1': {
+              overall: readSemesterAverageField('2-1', 'overall'),
+              core: readSemesterAverageField('2-1', 'core'),
+            },
+            '2-2': {
+              overall: readSemesterAverageField('2-2', 'overall'),
+              core: readSemesterAverageField('2-2', 'core'),
+            },
+            '3-1': {
+              overall: readSemesterAverageField('3-1', 'overall'),
+              core: readSemesterAverageField('3-1', 'core'),
+            },
+            '3-2': {
+              overall: readSemesterAverageField('3-2', 'overall'),
+              core: readSemesterAverageField('3-2', 'core'),
+            },
+          },
+        }
+      : fallbackGradeSummary
 
   return {
     semesters: {
@@ -264,6 +330,7 @@ const normalizeSchoolGradeInputData = (rawData: unknown): SchoolGradeInputData =
       '3-2': normalizeRows(semesters['3-2']),
     },
     extracurricular,
+    gradeSummary,
     recordUpload: {
       fileName: String(
         parsedRecord.recordUpload && typeof parsedRecord.recordUpload === 'object'
@@ -316,6 +383,40 @@ const sanitizeCellValue = (value: unknown): string => {
 
 const sanitizeNumberInput = (value: string): string =>
   value.replace(/[^\d]/g, '')
+
+const sanitizeGradeNumberInput = (value: string): string => {
+  let cleaned = value.replace(/[^\d.]/g, '')
+  if (!cleaned) return ''
+
+  const firstDotIndex = cleaned.indexOf('.')
+  if (firstDotIndex >= 0) {
+    cleaned = `${cleaned.slice(0, firstDotIndex + 1)}${cleaned.slice(firstDotIndex + 1).replace(/\./g, '')}`
+  }
+
+  if (cleaned.startsWith('.')) cleaned = `0${cleaned}`
+
+  const [intPartRaw, decimalPartRaw] = cleaned.split('.')
+  const intPart = intPartRaw.replace(/^0+(?=\d)/, '')
+  if (decimalPartRaw === undefined) return intPart
+  return `${intPart || '0'}.${decimalPartRaw.slice(0, 2)}`
+}
+
+const parseGradeNumber = (value: string): number | null => {
+  const text = value.trim()
+  if (!text) return null
+  const parsed = Number.parseFloat(text)
+  if (!Number.isFinite(parsed)) return null
+  return parsed
+}
+
+const formatAveragedGrade = (values: string[]): string => {
+  const numericValues = values
+    .map((value) => parseGradeNumber(value))
+    .filter((value): value is number => value !== null)
+  if (numericValues.length === 0) return ''
+  const average = numericValues.reduce((sum, value) => sum + value, 0) / numericValues.length
+  return Number.isInteger(average) ? String(average) : average.toFixed(2).replace(/\.?0+$/, '')
+}
 
 const toNonNegativeInt = (value: string): number => {
   const parsed = Number.parseInt(value, 10)
@@ -1010,6 +1111,9 @@ export default function SchoolGradeInputModal({
   const [message, setMessage] = useState('')
   const [isAutofillLoading, setIsAutofillLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [selectedSemesterColumn, setSelectedSemesterColumn] = useState<SemesterKey | null>(null)
+  const [inlineSemesterOpen, setInlineSemesterOpen] = useState(false)
+  const [inlineExtracurricularOpen, setInlineExtracurricularOpen] = useState(false)
 
   const loadSchoolGradeInputFromServer = useCallback(
     async (signal?: AbortSignal) => {
@@ -1222,6 +1326,8 @@ export default function SchoolGradeInputModal({
     setSelectedSemester('1-1')
     setSelectedSchoolYear(schoolYearOptions[0])
     setMessage('')
+    setInlineSemesterOpen(false)
+    setInlineExtracurricularOpen(false)
     setData(loadSavedData())
   }, [isOpen])
 
@@ -1259,6 +1365,8 @@ export default function SchoolGradeInputModal({
   const goMenu = () => {
     setStep('menu')
     setMessage('')
+    setInlineSemesterOpen(false)
+    setInlineExtracurricularOpen(false)
   }
 
   const saveData = useCallback(async (nextData: SchoolGradeInputData, successMessage: string) => {
@@ -1329,6 +1437,11 @@ export default function SchoolGradeInputModal({
 
   const handleSemesterCancel = () => {
     setData(loadSavedData())
+    if (step === 'menu') {
+      setInlineSemesterOpen(false)
+      setMessage('')
+      return
+    }
     goMenu()
   }
 
@@ -1338,6 +1451,11 @@ export default function SchoolGradeInputModal({
 
   const handleExtracurricularCancel = () => {
     setData(loadSavedData())
+    if (step === 'menu') {
+      setInlineExtracurricularOpen(false)
+      setMessage('')
+      return
+    }
     goMenu()
   }
 
@@ -1439,6 +1557,55 @@ export default function SchoolGradeInputModal({
 
   if (!isOpen && !embedded) return null
 
+  const updateSummaryAverage = (field: GradeAverageFieldKey, value: string) => {
+    const sanitized = sanitizeGradeNumberInput(value)
+    setData((prev) => {
+      const nextSemesterAverages = semesterKeys.reduce<Record<SemesterKey, Record<GradeAverageFieldKey, string>>>((acc, semesterKey) => {
+        acc[semesterKey] = {
+          ...prev.gradeSummary.semesterAverages[semesterKey],
+          [field]: sanitized,
+        }
+        return acc
+      }, {} as Record<SemesterKey, Record<GradeAverageFieldKey, string>>)
+
+      return {
+        ...prev,
+        gradeSummary: {
+          ...prev.gradeSummary,
+          overallAverage: field === 'overall' ? sanitized : prev.gradeSummary.overallAverage,
+          coreAverage: field === 'core' ? sanitized : prev.gradeSummary.coreAverage,
+          semesterAverages: nextSemesterAverages,
+        },
+      }
+    })
+  }
+
+  const updateSemesterAverage = (semester: SemesterKey, field: GradeAverageFieldKey, value: string) => {
+    const sanitized = sanitizeGradeNumberInput(value)
+    setData((prev) => {
+      const nextSemesterAverages = {
+        ...prev.gradeSummary.semesterAverages,
+        [semester]: {
+          ...prev.gradeSummary.semesterAverages[semester],
+          [field]: sanitized,
+        },
+      }
+      const nextAverage = formatAveragedGrade(
+        semesterKeys.map((semesterKey) => nextSemesterAverages[semesterKey][field])
+      )
+
+      return {
+        ...prev,
+        gradeSummary: {
+          ...prev.gradeSummary,
+          semesterAverages: nextSemesterAverages,
+          overallAverage: field === 'overall' ? nextAverage : prev.gradeSummary.overallAverage,
+          coreAverage: field === 'core' ? nextAverage : prev.gradeSummary.coreAverage,
+        },
+      }
+    })
+  }
+
   return (
     <div className={embedded ? 'w-full h-full overflow-y-auto px-4 py-4 sm:px-6 sm:py-6' : 'fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4'}>
       <div className={embedded ? 'mx-auto w-full max-w-[1240px] max-h-[calc(100vh-3rem)] overflow-y-auto rounded-3xl border border-gray-300 bg-[#f7f8fa] shadow-sm' : 'w-full max-w-[1240px] max-h-[92vh] overflow-y-auto rounded-3xl border border-gray-300 bg-[#f7f8fa] shadow-2xl'}>
@@ -1481,148 +1648,173 @@ export default function SchoolGradeInputModal({
                 </div>
               </div>
 
-              {semesterSections.map((section) => (
-                <div key={section.title}>
-                  <h3 className="mb-2 text-xl font-bold text-gray-900">{section.title}</h3>
-                  <div className="space-y-2.5">
-                    {section.semesters.map((semester) => (
+              <div className="rounded-xl border border-gray-300 bg-white px-4 py-4">
+                <div className="space-y-1">
+                  <div className="rounded-lg border border-gray-200 bg-[#fbfcfd] p-3">
+                    <div className="flex flex-wrap items-center gap-3 sm:flex-nowrap sm:gap-4">
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-semibold text-gray-600">평균 내신(전체)</p>
+                        <input
+                          value={data.gradeSummary.overallAverage}
+                          onChange={(e) => updateSummaryAverage('overall', e.target.value)}
+                          inputMode="decimal"
+                          placeholder="예: 2.35"
+                          className="h-10 w-[150px] rounded-lg border border-gray-300 px-3 text-sm text-gray-900"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-semibold text-gray-600">평균 내신(국영수탐)</p>
+                        <input
+                          value={data.gradeSummary.coreAverage}
+                          onChange={(e) => updateSummaryAverage('core', e.target.value)}
+                          inputMode="decimal"
+                          placeholder="예: 2.11"
+                          className="h-10 w-[150px] rounded-lg border border-gray-300 px-3 text-sm text-gray-900"
+                        />
+                      </div>
                       <button
-                        key={semester}
+                        type="button"
                         onClick={() => {
-                          setSelectedSemester(semester)
-                          setStep('semester')
+                          setInlineSemesterOpen(false)
+                          setInlineExtracurricularOpen((prev) => !prev)
                           setMessage('')
                         }}
-                        className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-center text-xl font-semibold text-gray-800 transition-colors hover:border-[#0e6093]/35 hover:bg-[#eef5fb]"
+                        className="inline-flex h-10 items-center justify-center rounded-lg bg-[#0e6093] px-4 text-sm font-semibold text-white transition-colors hover:bg-[#0b4f77] sm:ml-auto"
                       >
-                        {semesterLabels[semester]} 입력
+                        출결/봉사
                       </button>
-                    ))}
+                    </div>
+                  </div>
+
+                  <div className="relative flex w-full items-center justify-center py-1.5">
+                    <div className="absolute left-1/2 flex -translate-x-1/2 items-center gap-2">
+                      <span className="invisible text-xs" aria-hidden>하나만 채워도 자동 완성돼요!</span>
+                      <div className="flex flex-col items-center gap-[0.5px]">
+                        <span className="h-1 w-1 shrink-0 rounded-full bg-gradient-to-br from-[#61b7df] to-[#0e6093]" />
+                        <span className="h-1 w-1 shrink-0 rounded-full bg-gradient-to-br from-[#61b7df] to-[#0e6093]" />
+                        <span className="h-1 w-1 shrink-0 rounded-full bg-gradient-to-br from-[#61b7df] to-[#0e6093]" />
+                      </div>
+                      <span className="text-xs text-gray-400">하나만 채워도 자동 완성돼요!</span>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-gray-200 bg-[#fbfcfd] p-3">
+                    <div
+                      className="grid items-start gap-2"
+                      style={{ gridTemplateColumns: '110px repeat(6, minmax(0, 1fr))' }}
+                    >
+                      <div className="flex flex-col gap-2">
+                        <div className="text-[11px] font-semibold leading-tight text-gray-600">구분</div>
+                        <div className="flex h-8 items-center text-xs font-semibold text-gray-700">평균 내신(전체)</div>
+                        <div className="flex h-8 items-center text-xs font-semibold text-gray-700">평균 내신(국영수탐)</div>
+                      </div>
+                      {semesterKeys.map((semesterKey) => (
+                        <div
+                          key={semesterKey}
+                          role="group"
+                          tabIndex={0}
+                          onClick={(e) => {
+                            if (e.target instanceof HTMLInputElement) return
+                            if (selectedSemesterColumn === semesterKey) {
+                              setSelectedSemesterColumn(null)
+                              setStep('menu')
+                              setInlineSemesterOpen(false)
+                              setMessage('')
+                              return
+                            }
+                            setSelectedSemesterColumn(semesterKey)
+                            setSelectedSemester(semesterKey)
+                            setStep('menu')
+                            setInlineSemesterOpen(true)
+                            setInlineExtracurricularOpen(false)
+                            setMessage('')
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault()
+                              if (selectedSemesterColumn === semesterKey) {
+                                setSelectedSemesterColumn(null)
+                                setStep('menu')
+                                setInlineSemesterOpen(false)
+                                setMessage('')
+                                return
+                              }
+                              setSelectedSemesterColumn(semesterKey)
+                              setSelectedSemester(semesterKey)
+                              setStep('menu')
+                              setInlineSemesterOpen(true)
+                              setInlineExtracurricularOpen(false)
+                              setMessage('')
+                            }
+                          }}
+                          className={`flex flex-col gap-2 rounded-lg border-2 py-1 px-0.5 transition-[border-color,box-shadow] cursor-pointer ${selectedSemesterColumn === semesterKey ? 'border-[#0e6093] ring-2 ring-[#0e6093]/20' : 'border-transparent hover:border-[#0e6093] hover:ring-2 hover:ring-[#0e6093]/20'}`}
+                        >
+                          <div
+                            className="text-center text-[11px] font-semibold leading-tight text-gray-600"
+                            title={`${semesterLabels[semesterKey]} 상세 입력`}
+                          >
+                            {semesterLabels[semesterKey]}
+                          </div>
+                          <input
+                            value={data.gradeSummary.semesterAverages[semesterKey].overall}
+                            onChange={(e) => updateSemesterAverage(semesterKey, 'overall', e.target.value)}
+                            onFocus={() => {
+                              setSelectedSemesterColumn(semesterKey)
+                              setSelectedSemester(semesterKey)
+                              setStep('menu')
+                              setInlineSemesterOpen(true)
+                              setInlineExtracurricularOpen(false)
+                            }}
+                            inputMode="decimal"
+                            className="h-8 w-full rounded-md border border-gray-300 px-1.5 text-center text-sm text-gray-900 outline-none"
+                          />
+                          <input
+                            value={data.gradeSummary.semesterAverages[semesterKey].core}
+                            onChange={(e) => updateSemesterAverage(semesterKey, 'core', e.target.value)}
+                            onFocus={() => {
+                              setSelectedSemesterColumn(semesterKey)
+                              setSelectedSemester(semesterKey)
+                              setStep('menu')
+                              setInlineSemesterOpen(true)
+                              setInlineExtracurricularOpen(false)
+                            }}
+                            inputMode="decimal"
+                            className="h-8 w-full rounded-md border border-gray-300 px-1.5 text-center text-sm text-gray-900 outline-none"
+                          />
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              ))}
-
-              <div>
-                <h3 className="mb-2 text-xl font-bold text-gray-900">비교과</h3>
-                <button
-                  onClick={() => {
-                    setStep('extracurricular')
-                    setMessage('')
-                  }}
-                  className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-center text-xl font-semibold text-gray-800 transition-colors hover:border-[#0e6093]/35 hover:bg-[#eef5fb]"
-                >
-                  입력
-                </button>
               </div>
 
-              <div>
-                <h3 className="mb-2 text-xl font-bold text-gray-900">학생부 성적 업로드</h3>
-                <button
-                  onClick={() => {
-                    setStep('record_upload')
-                    setMessage('')
-                  }}
-                  className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-center text-xl font-semibold text-gray-800 transition-colors hover:border-[#0e6093]/35 hover:bg-[#eef5fb]"
-                >
-                  입력
-                </button>
-              </div>
-
-              {onOpenMockExamInput && (
-                <div>
-                  <h3 className="mb-2 text-xl font-bold text-gray-900">정시 / 모의고사 성적</h3>
-                  <button
-                    onClick={() => {
-                      onClose()
-                      onOpenMockExamInput()
-                    }}
-                    className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 text-center text-xl font-semibold text-gray-800 transition-colors hover:border-[#0e6093]/35 hover:bg-[#eef5fb]"
-                  >
-                    모의고사 성적 입력하기
-                  </button>
-                </div>
-              )}
             </div>
           )}
 
-          {step === 'semester' && (
+          {(step === 'semester' || (step === 'menu' && inlineSemesterOpen)) && (
             <div className="space-y-4">
-              <div className="rounded-2xl border border-gray-300 bg-white p-5">
-                <p className="mb-4 flex items-start gap-2 text-lg font-semibold text-gray-700 sm:text-xl">
-                  <span className="text-red-500">ⓘ</span>
-                  <span>입력이 안되거나 과목수가 충분하지 않은 경우 다른 성적을 참조하게 되므로 정확도가 떨어집니다</span>
-                </p>
-
-                <div className="mb-4 flex flex-wrap items-center gap-2">
-                  <select
-                    value={selectedSemester}
-                    onChange={(e) => setSelectedSemester(e.target.value as SemesterKey)}
-                    className="h-12 rounded-xl border border-gray-300 bg-white px-4 text-lg font-semibold text-gray-700"
-                  >
-                    {(Object.keys(semesterLabels) as SemesterKey[]).map((key) => (
-                      <option key={key} value={key}>{semesterLabels[key]}</option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={selectedSchoolYear}
-                    onChange={(e) => setSelectedSchoolYear(e.target.value)}
-                    className="h-12 rounded-xl border border-gray-300 bg-white px-4 text-lg font-semibold text-gray-700"
-                  >
-                    {schoolYearOptions.map((year) => (
-                      <option key={year} value={year}>{year}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                  <button
-                    onClick={() => {
-                      addSemesterRow(selectedSemester, 3)
-                      setMessage('3개 과목 입력 행을 추가했습니다.')
-                    }}
-                    className="h-11 rounded-full bg-[#0e8098] px-5 text-lg font-bold text-white hover:bg-[#0d7288]"
-                  >
-                    여러 과목 추가하기
-                  </button>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setMessage('수정은 표에서 직접 입력하면 바로 반영됩니다.')}
-                      className="h-11 rounded-full border border-gray-300 bg-white px-4 text-lg font-semibold text-gray-700 hover:bg-gray-50"
-                    >
-                      수정
-                    </button>
-                    <button
-                      onClick={() => addSemesterRow(selectedSemester, 1)}
-                      className="h-11 w-11 rounded-lg border border-gray-300 bg-white text-3xl leading-none text-gray-700 hover:bg-gray-50"
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-
+              <div className="rounded-2xl border border-gray-300 bg-white p-3">
                 <div className="overflow-x-auto rounded-xl border border-gray-300">
-                  <table className="min-w-[1320px] w-full border-collapse bg-white">
+                  <table className="min-w-[980px] w-full border-collapse bg-white text-xs">
                     <thead>
-                      <tr className="bg-[#f2f4f7] text-center text-sm font-bold text-gray-800 lg:text-base">
-                        <th className="border border-gray-300 px-2 py-3" rowSpan={2}>번호</th>
-                        <th className="border border-gray-300 px-2 py-3" rowSpan={2}>교과종류 구분</th>
-                        <th className="border border-gray-300 px-2 py-3" rowSpan={2}>교과</th>
-                        <th className="border border-gray-300 px-2 py-3" rowSpan={2}>과목</th>
-                        <th className="border border-gray-300 px-2 py-3" rowSpan={2}>단위수</th>
-                        <th className="border border-gray-300 px-2 py-3" rowSpan={2}>석차등급</th>
-                        <th className="border border-gray-300 px-2 py-3" rowSpan={2}>원점수</th>
-                        <th className="border border-gray-300 px-2 py-3" rowSpan={2}>과목평균</th>
-                        <th className="border border-gray-300 px-2 py-3" rowSpan={2}>표준편차</th>
-                        <th className="border border-gray-300 px-2 py-3" rowSpan={2}>수강자수</th>
-                        <th className="border border-gray-300 px-2 py-3" rowSpan={2}>성취도</th>
-                        <th className="border border-gray-300 px-2 py-3" colSpan={3}>성취도별 분포</th>
+                      <tr className="bg-[#f2f4f7] text-center font-bold text-gray-800">
+                        <th className="border border-gray-300 px-1.5 py-1.5" rowSpan={2}>번호</th>
+                        <th className="border border-gray-300 px-1.5 py-1.5" rowSpan={2}>교과종류 구분</th>
+                        <th className="border border-gray-300 px-1.5 py-1.5" rowSpan={2}>교과</th>
+                        <th className="border border-gray-300 px-1.5 py-1.5" rowSpan={2}>과목</th>
+                        <th className="border border-gray-300 px-1.5 py-1.5" rowSpan={2}>단위수</th>
+                        <th className="border border-gray-300 px-1.5 py-1.5" rowSpan={2}>석차등급</th>
+                        <th className="border border-gray-300 px-1.5 py-1.5" rowSpan={2}>원점수</th>
+                        <th className="border border-gray-300 px-1.5 py-1.5" rowSpan={2}>과목평균</th>
+                        <th className="border border-gray-300 px-1.5 py-1.5" rowSpan={2}>표준편차</th>
+                        <th className="border border-gray-300 px-1.5 py-1.5" rowSpan={2}>수강자수</th>
+                        <th className="border border-gray-300 px-1.5 py-1.5" rowSpan={2}>성취도</th>
+                        <th className="border border-gray-300 px-1.5 py-1.5" colSpan={3}>성취도별 분포</th>
                       </tr>
-                      <tr className="bg-[#f2f4f7] text-center text-sm font-bold text-gray-800 lg:text-base">
-                        <th className="border border-gray-300 px-2 py-3">A</th>
-                        <th className="border border-gray-300 px-2 py-3">B</th>
-                        <th className="border border-gray-300 px-2 py-3">C</th>
+                      <tr className="bg-[#f2f4f7] text-center font-bold text-gray-800">
+                        <th className="border border-gray-300 px-1.5 py-1.5">A</th>
+                        <th className="border border-gray-300 px-1.5 py-1.5">B</th>
+                        <th className="border border-gray-300 px-1.5 py-1.5">C</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1639,88 +1831,91 @@ export default function SchoolGradeInputModal({
                           : availableSubjectOptions
 
                         return (
-                          <tr key={row.id} className="text-sm text-gray-800 lg:text-base">
-                          <td className="border border-gray-300 px-2 py-2 text-center">{index + 1}</td>
+                          <tr key={row.id} className="text-xs text-gray-800">
+                          <td className="border border-gray-300 px-1.5 py-1.5 text-center">{index + 1}</td>
 
-                          <td className="border border-gray-300 px-2 py-2">
+                          <td className="border border-gray-300 px-1.5 py-1.5">
                             <ScrollableSelect
                               value={row.trackType}
                               options={trackTypeOptions}
                               onChange={(nextValue) => updateSemesterRow(selectedSemester, row.id, 'trackType', nextValue)}
+                              buttonClassName="h-7 w-full rounded-md border border-gray-300 bg-white px-1.5 text-xs"
                             />
                           </td>
 
-                          <td className="border border-gray-300 px-2 py-2">
+                          <td className="border border-gray-300 px-1.5 py-1.5">
                             <ScrollableSelect
                               value={row.curriculum}
                               options={curriculumOptionsForRow}
                               onChange={(nextValue) => updateSemesterRow(selectedSemester, row.id, 'curriculum', nextValue)}
                               minPanelWidth={320}
+                              buttonClassName="h-7 w-full rounded-md border border-gray-300 bg-white px-1.5 text-xs"
                             />
                           </td>
 
-                          <td className="border border-gray-300 px-2 py-2">
+                          <td className="border border-gray-300 px-1.5 py-1.5">
                             <ScrollableSelect
                               value={row.subject}
                               options={subjectOptionsForRow}
                               onChange={(nextValue) => updateSemesterRow(selectedSemester, row.id, 'subject', nextValue)}
                               minPanelWidth={360}
+                              buttonClassName="h-7 w-full rounded-md border border-gray-300 bg-white px-1.5 text-xs"
                             />
                           </td>
 
-                          <td className="border border-gray-300 px-2 py-2">
+                          <td className="border border-gray-300 px-1.5 py-1.5">
                             <input
                               value={row.credits}
                               onChange={(e) => updateSemesterRow(selectedSemester, row.id, 'credits', e.target.value)}
-                              className="h-10 w-full rounded-md border border-gray-300 px-2"
+                              className="h-7 w-full rounded-md border border-gray-300 px-1.5 text-center text-sm"
                             />
                           </td>
 
-                          <td className="border border-gray-300 px-2 py-2">
+                          <td className="border border-gray-300 px-1.5 py-1.5">
                             <input
                               value={row.classRank}
                               onChange={(e) => updateSemesterRow(selectedSemester, row.id, 'classRank', e.target.value)}
-                              className="h-10 w-full rounded-md border border-gray-300 px-2"
+                              className="h-7 w-full rounded-md border border-gray-300 px-1.5 text-center text-sm"
                             />
                           </td>
 
-                          <td className="border border-gray-300 px-2 py-2">
+                          <td className="border border-gray-300 px-1.5 py-1.5">
                             <input
                               value={row.rawScore}
                               onChange={(e) => updateSemesterRow(selectedSemester, row.id, 'rawScore', e.target.value)}
-                              className="h-10 w-full rounded-md border border-gray-300 px-2"
+                              className="h-7 w-full rounded-md border border-gray-300 px-1.5 text-center text-sm"
                             />
                           </td>
 
-                          <td className="border border-gray-300 px-2 py-2">
+                          <td className="border border-gray-300 px-1.5 py-1.5">
                             <input
                               value={row.avgScore}
                               onChange={(e) => updateSemesterRow(selectedSemester, row.id, 'avgScore', e.target.value)}
-                              className="h-10 w-full rounded-md border border-gray-300 px-2"
+                              className="h-7 w-full rounded-md border border-gray-300 px-1.5 text-center text-sm"
                             />
                           </td>
 
-                          <td className="border border-gray-300 px-2 py-2">
+                          <td className="border border-gray-300 px-1.5 py-1.5">
                             <input
                               value={row.stdDev}
                               onChange={(e) => updateSemesterRow(selectedSemester, row.id, 'stdDev', e.target.value)}
-                              className="h-10 w-full rounded-md border border-gray-300 px-2"
+                              className="h-7 w-full rounded-md border border-gray-300 px-1.5 text-center text-sm"
                             />
                           </td>
 
-                          <td className="border border-gray-300 px-2 py-2">
+                          <td className="border border-gray-300 px-1.5 py-1.5">
                             <input
                               value={row.studentCount}
                               onChange={(e) => updateSemesterRow(selectedSemester, row.id, 'studentCount', e.target.value)}
-                              className="h-10 w-full rounded-md border border-gray-300 px-2"
+                              className="h-7 w-full rounded-md border border-gray-300 px-1.5 text-center text-sm"
                             />
                           </td>
 
-                          <td className="border border-gray-300 px-2 py-2">
+                          <td className="border border-gray-300 px-1.5 py-1.5">
                             <select
                               value={row.achievement}
                               onChange={(e) => updateSemesterRow(selectedSemester, row.id, 'achievement', e.target.value)}
-                              className="h-10 w-full rounded-md border border-gray-300 px-2"
+                              className="h-7 w-full rounded-md border border-gray-300 px-1.5 text-center text-sm"
                             >
                               {achievementOptions.map((opt) => (
                                 <option key={opt} value={opt}>{opt}</option>
@@ -1728,27 +1923,27 @@ export default function SchoolGradeInputModal({
                             </select>
                           </td>
 
-                          <td className="border border-gray-300 px-2 py-2">
+                          <td className="border border-gray-300 px-1.5 py-1.5">
                             <input
                               value={row.distA}
                               onChange={(e) => updateSemesterRow(selectedSemester, row.id, 'distA', e.target.value)}
-                              className="h-10 w-full rounded-md border border-gray-300 px-2"
+                              className="h-7 w-full rounded-md border border-gray-300 px-1.5 text-center text-sm"
                             />
                           </td>
 
-                          <td className="border border-gray-300 px-2 py-2">
+                          <td className="border border-gray-300 px-1.5 py-1.5">
                             <input
                               value={row.distB}
                               onChange={(e) => updateSemesterRow(selectedSemester, row.id, 'distB', e.target.value)}
-                              className="h-10 w-full rounded-md border border-gray-300 px-2"
+                              className="h-7 w-full rounded-md border border-gray-300 px-1.5 text-center text-sm"
                             />
                           </td>
 
-                          <td className="border border-gray-300 px-2 py-2">
+                          <td className="border border-gray-300 px-1.5 py-1.5">
                             <input
                               value={row.distC}
                               onChange={(e) => updateSemesterRow(selectedSemester, row.id, 'distC', e.target.value)}
-                              className="h-10 w-full rounded-md border border-gray-300 px-2"
+                              className="h-7 w-full rounded-md border border-gray-300 px-1.5 text-center text-sm"
                             />
                           </td>
                           </tr>
@@ -1758,49 +1953,27 @@ export default function SchoolGradeInputModal({
                   </table>
                 </div>
               </div>
-
-              <div className="flex justify-center gap-3 pt-1">
-                <button
-                  onClick={handleSemesterCancel}
-                  className="h-12 min-w-[200px] rounded-2xl bg-[#cfd6db] px-6 text-xl font-bold text-gray-700 hover:bg-[#bec7cd]"
-                >
-                  취소
-                </button>
-                <button
-                  onClick={handleSemesterSave}
-                  disabled={isSaving}
-                  className="h-12 min-w-[200px] rounded-2xl bg-[#0e8098] px-6 text-xl font-bold text-white hover:bg-[#0d7288] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isSaving ? '저장 중...' : '저장'}
-                </button>
-              </div>
             </div>
           )}
 
-          {step === 'extracurricular' && (
+          {(step === 'extracurricular' || (step === 'menu' && inlineExtracurricularOpen)) && (
             <div className="space-y-4">
-              <div className="rounded-2xl border border-gray-300 bg-white p-5">
-                <p className="mb-5 flex items-start gap-2 text-2xl font-semibold text-gray-700">
-                  <span className="text-red-500">ⓘ</span>
-                  <span>입력이 안되거나 과목수가 충분하지 않은 경우 다른 성적을 참조하게 되므로 정확도가 떨어집니다</span>
-                </p>
-
-                <div className="grid gap-6 xl:grid-cols-[2.6fr_1fr]">
+              <div className="rounded-2xl border border-gray-300 bg-white p-3">
+                <div className="grid gap-3 xl:grid-cols-[2.6fr_1fr]">
                   <div>
-                    <h3 className="mb-3 text-3xl font-bold text-gray-900 md:text-4xl">출결사항</h3>
                     <div className="overflow-x-auto rounded-xl border border-gray-300">
-                      <table className="min-w-[760px] w-full border-collapse bg-white text-lg">
+                      <table className="min-w-[560px] w-full border-collapse bg-white text-xs">
                         <thead>
                           <tr className="bg-[#f2f4f7] text-center font-bold text-gray-800">
-                            <th className="border border-gray-300 px-3 py-3">학년</th>
-                            <th className="border border-gray-300 px-3 py-3">무단(미인정) 결석</th>
-                            <th className="border border-gray-300 px-3 py-3">무단(미인정) 지각</th>
-                            <th className="border border-gray-300 px-3 py-3">무단(미인정) 조퇴</th>
-                            <th className="border border-gray-300 px-3 py-3">무단(미인정) 결과</th>
-                            <th className="border border-gray-300 px-3 py-3">
+                            <th className="border border-gray-300 px-2 py-1.5">학년</th>
+                            <th className="border border-gray-300 px-2 py-1.5">무단(미인정) 결석</th>
+                            <th className="border border-gray-300 px-2 py-1.5">무단(미인정) 지각</th>
+                            <th className="border border-gray-300 px-2 py-1.5">무단(미인정) 조퇴</th>
+                            <th className="border border-gray-300 px-2 py-1.5">무단(미인정) 결과</th>
+                            <th className="border border-gray-300 px-2 py-1.5">
                               <span className="inline-flex items-center gap-2">
                                 합계
-                                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full border border-gray-300 text-sm text-gray-500">?</span>
+                                <span className="inline-flex h-4 w-4 items-center justify-center rounded-full border border-gray-300 text-[10px] text-gray-500">?</span>
                               </span>
                             </th>
                           </tr>
@@ -1808,51 +1981,51 @@ export default function SchoolGradeInputModal({
                         <tbody>
                           {gradeKeys.map((grade) => (
                             <tr key={`attendance-${grade}`} className="text-center text-gray-800">
-                              <td className="border border-gray-300 px-3 py-3 text-3xl font-semibold">{grade}</td>
-                              <td className="border border-gray-300 px-3 py-3">
+                              <td className="border border-gray-300 px-2 py-1.5 text-base font-semibold">{grade}</td>
+                              <td className="border border-gray-300 px-2 py-1.5">
                                 <input
                                   inputMode="numeric"
                                   value={data.extracurricular.attendance[grade].absence}
                                   onChange={(e) => updateAttendanceField(grade, 'absence', e.target.value)}
-                                  className="h-11 w-full rounded-xl border border-gray-300 px-3 text-center text-xl"
+                                  className="h-7 w-full rounded-md border border-gray-300 px-2 text-center text-sm"
                                 />
                               </td>
-                              <td className="border border-gray-300 px-3 py-3">
+                              <td className="border border-gray-300 px-2 py-1.5">
                                 <input
                                   inputMode="numeric"
                                   value={data.extracurricular.attendance[grade].tardy}
                                   onChange={(e) => updateAttendanceField(grade, 'tardy', e.target.value)}
-                                  className="h-11 w-full rounded-xl border border-gray-300 px-3 text-center text-xl"
+                                  className="h-7 w-full rounded-md border border-gray-300 px-2 text-center text-sm"
                                 />
                               </td>
-                              <td className="border border-gray-300 px-3 py-3">
+                              <td className="border border-gray-300 px-2 py-1.5">
                                 <input
                                   inputMode="numeric"
                                   value={data.extracurricular.attendance[grade].earlyLeave}
                                   onChange={(e) => updateAttendanceField(grade, 'earlyLeave', e.target.value)}
-                                  className="h-11 w-full rounded-xl border border-gray-300 px-3 text-center text-xl"
+                                  className="h-7 w-full rounded-md border border-gray-300 px-2 text-center text-sm"
                                 />
                               </td>
-                              <td className="border border-gray-300 px-3 py-3">
+                              <td className="border border-gray-300 px-2 py-1.5">
                                 <input
                                   inputMode="numeric"
                                   value={data.extracurricular.attendance[grade].result}
                                   onChange={(e) => updateAttendanceField(grade, 'result', e.target.value)}
-                                  className="h-11 w-full rounded-xl border border-gray-300 px-3 text-center text-xl"
+                                  className="h-7 w-full rounded-md border border-gray-300 px-2 text-center text-sm"
                                 />
                               </td>
-                              <td className="border border-gray-300 px-3 py-3 text-3xl font-semibold text-gray-700">
+                              <td className="border border-gray-300 px-2 py-1.5 text-base font-semibold text-gray-700">
                                 {attendanceTotalsByGrade[grade]}
                               </td>
                             </tr>
                           ))}
                           <tr className="bg-[#f7f8fa] text-center font-semibold text-gray-700">
-                            <td className="border border-gray-300 px-3 py-3 text-xl">전학년</td>
-                            <td className="border border-gray-300 px-3 py-3 text-xl">{attendanceColumnTotals.absence}</td>
-                            <td className="border border-gray-300 px-3 py-3 text-xl">{attendanceColumnTotals.tardy}</td>
-                            <td className="border border-gray-300 px-3 py-3 text-xl">{attendanceColumnTotals.earlyLeave}</td>
-                            <td className="border border-gray-300 px-3 py-3 text-xl">{attendanceColumnTotals.result}</td>
-                            <td className="border border-gray-300 px-3 py-3 text-xl">{attendanceGrandTotal}</td>
+                            <td className="border border-gray-300 px-2 py-1.5 text-sm">전학년</td>
+                            <td className="border border-gray-300 px-2 py-1.5 text-sm">{attendanceColumnTotals.absence}</td>
+                            <td className="border border-gray-300 px-2 py-1.5 text-sm">{attendanceColumnTotals.tardy}</td>
+                            <td className="border border-gray-300 px-2 py-1.5 text-sm">{attendanceColumnTotals.earlyLeave}</td>
+                            <td className="border border-gray-300 px-2 py-1.5 text-sm">{attendanceColumnTotals.result}</td>
+                            <td className="border border-gray-300 px-2 py-1.5 text-sm">{attendanceGrandTotal}</td>
                           </tr>
                         </tbody>
                       </table>
@@ -1860,54 +2033,37 @@ export default function SchoolGradeInputModal({
                   </div>
 
                   <div>
-                    <h3 className="mb-3 text-3xl font-bold text-gray-900 md:text-4xl">봉사활동</h3>
                     <div className="overflow-x-auto rounded-xl border border-gray-300">
-                      <table className="min-w-[320px] w-full border-collapse bg-white text-lg">
+                      <table className="min-w-[220px] w-full border-collapse bg-white text-xs">
                         <thead>
                           <tr className="bg-[#f2f4f7] text-center font-bold text-gray-800">
-                            <th className="border border-gray-300 px-3 py-3">학년</th>
-                            <th className="border border-gray-300 px-3 py-3">시간</th>
+                            <th className="border border-gray-300 px-2 py-1.5">학년</th>
+                            <th className="border border-gray-300 px-2 py-1.5">봉사시간</th>
                           </tr>
                         </thead>
                         <tbody>
                           {gradeKeys.map((grade) => (
                             <tr key={`volunteer-${grade}`} className="text-center text-gray-800">
-                              <td className="border border-gray-300 px-3 py-3 text-3xl font-semibold">{grade}</td>
-                              <td className="border border-gray-300 px-3 py-3">
+                              <td className="border border-gray-300 px-2 py-1.5 text-base font-semibold">{grade}</td>
+                              <td className="border border-gray-300 px-2 py-1.5">
                                 <input
                                   inputMode="numeric"
                                   value={data.extracurricular.volunteerHours[grade]}
                                   onChange={(e) => updateVolunteerHours(grade, e.target.value)}
-                                  className="h-11 w-full rounded-xl border border-gray-300 px-3 text-center text-xl"
+                                  className="h-7 w-full rounded-md border border-gray-300 px-2 text-center text-sm"
                                 />
                               </td>
                             </tr>
                           ))}
                           <tr className="bg-[#f7f8fa] text-center font-semibold text-gray-700">
-                            <td className="border border-gray-300 px-3 py-3 text-xl">전학년</td>
-                            <td className="border border-gray-300 px-3 py-3 text-xl">{volunteerTotal}</td>
+                            <td className="border border-gray-300 px-2 py-1.5 text-sm">전학년</td>
+                            <td className="border border-gray-300 px-2 py-1.5 text-sm">{volunteerTotal}</td>
                           </tr>
                         </tbody>
                       </table>
                     </div>
                   </div>
                 </div>
-              </div>
-
-              <div className="flex justify-center gap-3 pt-1">
-                <button
-                  onClick={handleExtracurricularCancel}
-                  className="h-12 min-w-[200px] rounded-2xl bg-[#cfd6db] px-6 text-xl font-bold text-gray-700 hover:bg-[#bec7cd]"
-                >
-                  취소
-                </button>
-                <button
-                  onClick={handleExtracurricularSave}
-                  disabled={isSaving}
-                  className="h-12 min-w-[200px] rounded-2xl bg-[#0e8098] px-6 text-xl font-bold text-white hover:bg-[#0d7288] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {isSaving ? '저장 중...' : '저장'}
-                </button>
               </div>
             </div>
           )}
