@@ -1,0 +1,172 @@
+{
+  "1": {
+    "name": "서울대 자연A 물화",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "2": {
+    "name": "서울대 자연B",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "3": {
+    "name": "서울대 통합",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "4": {
+    "name": "서울대 자전",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "5": {
+    "name": "연세대 자연",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "6": {
+    "name": "연세대 인문",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "7": {
+    "name": "연세대 의",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "8": {
+    "name": "연세대 국제",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "9": {
+    "name": "고려대 자연",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "10": {
+    "name": "고려대 사국",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "11": {
+    "name": "고려대 통합",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "12": {
+    "name": "서강 자연",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "13": {
+    "name": "서강 통합",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "14": {
+    "name": "서강 적용",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "15": {
+    "name": "서강 적용(최저)",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "16": {
+    "name": "서강 자연(최저)",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  },
+  "17": {
+    "name": "서강 통합(최저)",
+    "final": 0.0,
+    "korean": 0.0,
+    "math": 0.0,
+    "tamgu1": 0.0,
+    "tamgu2": 0.0,
+    "english": 0.0,
+    "history": 0.0
+  }
+}

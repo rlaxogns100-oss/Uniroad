@@ -1,0 +1,12 @@
+{
+  "crawl_time": "2026-02-17T00:20:49.674386",
+  "universities": [],
+  "scoring_formulas": [],
+  "api_endpoints": [],
+  "errors": [
+    {
+      "step": "run",
+      "error": "BrowserType.launch: Executable doesn't exist at /var/folders/tb/3r9gx_bn27j55xqlxl7x1qc80000gn/T/cursor-sandbox-cache/0d3fbedad97c82b4a55d19967a1d6674/playwright/chromium-1208/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing\n╔════════════════════════════════════════════════════════════╗\n║ Looks like Playwright was just installed or updated.       ║\n║ Please run the following command to download new browsers: ║\n║                                                            ║\n║     playwright install                                     ║\n║                                                            ║\n║ <3 Playwright Team                                         ║\n╚════════════════════════════════════════════════════════════╝"
+    }
+  ]
+}

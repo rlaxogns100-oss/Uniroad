@@ -69,6 +69,13 @@ frontend/build/
 !frontend/public/**/*.png
 !frontend/src/assets/**/*.png
 
+# 임시 분석 파일 (Excel, CSV)
+backend/*.xlsx
+user_logs.xlsx
+프깎노*.xlsx
+admin_logs_*.xlsx
+FINAL_nesin_detail_complete_*.csv
+
 # ============================================
 # IDE & System
 # ============================================

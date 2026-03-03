@@ -1,6 +1,68 @@
 import axios from 'axios'
+import { API_BASE, isCapacitorApp, getApiBaseUrl } from '../config'
 
-const API_BASE_URL = '/api'
+const API_BASE_URL = API_BASE ? `${API_BASE}/api` : '/api'
+
+/** 요청 시점의 API 베이스 URL (Capacitor 앱에서 env 미설정 시 https://uni2road.com 사용) */
+const getEffectiveApiBaseUrl = (): string => {
+  const base = getApiBaseUrl()
+  return base ? `${base}/api` : '/api'
+}
+
+const AUTH_REQUIRED_ERROR = '__AUTH_REQUIRED__'
+
+const refreshAccessToken = async (apiUrl: string): Promise<string | null> => {
+  const refreshToken = localStorage.getItem('refresh_token')
+  if (!refreshToken) return null
+
+  try {
+    const response = await fetch(`${apiUrl}/auth/refresh?refresh_token=${encodeURIComponent(refreshToken)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    if (!response.ok) return null
+
+    const data = await response.json()
+    const newAccessToken = data?.access_token
+    const newRefreshToken = data?.refresh_token
+    if (!newAccessToken) return null
+
+    localStorage.setItem('access_token', newAccessToken)
+    if (newRefreshToken) {
+      localStorage.setItem('refresh_token', newRefreshToken)
+    }
+    return newAccessToken
+  } catch {
+    return null
+  }
+}
+
+const withBearerHeader = (headers: Record<string, string>, token?: string): Record<string, string> => {
+  if (!token) return headers
+  return { ...headers, Authorization: `Bearer ${token}` }
+}
+
+const fetchWithAuthRetry = async (
+  url: string,
+  init: RequestInit,
+  apiUrl: string,
+  token?: string
+): Promise<Response> => {
+  const initialToken = token || localStorage.getItem('access_token') || undefined
+  let response = await fetch(url, { ...init, headers: withBearerHeader((init.headers || {}) as Record<string, string>, initialToken) })
+
+  if (response.status !== 401 || !initialToken) {
+    return response
+  }
+
+  const refreshed = await refreshAccessToken(apiUrl)
+  if (!refreshed) {
+    return response
+  }
+
+  response = await fetch(url, { ...init, headers: withBearerHeader((init.headers || {}) as Record<string, string>, refreshed) })
+  return response
+}
 
 export const api = axios.create({
   baseURL: API_BASE_URL,
@@ -13,6 +75,7 @@ export const api = axios.create({
 export interface ChatRequest {
   message: string
   session_id?: string
+  thinking?: boolean  // Thinking 모드 활성화 여부
 }
 
 // 멀티에이전트 응답 타입
@@ -85,6 +148,7 @@ export interface ChatResponse {
   orchestration_result?: OrchestrationResult
   sub_agent_results?: Record<string, SubAgentResult>
   metadata?: Record<string, any>
+  require_login?: boolean  // 비로그인 3회째 질문 시 마스킹 필요
 }
 
 export interface UploadResponse {
@@ -120,6 +184,103 @@ export interface Agent {
   description: string
 }
 
+// 비스트리밍 채팅 API (iOS WebView용)
+const sendMessageNonStream = async (
+  message: string,
+  sessionId: string,
+  onLog: (log: string) => void,
+  onResult: (result: ChatResponse) => void,
+  onError?: (error: string) => void,
+  abortSignal?: AbortSignal,
+  token?: string
+): Promise<void> => {
+  const apiUrl = getEffectiveApiBaseUrl()
+  console.log('[sendMessageNonStream] Starting non-streaming request')
+  console.log('API_BASE_URL:', apiUrl)
+  
+  try {
+    onLog('🔍 질문을 분석하는 중...')
+    
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    }
+    
+    const response = await fetchWithAuthRetry(`${apiUrl}/chat/`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        message,
+        session_id: sessionId,
+      }),
+      signal: abortSignal,
+    }, apiUrl, token)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('API 에러:', response.status, errorText)
+
+      if (response.status === 401) {
+        onError?.(AUTH_REQUIRED_ERROR)
+        return
+      }
+      
+      if (response.status === 429) {
+        if (errorText.includes('로그인을 통해')) {
+          onError?.('__RATE_LIMIT_GUEST__')
+        } else {
+          try {
+            const parsed = JSON.parse(errorText)
+            onError?.(parsed.detail || '일일 사용량을 초과했습니다.')
+          } catch {
+            onError?.('일일 사용량을 초과했습니다. 내일 00:00에 초기화됩니다.')
+          }
+        }
+        return
+      }
+      
+      onError?.(`서버 오류 (${response.status}): ${errorText}`)
+      return
+    }
+
+    const rawText = await response.text()
+    let data: any
+    try {
+      data = JSON.parse(rawText)
+    } catch (parseError) {
+      console.error('[sendMessageNonStream] Response is not JSON. URL:', apiUrl, 'Preview:', rawText.slice(0, 200))
+      onError?.('서버 응답 형식 오류입니다. API 주소를 확인해 주세요.')
+      return
+    }
+    console.log('[sendMessageNonStream] Response received:', data)
+    onLog('✨ 답변 완료!')
+    
+    const chatResponse: ChatResponse = {
+      response: data.response || '',
+      raw_answer: data.response || '',
+      sources: data.sources || [],
+      source_urls: data.source_urls || [],
+      used_chunks: data.used_chunks || [],
+      router_output: data.router_output,
+      function_results: data.function_results,
+      orchestration_result: data.orchestration_result,
+      sub_agent_results: data.sub_agent_results,
+      metadata: data.metadata
+    }
+    
+    console.log('[sendMessageNonStream] Calling onResult with:', chatResponse)
+    onResult(chatResponse)
+    
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      console.log('요청이 취소되었습니다')
+      return
+    }
+    
+    console.error('채팅 오류:', error)
+    onError?.(error?.message || '네트워크 오류가 발생했습니다')
+  }
+}
+
 // 채팅 API (Router Agent) - 비스트리밍 폴백
 export const sendMessageStream = async (
   message: string,
@@ -129,33 +290,48 @@ export const sendMessageStream = async (
   onError?: (error: string) => void,
   abortSignal?: AbortSignal,
   onChunk?: (chunk: string) => void,  // 실시간 텍스트 청크 콜백
-  token?: string  // 인증 토큰
+  token?: string,  // 인증 토큰
+  thinking?: boolean  // Thinking 모드
 ): Promise<void> => {
+  const IS_CAPACITOR_APP = isCapacitorApp()
+  console.log('[sendMessageStream] IS_CAPACITOR_APP:', IS_CAPACITOR_APP)
+  
+  // iOS WebView에서 SSE ReadableStream이 제대로 동작하지 않아 비스트리밍 API 사용
+  if (IS_CAPACITOR_APP) {
+    console.log('[sendMessageStream] Using non-streaming API for iOS')
+    return sendMessageNonStream(message, sessionId, onLog, onResult, onError, abortSignal, token)
+  }
+  
+  console.log('[sendMessageStream] Using streaming API for web')
+  
   try {
-    onLog('🔍 질문을 분석하는 중...')
+    onLog(thinking ? '🧠 Thinking 모드로 분석 중...' : '🔍 질문을 분석하는 중...')
     
     // 헤더 구성
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
     }
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    }
     
     // 실시간 스트리밍 엔드포인트 사용
-    const response = await fetch('/api/chat/v2/stream', {
+    const response = await fetchWithAuthRetry(`${API_BASE_URL}/chat/v2/stream`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
         message,
         session_id: sessionId,
+        thinking: thinking || false,
       }),
       signal: abortSignal,
-    })
+    }, API_BASE_URL, token)
 
     if (!response.ok) {
       const errorText = await response.text()
       console.error('API 에러:', response.status, errorText)
+
+      if (response.status === 401) {
+        onError?.(AUTH_REQUIRED_ERROR)
+        return
+      }
       
       // 429 에러 (Rate Limit)
       if (response.status === 429) {
@@ -213,6 +389,18 @@ export const sendMessageStream = async (
               ? `${event.message || ''}|||${JSON.stringify({ step: event.step, detail: event.detail })}`
               : event.message || ''
             onLog(logMessage)
+          } else if (event.type === 'log') {
+            // Thinking 모드 로그 - step, iteration, detail 정보 포함
+            if (event.step || event.iteration || event.detail) {
+              const logMessage = `${event.content || ''}|||${JSON.stringify({ 
+                step: event.step, 
+                iteration: event.iteration,
+                detail: event.detail 
+              })}`
+              onLog(logMessage)
+            } else {
+              onLog(event.content || '')
+            }
           } else if (event.type === 'chunk') {
             // 텍스트 청크 - 실시간으로 화면에 표시
             const chunkText = event.text || ''
@@ -246,7 +434,8 @@ export const sendMessageStream = async (
       metadata: {
         timing: finalData?.timing,
         pipeline_time: finalData?.pipeline_time
-      }
+      },
+      require_login: finalData?.require_login || false  // 비로그인 3회째 질문 시 마스킹
     }
     
     onResult(chatResponse)
@@ -263,6 +452,118 @@ export const sendMessageStream = async (
   }
 }
 
+// 비스트리밍 이미지 채팅 API (iOS WebView용)
+const sendMessageNonStreamWithImage = async (
+  message: string,
+  sessionId: string,
+  image: File,
+  onLog: (log: string) => void,
+  onResult: (result: ChatResponse) => void,
+  onError?: (error: string) => void,
+  abortSignal?: AbortSignal,
+  token?: string
+): Promise<void> => {
+  try {
+    onLog('🖼️ 이미지를 분석하는 중...')
+    
+    const formData = new FormData()
+    formData.append('message', message)
+    formData.append('session_id', sessionId)
+    formData.append('image', image)
+    
+    const headers: Record<string, string> = {}
+    
+    const apiUrl = getEffectiveApiBaseUrl()
+    // 스트리밍 엔드포인트를 사용하되, 전체 응답을 한번에 받음
+    const response = await fetchWithAuthRetry(`${apiUrl}/chat/v2/stream/with-image`, {
+      method: 'POST',
+      headers,
+      body: formData,
+      signal: abortSignal,
+    }, apiUrl, token)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('API 에러:', response.status, errorText)
+
+      if (response.status === 401) {
+        onError?.(AUTH_REQUIRED_ERROR)
+        return
+      }
+      
+      // 413 에러 (파일 크기 초과)
+      if (response.status === 413) {
+        onError?.('이미지 크기가 너무 큽니다. 10MB 이하의 이미지를 선택해주세요.')
+        return
+      }
+      
+      if (response.status === 429) {
+        if (errorText.includes('로그인을 통해')) {
+          onError?.('__RATE_LIMIT_GUEST__')
+        } else {
+          try {
+            const parsed = JSON.parse(errorText)
+            onError?.(parsed.detail || '일일 사용량을 초과했습니다.')
+          } catch {
+            onError?.('일일 사용량을 초과했습니다. 내일 00:00에 초기화됩니다.')
+          }
+        }
+        return
+      }
+      
+      onError?.(`서버 오류 (${response.status}): ${errorText}`)
+      return
+    }
+
+    // SSE 응답을 텍스트로 받아서 파싱
+    const text = await response.text()
+    let fullResponse = ''
+    let finalData: any = null
+    
+    const lines = text.split('\n\n')
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      try {
+        const jsonStr = line.slice(6)
+        const event = JSON.parse(jsonStr)
+        if (event.type === 'chunk') {
+          fullResponse += event.text || ''
+        } else if (event.type === 'done') {
+          finalData = event
+        }
+      } catch (e) {
+        // 파싱 오류 무시
+      }
+    }
+    
+    onLog('✨ 답변 완료!')
+    
+    const chatResponse: ChatResponse = {
+      response: finalData?.response || fullResponse,
+      raw_answer: finalData?.response || fullResponse,
+      sources: finalData?.sources || [],
+      source_urls: finalData?.source_urls || [],
+      used_chunks: finalData?.used_chunks || [],
+      router_output: finalData?.router_output,
+      function_results: finalData?.function_results,
+      orchestration_result: finalData?.orchestration_result,
+      sub_agent_results: finalData?.sub_agent_results,
+      metadata: finalData?.metadata
+    }
+    
+    onResult(chatResponse)
+    
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      console.log('요청이 취소되었습니다')
+      return
+    }
+    
+    console.error('이미지 채팅 오류:', error)
+    onError?.(error?.message || '네트워크 오류가 발생했습니다')
+  }
+}
+
 // 이미지와 함께 채팅 API (스트리밍)
 export const sendMessageStreamWithImage = async (
   message: string,
@@ -275,6 +576,13 @@ export const sendMessageStreamWithImage = async (
   onChunk?: (chunk: string) => void,
   token?: string  // 인증 토큰
 ): Promise<void> => {
+  const IS_CAPACITOR_APP = isCapacitorApp()
+  
+  // iOS WebView에서 SSE ReadableStream이 제대로 동작하지 않아 비스트리밍 API 사용
+  if (IS_CAPACITOR_APP) {
+    return sendMessageNonStreamWithImage(message, sessionId, image, onLog, onResult, onError, abortSignal, token)
+  }
+  
   try {
     onLog('🖼️ 이미지를 분석하는 중...')
     
@@ -286,20 +594,28 @@ export const sendMessageStreamWithImage = async (
     
     // 헤더 구성
     const headers: Record<string, string> = {}
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    }
     
-    const response = await fetch('/api/chat/v2/stream/with-image', {
+    const response = await fetchWithAuthRetry(`${API_BASE_URL}/chat/v2/stream/with-image`, {
       method: 'POST',
       headers,
       body: formData,
       signal: abortSignal,
-    })
+    }, API_BASE_URL, token)
 
     if (!response.ok) {
       const errorText = await response.text()
       console.error('API 에러:', response.status, errorText)
+
+      if (response.status === 401) {
+        onError?.(AUTH_REQUIRED_ERROR)
+        return
+      }
+      
+      // 413 에러 (파일 크기 초과)
+      if (response.status === 413) {
+        onError?.('이미지 크기가 너무 큽니다. 10MB 이하의 이미지를 선택해주세요.')
+        return
+      }
       
       // 429 에러 (Rate Limit)
       if (response.status === 429) {
@@ -388,7 +704,8 @@ export const sendMessageStreamWithImage = async (
       metadata: {
         image_analysis: finalData?.image_analysis,
         pipeline_time: finalData?.pipeline_time
-      }
+      },
+      require_login: finalData?.require_login || false  // 비로그인 3회째 질문 시 마스킹
     }
     
     onResult(chatResponse)
@@ -542,4 +859,35 @@ export const deleteProfile = async (token: string): Promise<void> => {
   await api.delete('/profile/me', {
     headers: { Authorization: `Bearer ${token}` }
   })
+}
+
+// ============================================================
+// 채팅 마이그레이션 API
+// ============================================================
+
+export interface MigrateMessageItem {
+  role: 'user' | 'assistant'
+  content: string
+  sources?: string[]
+  source_urls?: string[]
+}
+
+export interface MigrateMessagesResponse {
+  session_id: string
+  message_count: number
+  message: string
+}
+
+// 비로그인 채팅 내역을 로그인한 사용자의 세션으로 마이그레이션
+export const migrateMessages = async (
+  token: string,
+  messages: MigrateMessageItem[],
+  browserSessionId: string
+): Promise<MigrateMessagesResponse> => {
+  const response = await api.post<MigrateMessagesResponse>(
+    '/sessions/migrate',
+    { messages, browser_session_id: browserSessionId },
+    { headers: { Authorization: `Bearer ${token}` } }
+  )
+  return response.data
 }

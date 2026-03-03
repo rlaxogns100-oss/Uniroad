@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { trackUserAction } from '../utils/tracking'
 
 // 카드 아이템 타입
 interface SuggestionCard {
@@ -17,7 +18,7 @@ const suggestionList: SuggestionCard[] = [
     title: '합격 예측',
     representative: '내 점수로 어디 갈 수 있을까?',
     questions: [
-      '나 12232인데 고려대 기계공학부 합격 가능해?',
+      '나 내신 2.5인데 교대 가고 싶어',
       '국수영탐 21111 어디 전자공학과 갈 수 있어?',
       '백분위 80, 98, 1등급, 95, 95인데 대학 추천해줘',
     ],
@@ -29,8 +30,8 @@ const suggestionList: SuggestionCard[] = [
     iconBgColor: 'bg-blue-100 text-blue-600',
   },
   {
-    title: '환산 점수',
-    representative: '내 성적으로 갈 수 있는 대학 찾기',
+    title: '생활기록부',
+    representative: '내 생활기록부 분석하기',
     questions: [
       '서울대 환산점수 계산해줘',
       '연세대 환산점수 계산해줘',
@@ -50,7 +51,7 @@ const suggestionList: SuggestionCard[] = [
     representative: '전형별 모집 정보를 알려줘',
     questions: [
       '경희대 빅데이터응용학과 학종으로 몇 명 뽑아?',
-      '성균관대랑 한양대 모집요강 핵심만 요약해줘',
+      '성균관대 특성화고 전형에 대해 알려줘',
       '중앙대랑 이화여대 수능 최저 기준 어떻게 돼?',
       '부산대랑 경북대 지역인재 전형 조건 알려줘',
     ],
@@ -66,7 +67,7 @@ const suggestionList: SuggestionCard[] = [
     representative: '입결 및 대학 정보를 알려줘',
     questions: [
       '서울대학교 기계공학부 정시 입결 알려줘',
-      '연세대학교 인재상 알려줘',
+      '연세대학교 농어촌 가능해?',
       '고려대학교 경영학과 작년 컷 알려줘',
     ],
     icon: (
@@ -91,9 +92,10 @@ interface RollingPlaceholderProps {
   hasProfile?: boolean  // 성적 입력 여부
   onLoginRequired?: (message: { title: string; description: string }) => void
   onProfileRequired?: () => void  // 성적 입력 유도
+  onSchoolRecordClick?: () => void
 }
 
-export default function RollingPlaceholder({ onQuestionClick, onCategorySelect, selectedCategory, isAuthenticated, hasProfile, onLoginRequired, onProfileRequired }: RollingPlaceholderProps) {
+export default function RollingPlaceholder({ onQuestionClick, onCategorySelect, selectedCategory, onSchoolRecordClick }: RollingPlaceholderProps) {
   const [selectedQuestionIndex, setSelectedQuestionIndex] = useState<number | null>(null)
 
   // 선택된 카테고리에 해당하는 인덱스 찾기
@@ -105,20 +107,13 @@ export default function RollingPlaceholder({ onQuestionClick, onCategorySelect, 
   const handleCardClick = (index: number) => {
     const card = suggestionList[index]
     
-    // "환산 점수" 카드 처리
-    if (card.title === '환산 점수') {
-      if (!isAuthenticated) {
-        // 비로그인 → 로그인 유도
-        onLoginRequired?.({
-          title: '로그인하여 고급 기능을 사용하세요',
-          description: '학생의 성적 입력을 통해 학교별로 환산하여 대학을 추천해드립니다'
-        })
-        return
-      } else if (!hasProfile) {
-        // 로그인했지만 성적 미입력 → 성적 입력 유도
-        onProfileRequired?.()
-        return
-      }
+    // 카테고리 카드 클릭 추적
+    trackUserAction('category_card_click', card.title)
+    
+    // "생활기록부" 카드 클릭 시 사이드바의 생기부 세특 평가 이동 동작으로 연결
+    if (card.title === '생활기록부') {
+      onSchoolRecordClick?.()
+      return
     }
     
     if (selectedCategory === card.title) {

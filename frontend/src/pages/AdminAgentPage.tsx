@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import * as XLSX from 'xlsx'
+import { API_BASE } from '../config'
 import { 
   getLogs, 
   fetchLogs, 
@@ -55,7 +56,7 @@ async function evaluateLog(log: ExecutionLog): Promise<void> {
   
   // 1. Router 평가 API 호출
   try {
-    const response = await fetch('/api/admin/evaluate', {
+    const response = await fetch(`${API_BASE}/api/admin/evaluate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -90,7 +91,7 @@ async function evaluateLog(log: ExecutionLog): Promise<void> {
       }
       const functionCalls = routerObj?.function_calls || []
       
-      const response = await fetch('/api/admin/evaluate-function', {
+      const response = await fetch(`${API_BASE}/api/admin/evaluate-function`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -125,7 +126,7 @@ async function evaluateLog(log: ExecutionLog): Promise<void> {
   // 3. 최종 답변 평가 API 호출 (LLM 기반)
   if (log.finalAnswer && log.functionResult) {
     try {
-      const response = await fetch('/api/admin/evaluate-final', {
+      const response = await fetch(`${API_BASE}/api/admin/evaluate-final`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

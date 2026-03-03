@@ -6,6 +6,7 @@ RAG Functions
 
 import os
 import json
+import re
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
 from dotenv import load_dotenv
@@ -25,6 +26,44 @@ try:
     _DEFAULT_EMBEDDING_MODEL = getattr(embedding_config, "DEFAULT_EMBEDDING_MODEL", "models/gemini-embedding-001")
 except Exception:
     _DEFAULT_EMBEDDING_MODEL = "models/gemini-embedding-001"
+
+
+def convert_5grade_to_9grade(grade_5: float) -> float:
+    """
+    5등급제 내신을 9등급제로 환산
+    - 5등급제 1.0 → 9등급제 1.4
+    - 5등급제 5.0 → 9등급제 9.0
+    - 선형 보간: y = 1.4 + (x - 1.0) * 1.9
+    """
+    return round(1.4 + (grade_5 - 1.0) * 1.9, 2)
+
+
+def parse_score_with_grade_system(score_str: str) -> Tuple[float, str]:
+    """
+    내신 점수 문자열을 파싱하여 (점수, 등급제) 튜플 반환
+    - "2.3(5)" → (2.3, "5등급제")
+    - "2.3(9)" → (2.3, "9등급제")
+    - "2.3" → (2.3, "9등급제")  # 기본값
+    
+    5등급제인 경우 자동으로 9등급제로 환산하여 반환
+    """
+    score_str = str(score_str).strip()
+    match = re.match(r"([\d.]+)\s*\((\d)\)", score_str)
+    
+    if match:
+        score = float(match.group(1))
+        system_indicator = match.group(2)
+        
+        if system_indicator == "5":
+            # 5등급제 → 9등급제 환산
+            converted_score = convert_5grade_to_9grade(score)
+            return converted_score, "5등급제"
+        else:
+            # 9등급제 (또는 다른 숫자)
+            return score, "9등급제"
+    
+    # 괄호 없으면 기본값 9등급제
+    return float(score_str), "9등급제"
 
 
 def _school_name_search_variants(university: str) -> List[str]:
@@ -342,9 +381,25 @@ async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
         
         try:
             if func_name == "univ":
+                # university와 query 파라미터 처리 (리스트 또는 문자열)
+                university_param = params.get("university", "")
+                query_param = params.get("query", "")
+                
+                # university: 리스트면 첫 번째 요소, 문자열이면 그대로
+                if isinstance(university_param, list):
+                    university = university_param[0] if university_param else ""
+                else:
+                    university = university_param
+                
+                # query: 리스트면 공백으로 조인, 문자열이면 그대로
+                if isinstance(query_param, list):
+                    query = " ".join(query_param)
+                else:
+                    query = query_param
+                
                 result = await rag.univ(
-                    university=params.get("university", ""),
-                    query=params.get("query", "")
+                    university=university,
+                    query=query
                 )
                 results[f"univ_{idx}"] = result
             
@@ -382,10 +437,10 @@ async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
                 normalized = normalize_scores_from_extracted(converted_scores)
                 score_text = format_for_prompt(normalized)
                 
-                # 3. 파라미터 추출
-                target_univ = params.get("target_univ", []) or []
-                target_major = params.get("target_major", []) or []
-                target_range = params.get("target_range", []) or []
+                # 3. 파라미터 추출 (Router Agent는 university/department/range로 보냄)
+                target_univ = params.get("university", []) or params.get("target_univ", []) or []
+                target_major = params.get("department", []) or params.get("target_major", []) or []
+                target_range = params.get("range", []) or params.get("target_range", []) or []
                 
                 # 4. 리버스 서치 (86개 대학, 2158개 학과 지원)
                 # 새로운 판정 기준: 안정, 적정, 소신, 도전, 어려움
@@ -404,7 +459,7 @@ async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
                     except Exception as e:
                         print(f"⚠️ 리버스 서치 오류: {e}")
                 
-                # 5. chunk 기반 결과 생성 (토큰 제한 적용)
+                # 5. chunk 기반 결과 생성 (판정별 분리)
                 chunks = []
                 total_tokens = 0
                 
@@ -435,48 +490,85 @@ async def execute_function_calls(function_calls: List[Dict]) -> Dict[str, Any]:
                     })
                     total_tokens = CONSULT_TOKEN_LIMIT
                 
-                # 청크 2: 리버스 서치 결과 (admission_results)
-                # 새로운 테이블 형식: 대학 | 학과 | 군 | 계열 | 내 점수 | 안정컷 | 적정컷 | 소신컷 | 도전컷 | 판정
+                # 청크 2~N: 판정별 분리된 결과 (안정, 적정, 소신, 도전, 어려움, 하향)
                 if reverse_results:
-                    table_header = "**지원 가능 대학 분석 (86개 대학, 2158개 학과)**\n| 대학 | 학과 | 군 | 계열 | 내 점수 | 안정컷 | 적정컷 | 소신컷 | 도전컷 | 판정 |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
-                    table_rows = []
+                    # 판정별로 그룹핑
+                    from collections import defaultdict
+                    by_range = defaultdict(list)
+                    for r in reverse_results:
+                        # 이모지 제거하고 판정명만 추출
+                        판정_raw = r.get("판정", "")
+                        if "안정" in 판정_raw:
+                            by_range["안정"].append(r)
+                        elif "적정" in 판정_raw:
+                            by_range["적정"].append(r)
+                        elif "소신" in 판정_raw:
+                            by_range["소신"].append(r)
+                        elif "도전" in 판정_raw:
+                            by_range["도전"].append(r)
+                        elif "어려움" in 판정_raw:
+                            by_range["어려움"].append(r)
+                        elif "하향" in 판정_raw:
+                            by_range["하향"].append(r)
+                    
+                    # 판정 순서대로 청크 생성
+                    range_order = ["안정", "적정", "소신", "도전", "어려움", "하향"]
+                    range_labels = {
+                        "안정": "🟢 안정",
+                        "적정": "🟡 적정", 
+                        "소신": "🟠 소신",
+                        "도전": "🔴 도전",
+                        "어려움": "⚫ 어려움",
+                        "하향": "⬇️ 하향"
+                    }
                     
                     remaining_tokens = CONSULT_TOKEN_LIMIT - total_tokens
-                    header_tokens = estimate_tokens(table_header)
-                    current_tokens = header_tokens
                     
-                    for r in reverse_results:
-                        row = "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
-                            r.get("univ", ""),
-                            r.get("major", ""),
-                            r.get("gun", ""),
-                            r.get("track", "") or r.get("field", ""),
-                            r.get("my_score", ""),
-                            r.get("safe_score", "") if r.get("safe_score") else "—",
-                            r.get("appropriate_score", "") if r.get("appropriate_score") else "—",
-                            r.get("expected_score", "") if r.get("expected_score") else "—",
-                            r.get("challenge_score", "") if r.get("challenge_score") else "—",
-                            r.get("판정", ""),
-                        )
-                        row_tokens = estimate_tokens(row)
+                    for range_name in range_order:
+                        range_items = by_range.get(range_name, [])
+                        if not range_items:
+                            continue
                         
-                        if current_tokens + row_tokens <= remaining_tokens:
-                            table_rows.append(row)
-                            current_tokens += row_tokens
-                        else:
-                            break  # 토큰 제한 도달
-                    
-                    if table_rows:
-                        reverse_content = table_header + "\n" + "\n".join(table_rows)
-                        chunks.append({
-                            "document_id": "admission_results",
-                            "chunk_id": "reverse_search",
-                            "section_id": "reverse_search",
-                            "chunk_type": "reverse_search",
-                            "content": reverse_content,
-                            "page_number": ""
-                        })
-                        total_tokens += current_tokens
+                        table_header = f"**{range_labels[range_name]} 지원 가능 대학 ({len(range_items)}개)**\n| 대학 | 학과 | 군 | 계열 | 내 점수 | 안정컷 | 적정컷 | 소신컷 | 도전컷 |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+                        table_rows = []
+                        
+                        header_tokens = estimate_tokens(table_header)
+                        current_tokens = header_tokens
+                        
+                        for r in range_items:
+                            row = "| {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+                                r.get("univ", ""),
+                                r.get("major", ""),
+                                r.get("gun", ""),
+                                r.get("track", "") or r.get("field", ""),
+                                r.get("my_score", ""),
+                                r.get("safe_score", "") if r.get("safe_score") else "—",
+                                r.get("appropriate_score", "") if r.get("appropriate_score") else "—",
+                                r.get("expected_score", "") if r.get("expected_score") else "—",
+                                r.get("challenge_score", "") if r.get("challenge_score") else "—",
+                            )
+                            row_tokens = estimate_tokens(row)
+                            
+                            if current_tokens + row_tokens <= remaining_tokens:
+                                table_rows.append(row)
+                                current_tokens += row_tokens
+                            else:
+                                break  # 토큰 제한 도달
+                        
+                        if table_rows:
+                            range_content = table_header + "\n" + "\n".join(table_rows)
+                            chunks.append({
+                                "document_id": f"admission_results_{range_name}",
+                                "chunk_id": f"reverse_search_{range_name}",
+                                "section_id": f"reverse_search_{range_name}",
+                                "chunk_type": f"reverse_search_{range_name}",
+                                "content": range_content,
+                                "page_number": "",
+                                "range": range_name,
+                                "count": len(range_items)
+                            })
+                            total_tokens += current_tokens
+                            remaining_tokens -= current_tokens
                 
                 # 출처 정보
                 document_titles = {
@@ -697,17 +789,28 @@ async def _execute_consult_susi(params: Dict) -> Dict[str, Any]:
     if not isinstance(departments, list):
         departments = [departments] if departments else []
     
-    # 내신 점수 파싱
+    # 내신 점수 파싱 (5등급제 → 9등급제 자동 환산 포함)
     current_score = None
     target_score = None
+    current_grade_system = "9등급제"
+    target_grade_system = "9등급제"
+    
     if s_scores:
         if isinstance(s_scores, list):
-            if len(s_scores) >= 1:
-                current_score = float(s_scores[0]) if s_scores[0] else None
-            if len(s_scores) >= 2:
-                target_score = float(s_scores[1]) if s_scores[1] else None
+            if len(s_scores) >= 1 and s_scores[0]:
+                current_score, current_grade_system = parse_score_with_grade_system(s_scores[0])
+            if len(s_scores) >= 2 and s_scores[1]:
+                target_score, target_grade_system = parse_score_with_grade_system(s_scores[1])
         else:
-            current_score = float(s_scores)
+            current_score, current_grade_system = parse_score_with_grade_system(s_scores)
+    
+    # 디버그 로그: 5등급제 환산 여부 출력
+    if current_grade_system == "5등급제" or target_grade_system == "5등급제":
+        print(f"📊 5등급제 → 9등급제 환산 적용됨")
+        if current_score and current_grade_system == "5등급제":
+            print(f"   현재 내신: {s_scores[0] if isinstance(s_scores, list) else s_scores} → {current_score} (9등급제)")
+        if target_score and target_grade_system == "5등급제":
+            print(f"   목표 내신: {s_scores[1]} → {target_score} (9등급제)")
     
     # 비교할 내신 점수 결정 (목표 내신 우선, 없으면 현재 내신)
     compare_score = target_score if target_score else current_score
@@ -891,11 +994,11 @@ async def _execute_consult_susi(params: Dict) -> Dict[str, Any]:
     # 출처 정보
     document_titles = {
         "susi_search_condition": "수시 전형결과 검색 조건",
-        "susi_results": "2025학년도 수시 전형결과 (내신닷컴)"
+        "susi_results": "2025학년도 수시 전형결과 (자체 DB)"
     }
     document_urls = {
         "susi_search_condition": "",
-        "susi_results": "https://www.nesin.com"
+        "susi_results": ""
     }
     
     return {

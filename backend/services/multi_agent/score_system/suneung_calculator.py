@@ -82,18 +82,17 @@ def calculate_score(
     
     # 기본 점수 계산 (타입 안전성 확보)
     try:
-        korean_coef = float(formula.get("koreanCoef", 0))
-        math_coef = float(formula.get("mathCoef", 0))
+        korean_coef = float(formula.get("koreanCoef", 0) or 0)
+        math_coef = float(formula.get("mathCoef", 0) or 0)
         
-        # tamguCoef가 '자동'인 경우 처리
+        # tamguCoef가 '자동'이거나 None인 경우 처리
         tamgu_coef_raw = formula.get("tamguCoef", 0)
-        if tamgu_coef_raw == '자동':
-            # '자동'인 경우 계산 불가, 0으로 처리 또는 스킵
+        if tamgu_coef_raw is None or tamgu_coef_raw == '자동':
             tamgu_coef = 0.0
         else:
             tamgu_coef = float(tamgu_coef_raw)
         
-        tamgu_bonus = float(formula.get("tamguBonus", 0))
+        tamgu_bonus = float(formula.get("tamguBonus", 0) or 0)
     except (ValueError, TypeError) as e:
         # 변환 실패 시 None 반환
         return None
@@ -105,7 +104,7 @@ def calculate_score(
     
     # 영어/한국사 점수 (타입 안전성 확보)
     deduction = deductions.get(formula_id, {})
-    english_score = float(deduction.get("englishDeduction", 0))
+    english_score = float(deduction.get("englishDeduction", 0) or 0)
     
     history_deductions = deduction.get("historyDeductions", [])
     if history_deductions and 1 <= history <= 9:
@@ -126,7 +125,8 @@ def classify_by_cutoff(my_score: float, univ: Dict) -> str:
     컷 점수 기준 판정
     
     판정 기준:
-    - 안정: 내 점수 >= safeScore
+    - 하향: 내 점수가 safeScore보다 1% 이상 높음 (과도한 하향 지원)
+    - 안정: 내 점수 >= safeScore (1% 미만 초과)
     - 적정: 내 점수 >= appropriateScore
     - 소신: 내 점수 >= expectedScore
     - 도전: 내 점수 >= challengeScore
@@ -138,6 +138,10 @@ def classify_by_cutoff(my_score: float, univ: Dict) -> str:
     challenge = univ.get("challengeScore")
     
     if safe and my_score >= safe:
+        # 하향 판정: safeScore 대비 1% 이상 초과하면 하향
+        excess_ratio = (my_score - safe) / safe if safe > 0 else 0
+        if excess_ratio >= 0.01:  # 1% 이상 초과
+            return "하향"
         return "안정"
     if appropriate and my_score >= appropriate:
         return "적정"
@@ -191,6 +195,26 @@ def run_suneung_search(
     history = scores.get("한국사", {}).get("등급") or 1
     
     results = []
+
+    def _closest_cut_distance(item: Dict[str, Any]) -> float:
+        """
+        학생 점수(my_score)와 컷 점수들 사이의 최소 거리.
+        거리(절대값)가 작을수록 '학생 점수에 가까운' 결과로 간주.
+        """
+        my_score = item.get("my_score")
+        if my_score is None:
+            return float("inf")
+
+        cut_values = []
+        for key in ("safe_score", "appropriate_score", "expected_score", "challenge_score"):
+            val = item.get(key)
+            if isinstance(val, (int, float)):
+                cut_values.append(float(val))
+
+        if not cut_values:
+            return float("inf")
+
+        return min(abs(float(my_score) - cut) for cut in cut_values)
     
     for univ in universities:
         # 필터 적용
@@ -231,10 +255,6 @@ def run_suneung_search(
         # 판정
         판정 = classify_by_cutoff(my_score, univ)
         
-        # 판정 필터
-        if target_range and 판정 not in target_range:
-            continue
-        
         results.append({
             "univ": univ.get("university", ""),
             "major": univ.get("department", ""),
@@ -248,14 +268,41 @@ def run_suneung_search(
             "판정": 판정,
             "formula_id": univ.get("formulaId"),
         })
-    
-    # 점수 높은 순 정렬
-    results.sort(key=lambda x: (
-        ["안정", "적정", "소신", "도전", "어려움"].index(x["판정"]),
-        -x["my_score"]
-    ))
-    
-    return results
+
+    # ------------------------------------------------------------
+    # 판정(range) 필터 + fallback 규칙
+    # - 기본: 선택한 range만 반환
+    # - 단, 선택 결과가 10개 이하이면 비선택 range도 함께 반환
+    # ------------------------------------------------------------
+    if target_range:
+        selected = [r for r in results if r.get("판정") in target_range]
+        if len(selected) <= 10:
+            others = [r for r in results if r.get("판정") not in target_range]
+            filtered_results = selected + others
+        else:
+            filtered_results = selected
+    else:
+        # range 미지정이면 기존 정책 유지: 하향 제외
+        filtered_results = [r for r in results if r.get("판정") != "하향"]
+
+    # ------------------------------------------------------------
+    # 정렬/상한
+    # - 학생 점수에 가까운 순(컷과의 최소 거리 오름차순)
+    # - target_range가 있는 경우 selected 우선
+    # - 최대 100개 반환
+    # ------------------------------------------------------------
+    if target_range:
+        selected_set = set(target_range)
+        filtered_results.sort(
+            key=lambda x: (
+                0 if x.get("판정") in selected_set else 1,
+                _closest_cut_distance(x),
+            )
+        )
+    else:
+        filtered_results.sort(key=_closest_cut_distance)
+
+    return filtered_results[:100]
 
 
 def get_all_universities() -> List[Dict]:

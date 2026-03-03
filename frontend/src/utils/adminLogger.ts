@@ -2,6 +2,7 @@
  * Admin Logger - 실행 로그를 Supabase에 저장
  */
 
+import { API_BASE } from '../config'
 import { getEntryUrl } from './tracking'
 
 export interface ExecutionLog {
@@ -46,7 +47,7 @@ let cacheLoaded = false
  */
 export async function fetchLogs(limit = 500): Promise<ExecutionLog[]> {
   try {
-    const response = await fetch(`/api/admin/logs?limit=${limit}`)
+    const response = await fetch(`${API_BASE}/api/admin/logs?limit=${limit}`)
     if (!response.ok) {
       throw new Error('로그 조회 실패')
     }
@@ -74,7 +75,7 @@ export async function fetchLogsForExport(): Promise<ExecutionLog[]> {
   let offset = 0
   while (true) {
     const res = await fetch(
-      `/api/admin/logs?limit=${EXPORT_PAGE_SIZE}&offset=${offset}`,
+      `${API_BASE}/api/admin/logs?limit=${EXPORT_PAGE_SIZE}&offset=${offset}`,
       { headers }
     )
     if (!res.ok) {
@@ -117,7 +118,7 @@ export async function addLog(
 
     const entryUrl = getEntryUrl()
 
-    const response = await fetch('/api/admin/logs', {
+    const response = await fetch(`${API_BASE}/api/admin/logs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -154,7 +155,7 @@ export async function updateLogEvaluation(
   evaluation: Partial<ExecutionLog['evaluation']>
 ): Promise<void> {
   try {
-    const response = await fetch(`/api/admin/logs/${logId}/evaluation`, {
+    const response = await fetch(`${API_BASE}/api/admin/logs/${logId}/evaluation`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(evaluation)
@@ -187,7 +188,7 @@ export async function updateLogEvaluation(
  */
 export async function clearLogs(): Promise<void> {
   try {
-    const response = await fetch('/api/admin/logs', {
+    const response = await fetch(`${API_BASE}/api/admin/logs`, {
       method: 'DELETE'
     })
     
@@ -207,7 +208,7 @@ export async function clearLogs(): Promise<void> {
  */
 export async function deleteLog(logId: string): Promise<void> {
   try {
-    const response = await fetch(`/api/admin/logs/${logId}`, {
+    const response = await fetch(`${API_BASE}/api/admin/logs/${logId}`, {
       method: 'DELETE'
     })
     
@@ -244,7 +245,7 @@ export async function migrateLocalStorageLogs(): Promise<{
     }
     
     // 마이그레이션 API 호출
-    const response = await fetch('/api/admin/logs/migrate', {
+    const response = await fetch(`${API_BASE}/api/admin/logs/migrate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(logs)

@@ -21,12 +21,14 @@ from services.multi_agent import (
 )
 from utils.timing_logger import TimingLogger
 from utils.admin_filter import should_skip_logging
-from middleware.auth import optional_auth
+from middleware.auth import optional_auth, optional_auth_with_state
 from middleware.rate_limit import check_and_increment_usage, get_client_ip
 import uuid
 from datetime import datetime
 
 router = APIRouter()
+
+AUTH_EXPIRED_DETAIL = "세션이 만료되었거나 유효하지 않습니다. 다시 로그인해 주세요."
 
 
 def _record_question_sent(session_id: str, user_id: Optional[str]) -> None:
@@ -93,20 +95,34 @@ def _save_messages_to_session_chat(
 log_queues: Dict[str, asyncio.Queue] = {}
 
 # 세션별 대화 히스토리 (메모리)
+# 키 형식: "{user_id}:{session_id}" 또는 "guest:{session_id}"
 conversation_sessions: Dict[str, List[Dict[str, Any]]] = {}
 
 
-async def load_history_from_db(session_id: str) -> List[Dict[str, Any]]:
+def get_cache_key(user_id: Optional[str], session_id: str) -> str:
+    """
+    대화 히스토리 캐시 키 생성
+    - 사용자별로 세션을 분리하여 다른 사용자의 대화가 섞이지 않도록 함
+    """
+    return f"{user_id or 'guest'}:{session_id}"
+
+
+async def load_history_from_db(session_id: str, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     DB에서 세션 히스토리 로드 (session_chat_messages)
+    - user_id가 있으면 해당 사용자의 메시지만 로드
     """
     try:
-        messages_response = supabase_service.client.table("session_chat_messages")\
+        query = supabase_service.client.table("session_chat_messages")\
             .select("role, content")\
-            .eq("user_session", session_id)\
-            .order("created_at")\
-            .limit(20)\
-            .execute()
+            .eq("user_session", session_id)
+        
+        # user_id가 있으면 해당 사용자의 메시지만 필터링
+        if user_id:
+            query = query.eq("user_id", user_id)
+        
+        messages_response = query.order("created_at").limit(20).execute()
+        
         if messages_response.data:
             return [
                 {"role": msg.get("role", "user"), "content": msg.get("content", "")}
@@ -117,18 +133,20 @@ async def load_history_from_db(session_id: str) -> List[Dict[str, Any]]:
     return []
 
 
-def get_or_load_history(session_id: str) -> List[Dict[str, Any]]:
+def get_or_load_history(session_id: str, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     메모리에서 히스토리 가져오기. 없으면 빈 리스트 반환 (async 버전 사용 권장)
     """
-    if session_id not in conversation_sessions:
-        conversation_sessions[session_id] = []
-    return conversation_sessions[session_id][-20:]
+    cache_key = get_cache_key(user_id, session_id)
+    if cache_key not in conversation_sessions:
+        conversation_sessions[cache_key] = []
+    return conversation_sessions[cache_key][-20:]
 
 
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = "default"
+    thinking: Optional[bool] = False  # Thinking 모드 활성화 여부
 
 
 class ChatResponse(BaseModel):
@@ -170,11 +188,14 @@ async def chat(
         client_ip = get_client_ip(http_request)
         
         # 2. 선택적 인증
-        user = await optional_auth(authorization)
+        auth_header = authorization or (http_request.headers.get("authorization") if http_request else None)
+        user, auth_failed = await optional_auth_with_state(auth_header)
+        if auth_failed or (auth_header and auth_header.startswith("Bearer ") and user is None):
+            raise HTTPException(status_code=401, detail=AUTH_EXPIRED_DETAIL)
         user_id = user["user_id"] if user else None
         
         # 3. Rate Limit 체크 및 증가
-        is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
+        is_allowed, current_count, limit, require_login = await check_and_increment_usage(user_id, client_ip)
         if not is_allowed:
             if user_id is None:
                 # 비로그인 사용자
@@ -191,7 +212,7 @@ async def chat(
         
         # 로그에 사용량 정보 추가
         logs.append(f"📊 API 사용량: {current_count}/{limit}회")
-        print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
+        print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip}, require_login={require_login})")
         
         # ========================================
         # 기존 채팅 로직
@@ -218,13 +239,14 @@ async def chat(
         log_and_emit(f"{'#'*80}")
 
         # 세션별 히스토리 로드 (메모리에 없으면 DB에서 로드)
-        if session_id not in conversation_sessions or len(conversation_sessions[session_id]) == 0:
-            db_history = await load_history_from_db(session_id)
+        cache_key = get_cache_key(user_id, session_id)
+        if cache_key not in conversation_sessions or len(conversation_sessions[cache_key]) == 0:
+            db_history = await load_history_from_db(session_id, user_id)
             if db_history:
-                conversation_sessions[session_id] = db_history
+                conversation_sessions[cache_key] = db_history
             else:
-                conversation_sessions[session_id] = []
-        history = conversation_sessions[session_id][-20:]
+                conversation_sessions[cache_key] = []
+        history = conversation_sessions[cache_key][-20:]
         # user_id는 optional_auth에서 이미 설정됨 (프로필 점수 활용용)
 
         # ========================================
@@ -298,7 +320,7 @@ async def chat(
             # 히스토리 저장
             history.append({"role": "user", "content": message})
             history.append({"role": "assistant", "content": direct_response})
-            conversation_sessions[session_id] = history[-20:]  # 최근 20개만 유지
+            conversation_sessions[cache_key] = history[-20:]  # 최근 20개만 유지
 
             # 채팅 로그 저장
             await supabase_service.insert_chat_log(
@@ -414,7 +436,7 @@ async def chat(
         # 히스토리 저장
         history.append({"role": "user", "content": message})
         history.append({"role": "assistant", "content": final_answer})
-        conversation_sessions[session_id] = history[-20:]  # 최근 20개만 유지
+        conversation_sessions[cache_key] = history[-20:]  # 최근 20개만 유지
 
         # 채팅 로그 저장
         await supabase_service.insert_chat_log(
@@ -473,6 +495,8 @@ async def chat(
             metadata=final_result.get("metadata", {})
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"\n{'='*80}")
         print(f"❌ 채팅 오류: {e}")
@@ -521,10 +545,13 @@ async def chat_stream_v2_with_image(
     # Rate Limiting 체크
     # ========================================
     client_ip = get_client_ip(http_request)
-    user = await optional_auth(authorization)
+    auth_header = authorization or (http_request.headers.get("authorization") if http_request else None)
+    user, auth_failed = await optional_auth_with_state(auth_header)
+    if auth_failed or (auth_header and auth_header.startswith("Bearer ") and user is None):
+        raise HTTPException(status_code=401, detail=AUTH_EXPIRED_DETAIL)
     user_id = user["user_id"] if user else None
     
-    is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
+    is_allowed, current_count, limit, require_login = await check_and_increment_usage(user_id, client_ip)
     if not is_allowed:
         if user_id is None:
             # 비로그인 사용자
@@ -539,7 +566,7 @@ async def chat_stream_v2_with_image(
                 detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
             )
     
-    print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
+    print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip}, require_login={require_login})")
     
     # ========================================
     # 이미지 검증
@@ -557,14 +584,16 @@ async def chat_stream_v2_with_image(
         raise HTTPException(400, f"이미지 크기는 {MAX_IMAGE_SIZE_MB}MB를 초과할 수 없습니다.")
     
     def generate():
+        nonlocal require_login  # 클로저에서 사용
         pipeline_start = time.time()
         print(f"\n🔵 [STREAM_V2_IMAGE_START] {session_id}:{message[:30]}")
         print(f"🖼️ 이미지: {image.filename}, {image.content_type}, {len(image_data)} bytes")
         
-        # 세션별 히스토리 로드
-        if session_id not in conversation_sessions:
-            conversation_sessions[session_id] = []
-        history = conversation_sessions[session_id][-20:]
+        # 세션별 히스토리 로드 (user_id 기반 캐시 키 사용)
+        cache_key = get_cache_key(user_id, session_id)
+        if cache_key not in conversation_sessions:
+            conversation_sessions[cache_key] = []
+        history = conversation_sessions[cache_key][-20:]
         
         full_response = ""
         image_analysis = ""
@@ -648,7 +677,7 @@ async def chat_stream_v2_with_image(
             user_content = f"[이미지 첨부] {message}"
             history.append({"role": "user", "content": user_content})
             history.append({"role": "assistant", "content": full_response})
-            conversation_sessions[session_id] = history[-20:]
+            conversation_sessions[cache_key] = history[-20:]
             
             pipeline_time = time.time() - pipeline_start
             
@@ -679,7 +708,8 @@ async def chat_stream_v2_with_image(
                 "function_results": function_results,
                 "sources": sources,
                 "source_urls": source_urls,
-                "used_chunks": used_chunks
+                "used_chunks": used_chunks,
+                "require_login": require_login  # 비로그인 3회째 질문 시 True
             }
             yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
             
@@ -711,8 +741,15 @@ async def chat_stream_v2(
     """
     스트리밍 채팅 v2 - Main Agent 응답을 실시간 스트리밍
     
+    thinking=True일 경우:
+    - Router -> RAG -> MainAgentThinking (재질문 가능) -> 최종 답변
+    
+    thinking=False일 경우 (기본):
+    - Router -> RAG -> MainAgent -> 최종 답변
+    
     SSE (Server-Sent Events) 형식:
     - {"type": "status", "step": "router", "message": "..."}
+    - {"type": "log", "content": "..."} (thinking 모드)
     - {"type": "chunk", "text": "응답 텍스트 조각"}
     - {"type": "done", "timing": {...}, "response": "전체 응답"}
     """
@@ -722,10 +759,13 @@ async def chat_stream_v2(
     # Rate Limiting 체크 (generator 외부에서 실행)
     # ========================================
     client_ip = get_client_ip(http_request)
-    user = await optional_auth(authorization)
+    auth_header = authorization or (http_request.headers.get("authorization") if http_request else None)
+    user, auth_failed = await optional_auth_with_state(auth_header)
+    if auth_failed or (auth_header and auth_header.startswith("Bearer ") and user is None):
+        raise HTTPException(status_code=401, detail=AUTH_EXPIRED_DETAIL)
     user_id = user["user_id"] if user else None
     
-    is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
+    is_allowed, current_count, limit, require_login = await check_and_increment_usage(user_id, client_ip)
     if not is_allowed:
         if user_id is None:
             # 비로그인 사용자
@@ -740,19 +780,26 @@ async def chat_stream_v2(
                 detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
             )
     
-    print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
+    print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip}, require_login={require_login})")
+    
+    # Thinking 모드 체크
+    thinking_mode = request.thinking
     
     def generate():
+        nonlocal require_login  # 클로저에서 사용
         session_id = request.session_id
         message = request.message
         
         pipeline_start = time.time()
-        print(f"\n🔵 [STREAM_V2_START] {session_id}:{message[:30]}")
+        mode_label = "THINKING" if thinking_mode else "NORMAL"
+        print(f"\n🔵 [STREAM_V2_START] [{mode_label}] {session_id}:{message[:30]}")
         
         # 세션별 히스토리 로드 (동기 generator이므로 메모리에서만 확인)
-        if session_id not in conversation_sessions:
-            conversation_sessions[session_id] = []
-        history = conversation_sessions[session_id][-20:]
+        # user_id 기반 캐시 키 사용
+        cache_key = get_cache_key(user_id, session_id)
+        if cache_key not in conversation_sessions:
+            conversation_sessions[cache_key] = []
+        history = conversation_sessions[cache_key][-20:]
         # user_id는 optional_auth에서 온 클로저 변수 사용 (프로필/저장용)
 
         full_response = ""
@@ -764,37 +811,198 @@ async def chat_stream_v2(
         used_chunks = []
         
         try:
-            # 스트리밍 파이프라인 실행 (user_id 전달)
-            for event in run_orchestration_agent_stream(message, history, user_id=user_id):
-                event_type = event.get("type")
+            if thinking_mode:
+                # ========================================
+                # Thinking 모드: MainAgentThinking 사용
+                # main_agent와 동일한 로그 형식 사용
+                # ========================================
                 
-                if event_type == "status":
-                    # 상태 업데이트 전송
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                from services.multi_agent.main_agent_thinking import generate_thinking_stream
+                from services.multi_agent.router_agent import RouterAgent
+                from services.multi_agent.functions import execute_function_calls
                 
-                elif event_type == "chunk":
-                    # Main Agent 응답 청크 전송
-                    full_response += event.get("text", "")
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                # 1. Router로 1차 검색
+                yield f"data: {json.dumps({'type': 'status', 'step': 'router', 'message': '🔄 [1/3] Router Agent 호출 중...'}, ensure_ascii=False)}\n\n"
                 
-                elif event_type == "done":
-                    timing = event.get("timing", {})
-                    function_results = event.get("function_results", {})
-                    router_output = event.get("router_output", {})
-                    full_response = event.get("response", full_response)
-                    # 출처 정보 추출
-                    sources = event.get("sources", [])
-                    source_urls = event.get("source_urls", [])
-                    used_chunks = event.get("used_chunks", [])
+                router = RouterAgent()
+                loop = asyncio.new_event_loop()
                 
-                elif event_type == "error":
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                    return
+                try:
+                    router_result = loop.run_until_complete(router.route(message, history))
+                    router_output = router_result
+                    
+                    function_calls = router_result.get("function_calls", [])
+                    
+                    # Router 완료 시 검색 쿼리 상세 정보 포함 (main_agent와 동일)
+                    queries_detail = []
+                    for call in function_calls:
+                        func_name = call.get("function", "")
+                        params = call.get("params", {})
+                        if func_name == "univ":
+                            queries_detail.append({
+                                "type": "univ",
+                                "university": params.get("university", ""),
+                                "query": params.get("query", "")
+                            })
+                        elif func_name == "consult":
+                            queries_detail.append({
+                                "type": "consult",
+                                "target_univ": params.get("target_univ", []),
+                                "query": "성적 분석"
+                            })
+                    
+                    yield f"data: {json.dumps({'type': 'status', 'step': 'router_complete', 'message': f'✅ Router 완료: {len(function_calls)}개 함수 호출', 'detail': {'function_calls': queries_detail, 'count': len(function_calls)}}, ensure_ascii=False)}\n\n"
+                    
+                    # 2. RAG 검색 실행
+                    if function_calls:
+                        yield f"data: {json.dumps({'type': 'status', 'step': 'function', 'message': '🔄 [2/3] Functions 실행 중...'}, ensure_ascii=False)}\n\n"
+                        
+                        # 검색 시작 상세 정보 전송
+                        for idx, call in enumerate(function_calls):
+                            func_name = call.get("function", "")
+                            params = call.get("params", {})
+                            if func_name == "univ":
+                                univ_name = params.get('university', '')
+                                univ_query = params.get('query', '')
+                                yield f"data: {json.dumps({'type': 'status', 'step': 'search_start', 'message': f'🔍 검색 중: {univ_name}', 'detail': {'index': idx, 'university': univ_name, 'query': univ_query}}, ensure_ascii=False)}\n\n"
+                            elif func_name == "consult":
+                                target_univ = params.get('target_univ', [])
+                                yield f"data: {json.dumps({'type': 'status', 'step': 'search_start', 'message': '📊 성적 분석 중...', 'detail': {'index': idx, 'type': 'consult', 'target_univ': target_univ}}, ensure_ascii=False)}\n\n"
+                        
+                        initial_results = loop.run_until_complete(execute_function_calls(function_calls))
+                        function_results = initial_results
+                        
+                        # 검색 완료 상세 정보 추출 (찾은 문서 목록)
+                        search_results_detail = []
+                        for key, func_result in initial_results.items():
+                            if isinstance(func_result, dict) and "chunks" in func_result:
+                                university = func_result.get("university", "")
+                                doc_titles = func_result.get("document_titles", {})
+                                doc_count = func_result.get("count", 0)
+                                unique_titles = list(set(doc_titles.values())) if doc_titles else []
+                                search_results_detail.append({
+                                    "university": university,
+                                    "query": func_result.get("query", ""),
+                                    "doc_count": doc_count,
+                                    "documents": unique_titles[:5]
+                                })
+                        
+                        total_count = sum(r.get("doc_count", 0) for r in search_results_detail)
+                        yield f"data: {json.dumps({'type': 'status', 'step': 'search_complete', 'message': f'✅ Functions 완료: {len(initial_results)}개 결과', 'detail': {'results': search_results_detail, 'total_count': total_count}}, ensure_ascii=False)}\n\n"
+                    else:
+                        initial_results = {}
+                        yield f"data: {json.dumps({'type': 'status', 'step': 'function', 'message': 'ℹ️ 함수 호출 없음'}, ensure_ascii=False)}\n\n"
+                    
+                    # 3. MainAgentThinking으로 분석 및 재질문
+                    # (답변 작성하기 로그는 실제 답변 생성 시 main_agent_thinking.py에서 전송)
+                    
+                    for chunk in generate_thinking_stream(message, history, initial_results):
+                        chunk_type = chunk.get("type")
+                        
+                        if chunk_type == "log":
+                            # Thinking 내부 로그 - step, iteration, detail 정보 포함하여 전송
+                            log_data = {
+                                'type': 'log',
+                                'content': chunk.get('content', ''),
+                                'step': chunk.get('step'),
+                                'iteration': chunk.get('iteration'),
+                                'detail': chunk.get('detail')
+                            }
+                            yield f"data: {json.dumps(log_data, ensure_ascii=False)}\n\n"
+                        
+                        elif chunk_type == "text":
+                            # 최종 답변 텍스트
+                            full_response = chunk.get("content", "")
+                            # 청크 단위로 스트리밍 (한 번에 전송)
+                            yield f"data: {json.dumps({'type': 'chunk', 'text': full_response}, ensure_ascii=False)}\n\n"
+                        
+                        elif chunk_type == "done":
+                            # 완료 정보 - 출처 정보 철저히 관리
+                            citations = chunk.get("citations", [])
+                            
+                            # citations에서 sources, source_urls 추출
+                            sources = []
+                            source_urls = []
+                            for c in citations:
+                                source = c.get("source", "")
+                                url = c.get("url", "")
+                                # 빈 값이나 유효하지 않은 URL 제외
+                                if source and url and url.startswith("http"):
+                                    sources.append(source)
+                                    source_urls.append(url)
+                            
+                            # function_results에서 used_chunks 추출 (실제 검색된 청크들)
+                            used_chunks = []
+                            for key, result in function_results.items():
+                                chunks = result.get("chunks", [])
+                                doc_titles = result.get("document_titles", {})
+                                doc_urls = result.get("document_urls", {})
+                                
+                                for c in chunks:
+                                    doc_id = c.get("document_id")
+                                    title = doc_titles.get(doc_id, f"문서 {doc_id}")
+                                    url = doc_urls.get(doc_id, "")
+                                    
+                                    # 유효한 URL만 포함
+                                    if url and url.startswith("http"):
+                                        used_chunks.append({
+                                            "id": c.get("chunk_id", ""),
+                                            "content": c.get("content", "")[:200],  # 미리보기용
+                                            "title": title,
+                                            "source": f"{title} {c.get('page_number', '')}p".strip(),
+                                            "file_url": url,
+                                            "metadata": {
+                                                "page_number": c.get("page_number"),
+                                                "document_id": doc_id
+                                            }
+                                        })
+                            
+                            timing = {
+                                "iterations": chunk.get("iterations", 1),
+                                "total_chunks": chunk.get("total_chunks", 0)
+                            }
+                        
+                        elif chunk_type == "error":
+                            yield f"data: {json.dumps({'type': 'error', 'message': chunk.get('message', '')}, ensure_ascii=False)}\n\n"
+                            return
+                
+                finally:
+                    loop.close()
+            
+            else:
+                # ========================================
+                # 기본 모드: 기존 파이프라인 사용
+                # ========================================
+                for event in run_orchestration_agent_stream(message, history, user_id=user_id):
+                    event_type = event.get("type")
+                    
+                    if event_type == "status":
+                        # 상태 업데이트 전송
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    
+                    elif event_type == "chunk":
+                        # Main Agent 응답 청크 전송
+                        full_response += event.get("text", "")
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    
+                    elif event_type == "done":
+                        timing = event.get("timing", {})
+                        function_results = event.get("function_results", {})
+                        router_output = event.get("router_output", {})
+                        full_response = event.get("response", full_response)
+                        # 출처 정보 추출
+                        sources = event.get("sources", [])
+                        source_urls = event.get("source_urls", [])
+                        used_chunks = event.get("used_chunks", [])
+                    
+                    elif event_type == "error":
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                        return
             
             # 대화 이력에 추가
             history.append({"role": "user", "content": message})
             history.append({"role": "assistant", "content": full_response})
-            conversation_sessions[session_id] = history[-20:]  # 최근 20개만 유지
+            conversation_sessions[cache_key] = history[-20:]  # 최근 20개만 유지
             
             pipeline_time = time.time() - pipeline_start
             
@@ -824,11 +1032,13 @@ async def chat_stream_v2(
                 "function_results": function_results,
                 "sources": sources,
                 "source_urls": source_urls,
-                "used_chunks": used_chunks
+                "used_chunks": used_chunks,
+                "thinking_mode": thinking_mode,
+                "require_login": require_login  # 비로그인 3회째 질문 시 True
             }
             yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
             
-            print(f"🟢 [STREAM_V2_END] 총 {pipeline_time:.2f}초, {len(full_response)}자")
+            print(f"🟢 [STREAM_V2_END] [{mode_label}] 총 {pipeline_time:.2f}초, {len(full_response)}자")
             
         except Exception as e:
             print(f"❌ 스트리밍 오류: {e}")
@@ -865,10 +1075,13 @@ async def chat_stream(
     # Rate Limiting 체크 (generator 외부에서 실행)
     # ========================================
     client_ip = get_client_ip(http_request)
-    user = await optional_auth(authorization)
+    auth_header = authorization or (http_request.headers.get("authorization") if http_request else None)
+    user, auth_failed = await optional_auth_with_state(auth_header)
+    if auth_failed or (auth_header and auth_header.startswith("Bearer ") and user is None):
+        raise HTTPException(status_code=401, detail=AUTH_EXPIRED_DETAIL)
     user_id = user["user_id"] if user else None
     
-    is_allowed, current_count, limit = await check_and_increment_usage(user_id, client_ip)
+    is_allowed, current_count, limit, require_login = await check_and_increment_usage(user_id, client_ip)
     if not is_allowed:
         if user_id is None:
             # 비로그인 사용자
@@ -883,7 +1096,7 @@ async def chat_stream(
                 detail=f"일일 사용량을 초과했습니다 ({current_count}/{limit}회). 내일 00:00에 초기화됩니다."
             )
     
-    print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip})")
+    print(f"📊 API 사용량: {current_count}/{limit}회 (user_id={user_id}, ip={client_ip}, require_login={require_login})")
     
     async def generate():
         logs = []
@@ -922,13 +1135,15 @@ async def chat_stream(
             yield send_log(f"{'#'*80}")
 
             # 세션별 히스토리 로드 (메모리에 없으면 DB에서 로드)
-            if session_id not in conversation_sessions or len(conversation_sessions[session_id]) == 0:
-                db_history = await load_history_from_db(session_id)
+            # user_id 기반 캐시 키 사용
+            cache_key = get_cache_key(user_id, session_id)
+            if cache_key not in conversation_sessions or len(conversation_sessions[cache_key]) == 0:
+                db_history = await load_history_from_db(session_id, user_id)
                 if db_history:
-                    conversation_sessions[session_id] = db_history
+                    conversation_sessions[cache_key] = db_history
                 else:
-                    conversation_sessions[session_id] = []
-            history = conversation_sessions[session_id][-20:]
+                    conversation_sessions[cache_key] = []
+            history = conversation_sessions[cache_key][-20:]
             timing_logger.mark("history_loaded")
             # user_id는 stream_v2 상단 optional_auth에서 설정됨 (클로저로 사용)
 
@@ -1029,7 +1244,7 @@ async def chat_stream(
                 # 히스토리 저장
                 history.append({"role": "user", "content": message})
                 history.append({"role": "assistant", "content": direct_response})
-                conversation_sessions[session_id] = history[-20:]  # 최근 20개만 유지
+                conversation_sessions[cache_key] = history[-20:]  # 최근 20개만 유지
 
                 # 채팅 로그 저장
                 await supabase_service.insert_chat_log(
@@ -1195,7 +1410,7 @@ async def chat_stream(
             # 히스토리 저장
             history.append({"role": "user", "content": message})
             history.append({"role": "assistant", "content": final_answer})
-            conversation_sessions[session_id] = history[-20:]  # 최근 20개만 유지
+            conversation_sessions[cache_key] = history[-20:]  # 최근 20개만 유지
             
             timing_logger.mark("history_saved")
 
@@ -1317,10 +1532,19 @@ def emit_log(session_id: str, message: str):
 
 
 @router.post("/reset")
-async def reset_session(session_id: str = "default"):
+async def reset_session(
+    session_id: str = "default",
+    authorization: Optional[str] = Header(None)
+):
     """대화 히스토리 초기화"""
-    if session_id in conversation_sessions:
-        del conversation_sessions[session_id]
+    # 선택적 인증으로 user_id 확인
+    user = await optional_auth(authorization)
+    user_id = user["user_id"] if user else None
+    
+    # user_id 기반 캐시 키 사용
+    cache_key = get_cache_key(user_id, session_id)
+    if cache_key in conversation_sessions:
+        del conversation_sessions[cache_key]
     return {"status": "ok", "message": f"세션 {session_id} 초기화 완료"}
 
 

@@ -38,11 +38,12 @@ class PageViewRequest(BaseModel):
 
 class UserActionRequest(BaseModel):
     session_id: str
-    action_type: str  # 'click', 'scroll', 'submit'
-    action_name: str  # 'cta_button', 'chat_start'
+    action_type: str  # 'click', 'scroll', 'submit', 'login_modal_open', 'signup_success', etc.
+    action_name: str  # 'cta_button', 'chat_start', 'sidebar_login_button', etc.
     action_category: Optional[str] = None
     element_id: Optional[str] = None
     element_text: Optional[str] = None
+    customData: Optional[Dict[str, Any]] = None  # 추가 데이터 (signup_source 등)
 
 
 def parse_user_agent(user_agent_string: str) -> Dict[str, str]:
@@ -157,7 +158,7 @@ async def track_user_action(
     http_request: Request,
     authorization: Optional[str] = Header(None)
 ):
-    """사용자 행동 추적 — 질문 전송 시 events 테이블에 question_sent 기록"""
+    """사용자 행동 추적 — events 테이블에 기록"""
     try:
         user_data = await optional_auth(authorization)
         user_id = user_data.get("user_id") if user_data else None
@@ -167,29 +168,53 @@ async def track_user_action(
 
         client = supabase_service.get_client()
 
+        # 같은 세션의 기존 이벤트에서 UTM 가져오기 (없으면 null)
+        utm_row = (
+            client.table("events")
+            .select("utm_source, utm_medium, utm_campaign, utm_content, utm_term")
+            .eq("user_session", request.session_id)
+            .order("event_time", desc=False)
+            .limit(1)
+            .execute()
+        )
+        utm = utm_row.data[0] if utm_row.data else {}
+        
+        # 이벤트 타입 결정
+        event_type = request.action_type
         if request.action_name == "send_message":
-            # 같은 세션의 기존 이벤트에서 UTM 가져오기 (없으면 null)
-            utm_row = (
-                client.table("events")
-                .select("utm_source, utm_medium, utm_campaign, utm_content, utm_term")
-                .eq("user_session", request.session_id)
-                .order("event_time", desc=False)
-                .limit(1)
-                .execute()
-            )
-            utm = utm_row.data[0] if utm_row.data else {}
-            event_data = {
-                "event_time": datetime.now().isoformat(),
-                "event_type": "question_sent",
-                "utm_source": utm.get("utm_source"),
-                "utm_medium": utm.get("utm_medium"),
-                "utm_campaign": utm.get("utm_campaign"),
-                "utm_content": utm.get("utm_content"),
-                "utm_term": utm.get("utm_term"),
-                "user_id": user_id,
-                "user_session": request.session_id,
-            }
+            event_type = "question_sent"
+        
+        # custom_data에서 signup_source 추출
+        custom_data = request.customData or {}
+        signup_source = custom_data.get("signup_source")
+        
+        event_data = {
+            "event_time": datetime.now().isoformat(),
+            "event_type": event_type,
+            "action_name": request.action_name,
+            "utm_source": utm.get("utm_source"),
+            "utm_medium": utm.get("utm_medium"),
+            "utm_campaign": utm.get("utm_campaign"),
+            "utm_content": utm.get("utm_content"),
+            "utm_term": utm.get("utm_term"),
+            "user_id": user_id,
+            "user_session": request.session_id,
+        }
+        
+        # signup_source가 있으면 custom_data에 저장
+        if signup_source:
+            event_data["custom_data"] = {"signup_source": signup_source}
+        
+        # action_name 컬럼이 없을 수 있으므로 예외 처리
+        try:
             client.table("events").insert(event_data).execute()
+        except Exception as insert_err:
+            if "action_name" in str(insert_err) or "custom_data" in str(insert_err):
+                # 컬럼이 없으면 해당 필드 제외하고 재시도
+                event_data_simple = {k: v for k, v in event_data.items() if k not in ["action_name", "custom_data"]}
+                client.table("events").insert(event_data_simple).execute()
+            else:
+                raise
 
         return {"success": True}
 
@@ -228,4 +253,119 @@ async def get_session_info(session_id: str):
         }
     except Exception as e:
         print(f"❌ 세션 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/tracking/signup-sources")
+async def get_signup_sources(days: int = 30):
+    """회원가입 경로별 통계"""
+    try:
+        client = supabase_service.get_client()
+        
+        # 지정된 기간 내의 signup_success 이벤트 조회
+        from datetime import timedelta
+        start_date = (datetime.now() - timedelta(days=days)).isoformat()
+        
+        response = (
+            client.table("events")
+            .select("action_name, custom_data, event_time")
+            .eq("event_type", "signup_success")
+            .gte("event_time", start_date)
+            .execute()
+        )
+        
+        # signup_source별 집계
+        source_counts: Dict[str, int] = {}
+        for event in response.data:
+            custom_data = event.get("custom_data") or {}
+            source = custom_data.get("signup_source", "unknown")
+            source_counts[source] = source_counts.get(source, 0) + 1
+        
+        # 정렬된 결과 반환
+        sorted_sources = sorted(source_counts.items(), key=lambda x: x[1], reverse=True)
+        
+        return {
+            "period_days": days,
+            "total_signups": sum(source_counts.values()),
+            "sources": [{"source": s, "count": c} for s, c in sorted_sources]
+        }
+        
+    except Exception as e:
+        print(f"❌ 회원가입 경로 통계 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/tracking/category-clicks")
+async def get_category_clicks(days: int = 30):
+    """카테고리 버튼 클릭 통계"""
+    try:
+        client = supabase_service.get_client()
+        
+        # 지정된 기간 내의 category_card_click 이벤트 조회
+        from datetime import timedelta
+        start_date = (datetime.now() - timedelta(days=days)).isoformat()
+        
+        response = (
+            client.table("events")
+            .select("action_name, event_time")
+            .eq("event_type", "category_card_click")
+            .gte("event_time", start_date)
+            .execute()
+        )
+        
+        # 카테고리별 집계
+        category_counts: Dict[str, int] = {}
+        for event in response.data:
+            category = event.get("action_name", "unknown")
+            category_counts[category] = category_counts.get(category, 0) + 1
+        
+        # 정렬된 결과 반환
+        sorted_categories = sorted(category_counts.items(), key=lambda x: x[1], reverse=True)
+        
+        return {
+            "period_days": days,
+            "total_clicks": sum(category_counts.values()),
+            "categories": [{"category": c, "count": cnt} for c, cnt in sorted_categories]
+        }
+        
+    except Exception as e:
+        print(f"❌ 카테고리 클릭 통계 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/tracking/login-modal-sources")
+async def get_login_modal_sources(days: int = 30):
+    """로그인 모달 열림 경로별 통계"""
+    try:
+        client = supabase_service.get_client()
+        
+        # 지정된 기간 내의 login_modal_open 이벤트 조회
+        from datetime import timedelta
+        start_date = (datetime.now() - timedelta(days=days)).isoformat()
+        
+        response = (
+            client.table("events")
+            .select("action_name, event_time")
+            .eq("event_type", "login_modal_open")
+            .gte("event_time", start_date)
+            .execute()
+        )
+        
+        # 경로별 집계
+        source_counts: Dict[str, int] = {}
+        for event in response.data:
+            source = event.get("action_name", "unknown")
+            source_counts[source] = source_counts.get(source, 0) + 1
+        
+        # 정렬된 결과 반환
+        sorted_sources = sorted(source_counts.items(), key=lambda x: x[1], reverse=True)
+        
+        return {
+            "period_days": days,
+            "total_opens": sum(source_counts.values()),
+            "sources": [{"source": s, "count": c} for s, c in sorted_sources]
+        }
+        
+    except Exception as e:
+        print(f"❌ 로그인 모달 경로 통계 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))

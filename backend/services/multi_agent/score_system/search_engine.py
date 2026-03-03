@@ -81,7 +81,9 @@ def run_reverse_search(
     for r in results:
         # 이모지 추가된 판정 레이블로 변환
         판정_text = r.get("판정", "")
-        if 판정_text == "안정":
+        if 판정_text == "하향":
+            판정_label = ClassificationLabel.DOWNGRADE
+        elif 판정_text == "안정":
             판정_label = ClassificationLabel.SAFE
         elif 판정_text == "적정":
             판정_label = ClassificationLabel.APPROPRIATE

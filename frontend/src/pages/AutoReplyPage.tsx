@@ -33,6 +33,7 @@ interface BotConfig {
   rest_minutes: number
   keywords?: string[]
   banned_keywords?: string[]  // 금지 키워드 목록
+  ai_model_provider?: string  // AI 모델 제공자 (gemini 또는 azure)
 }
 
 interface CommentRecord {
@@ -45,7 +46,7 @@ interface CommentRecord {
   post_content?: string
   query?: string
   function_result?: string
-  status?: 'pending' | 'approved' | 'cancelled' | 'posted' | 'failed'  // 반자동 시스템 상태
+  status?: 'pending' | 'approved' | 'cancelled' | 'posted' | 'failed'  // 반자동 시스템 상태 (failed: 게시 실패)
   action_history?: Array<{action: string, timestamp: string, old_comment?: string, reason?: string}>
   posted_at?: string | null
   cancel_reason?: string  // 취소 사유
@@ -136,6 +137,7 @@ export default function AutoReplyPage() {
   const [bannedKeywords, setBannedKeywords] = useState<string[]>([])  // 금지 키워드
   const [bannedKeywordsText, setBannedKeywordsText] = useState('')  // 금지 키워드 텍스트 입력용
   const [bannedKeywordsExpanded, setBannedKeywordsExpanded] = useState(false)
+  const [aiModelProvider, setAiModelProvider] = useState('gemini')  // AI 모델 제공자
   const [configChanged, setConfigChanged] = useState(false)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())  // ID 기반으로 변경
   // 프롬프트 편집 (Query + Answer 2개)
@@ -220,6 +222,7 @@ export default function AutoReplyPage() {
       const loadedBannedKeywords = data.config.banned_keywords ?? []
       setBannedKeywords(loadedBannedKeywords)
       setBannedKeywordsText(loadedBannedKeywords.join(', '))
+      setAiModelProvider(data.config.ai_model_provider ?? 'gemini')
       setConfigChanged(false)
       // 계정 정보 설정
       if (data.current_account && !selectedAccount) {
@@ -235,7 +238,7 @@ export default function AutoReplyPage() {
 
   const fetchComments = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/comments?limit=500`)
+      const res = await fetch(`${API_BASE}/comments?limit=5000`)
       if (!res.ok) throw new Error('댓글 조회 실패')
       const data: CommentsResponse = await res.json()
       setComments(data.comments)
@@ -507,6 +510,33 @@ export default function AutoReplyPage() {
     setCancelModalOpen(true)
   }
 
+  const handleRevert = async (commentId: string) => {
+    if (!confirm('이 댓글을 대기중 상태로 되돌리시겠습니까?')) return
+    
+    setActionLoading2(prev => new Set(prev).add(commentId))
+    try {
+      const res = await fetch(`${API_BASE}/comments/${commentId}/revert`, { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '되돌리기 실패')
+      
+      // 즉시 로컬 상태 업데이트
+      setComments(prev => prev.map(c => 
+        c.id === commentId ? { ...c, status: 'pending' as const } : c
+      ))
+      
+      // 백그라운드에서 새로고침
+      fetchComments()
+    } catch (e: any) {
+      alert(e.message)
+    } finally {
+      setActionLoading2(prev => {
+        const next = new Set(prev)
+        next.delete(commentId)
+        return next
+      })
+    }
+  }
+
   const handleCancelConfirm = async () => {
     if (!cancelingCommentId || !cancelReason) {
       alert('취소 사유를 선택해주세요')
@@ -678,7 +708,8 @@ export default function AutoReplyPage() {
           comments_per_hour_max: commentsPerHourMax,
           rest_minutes: restMinutes,
           keywords: keywords,
-          banned_keywords: bannedKeywords
+          banned_keywords: bannedKeywords,
+          ai_model_provider: aiModelProvider
         })
       })
       const data = await res.json()
@@ -1057,6 +1088,26 @@ export default function AutoReplyPage() {
                   max={30}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">
+                  AI 모델
+                </label>
+                <select
+                  value={aiModelProvider}
+                  onChange={(e) => {
+                    setAiModelProvider(e.target.value)
+                    setConfigChanged(true)
+                  }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                >
+                  <option value="gemini">Gemini (Google)</option>
+                  <option value="azure">GPT-5.2 (Azure)</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  {aiModelProvider === 'gemini' ? 'Gemini 2.5 Flash 사용' : 'Azure GPT-5.2-chat 사용'}
+                </p>
               </div>
 
               <button
@@ -1443,6 +1494,7 @@ export default function AutoReplyPage() {
                   { key: 'all', label: '전체', count: comments.length },
                   { key: 'pending', label: '대기중', count: comments.filter(c => c.status === 'pending').length },
                   { key: 'approved', label: '승인됨', count: comments.filter(c => c.status === 'approved').length },
+                  { key: 'failed', label: '실패', count: comments.filter(c => c.status === 'failed').length },
                   { key: 'cancelled', label: '취소됨', count: comments.filter(c => c.status === 'cancelled').length },
                   { key: 'posted', label: '게시완료', count: comments.filter(c => c.status === 'posted').length },
                 ].map(tab => (
@@ -1525,7 +1577,7 @@ export default function AutoReplyPage() {
                               </a>
                             </td>
                             <td className="px-2 py-1.5 align-top" onClick={e => e.stopPropagation()}>
-                              {(record.status === 'pending' || record.status === 'approved') && record.id && (
+                              {(record.status === 'pending' || record.status === 'approved' || record.status === 'failed' || record.status === 'cancelled') && record.id && (
                                 <div className="flex flex-wrap gap-1">
                                   {record.status === 'pending' && (
                                     <button
@@ -1545,27 +1597,51 @@ export default function AutoReplyPage() {
                                       {isLoading ? '...' : '승인취소'}
                                     </button>
                                   )}
-                                  <button
-                                    onClick={() => handleCancelClick(record.id!)}
-                                    disabled={isLoading}
-                                    className="px-2 py-0.5 text-xs bg-gray-400 hover:bg-gray-500 text-white rounded disabled:opacity-50"
-                                  >
-                                    {isLoading ? '...' : '취소'}
-                                  </button>
-                                  <button
-                                    onClick={() => openEditModal(record)}
-                                    disabled={isLoading}
-                                    className="px-2 py-0.5 text-xs bg-yellow-500 hover:bg-yellow-600 text-white rounded disabled:opacity-50"
-                                  >
-                                    수정
-                                  </button>
-                                  <button
-                                    onClick={() => handleRegenerate(record.id!)}
-                                    disabled={isLoading}
-                                    className="px-2 py-0.5 text-xs bg-purple-500 hover:bg-purple-600 text-white rounded disabled:opacity-50"
-                                  >
-                                    {isLoading ? '...' : '재생성'}
-                                  </button>
+                                  {record.status === 'failed' && (
+                                    <button
+                                      onClick={() => handleApprove(record.id!)}
+                                      disabled={isLoading}
+                                      className="px-2 py-0.5 text-xs bg-green-500 hover:bg-green-600 text-white rounded disabled:opacity-50"
+                                    >
+                                      {isLoading ? '...' : '재승인'}
+                                    </button>
+                                  )}
+                                  {record.status === 'cancelled' && (
+                                    <button
+                                      onClick={() => handleRevert(record.id!)}
+                                      disabled={isLoading}
+                                      className="px-2 py-0.5 text-xs bg-green-500 hover:bg-green-600 text-white rounded disabled:opacity-50"
+                                    >
+                                      {isLoading ? '...' : '재승인'}
+                                    </button>
+                                  )}
+                                  {(record.status === 'pending' || record.status === 'approved' || record.status === 'failed') && (
+                                    <button
+                                      onClick={() => handleCancelClick(record.id!)}
+                                      disabled={isLoading}
+                                      className="px-2 py-0.5 text-xs bg-gray-400 hover:bg-gray-500 text-white rounded disabled:opacity-50"
+                                    >
+                                      {isLoading ? '...' : '취소'}
+                                    </button>
+                                  )}
+                                  {(record.status === 'pending' || record.status === 'approved') && (
+                                    <>
+                                      <button
+                                        onClick={() => openEditModal(record)}
+                                        disabled={isLoading}
+                                        className="px-2 py-0.5 text-xs bg-yellow-500 hover:bg-yellow-600 text-white rounded disabled:opacity-50"
+                                      >
+                                        수정
+                                      </button>
+                                      <button
+                                        onClick={() => handleRegenerate(record.id!)}
+                                        disabled={isLoading}
+                                        className="px-2 py-0.5 text-xs bg-purple-500 hover:bg-purple-600 text-white rounded disabled:opacity-50"
+                                      >
+                                        {isLoading ? '...' : '재생성'}
+                                      </button>
+                                    </>
+                                  )}
                                   {/* 쓰레기통 버튼 - 빠른 삭제 */}
                                   <button
                                     onClick={() => handleQuickDelete(record.id!)}

@@ -49,6 +49,30 @@ export default function AdminAnalyticsLayout() {
           >
             사용자 행동 분석
           </NavLink>
+          <NavLink
+            to="/admin-analytics/conversion"
+            className={({ isActive }) =>
+              `px-4 py-3 text-sm font-medium rounded-t-lg transition-colors ${
+                isActive
+                  ? 'bg-indigo-100 text-indigo-800 border-b-2 border-indigo-600 -mb-px'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+              }`
+            }
+          >
+            질문→유저 전환
+          </NavLink>
+          <NavLink
+            to="/admin-analytics/funnel"
+            className={({ isActive }) =>
+              `px-4 py-3 text-sm font-medium rounded-t-lg transition-colors ${
+                isActive
+                  ? 'bg-indigo-100 text-indigo-800 border-b-2 border-indigo-600 -mb-px'
+                  : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+              }`
+            }
+          >
+            유입 퍼널
+          </NavLink>
         </div>
       </nav>
 

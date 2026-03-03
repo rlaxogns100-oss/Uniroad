@@ -7,7 +7,7 @@ pydantic-settings>=2.1.0
 email-validator>=2.0.0
 
 # OpenAI & LlamaParse
-openai>=1.10.0
+openai>=2.17.0
 llama-parse>=0.4.0
 
 # Google Gemini & Analytics

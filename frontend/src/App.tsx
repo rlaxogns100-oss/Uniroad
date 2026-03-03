@@ -12,6 +12,15 @@ import AutoReplyPage from './pages/AutoReplyPage'
 import AdminAnalyticsLayout from './pages/AdminAnalyticsLayout'
 import AdminAnalyticsKpi from './pages/AdminAnalyticsKpi'
 import AdminAnalyticsBehavior from './pages/AdminAnalyticsBehavior'
+import AdminAnalyticsConversion from './pages/AdminAnalyticsConversion'
+import AdminAnalyticsFunnel from './pages/AdminAnalyticsFunnel'
+import AgentTestPage from './pages/AgentTestPage'
+import PolicyPage from './pages/PolicyPage'
+import TermsPage from './pages/TermsPage'
+import SharedChatPage from './pages/SharedChatPage'
+import OAuthCallbackPage from './pages/OAuthCallbackPage'
+import SchoolRecordEvalPage from './pages/SchoolRecordEvalPage'
+import { isCapacitorApp } from './config'
 import { useEffect } from 'react'
 import { initializeTracking, trackPageView } from './utils/tracking'
 
@@ -90,80 +99,101 @@ function App() {
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
         <PageTracker />
-        <Routes>
-          <Route path="/auth" element={<AuthPage />} />
-          <Route path="/" element={<LandingPage />} />
-          
-          {/* 로그인 후 채팅 페이지 */}
-          <Route
-            path="/chat/login/admin"
-            element={
-              <AdminRoute>
-                <AdminPage />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/chat/admin"
-            element={
-              <AdminRoute>
-                <AdminPage />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/chat/login"
-            element={
-              <ProtectedRoute>
-                <ChatPage />
-              </ProtectedRoute>
-            }
-          />
-          
-          {/* 로그인 없이 접근 가능한 채팅 */}
-          <Route path="/chat" element={<ChatPage />} />
-          
-          {/* 관리자 페이지들 */}
-          <Route
-            path="/upload"
-            element={
-              <AdminRoute>
-                <AdminUploadPage />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/agent"
-            element={
-              <AdminRoute>
-                <AgentAdminPage />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/timing-dashboard"
-            element={
-              <AdminRoute>
-                <TimingDashboard />
-              </AdminRoute>
-            }
-          />
-          <Route
-            path="/adminagent"
-            element={
-              <AdminRoute>
-                <AdminAgentPage />
-              </AdminRoute>
-            }
-          />
-          <Route path="/auto-reply" element={<AutoReplyPage />} />
-          <Route path="/admin-analytics" element={<AdminRoute><AdminAnalyticsLayout /></AdminRoute>}>
-            <Route index element={<Navigate to="/admin-analytics/kpi" replace />} />
-            <Route path="kpi" element={<AdminAnalyticsKpi />} />
-            <Route path="behavior" element={<AdminAnalyticsBehavior />} />
-          </Route>
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <div>
+          <Routes>
+            <Route path="/auth" element={<AuthPage />} />
+            <Route path="/oauth-callback" element={<OAuthCallbackPage />} />
+            <Route path="/policy" element={<PolicyPage />} />
+            <Route path="/terms" element={<TermsPage />} />
+            <Route path="/" element={isCapacitorApp() ? <Navigate to="/chat" replace /> : <LandingPage />} />
+            
+            {/* 로그인 후 채팅 페이지 */}
+            <Route
+              path="/chat/login/admin"
+              element={
+                <AdminRoute>
+                  <AdminPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/chat/admin"
+              element={
+                <AdminRoute>
+                  <AdminPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/chat/login"
+              element={
+                <ProtectedRoute>
+                  <ChatPage />
+                </ProtectedRoute>
+              }
+            />
+            
+            {/* 로그인 없이 접근 가능한 채팅 */}
+            <Route path="/chat" element={<ChatPage />} />
+            
+            {/* 생기부 세특 평가 */}
+            <Route path="/school-record" element={<SchoolRecordEvalPage />} />
+            
+            {/* 공유된 채팅 페이지 */}
+            <Route path="/s/:shareId" element={<SharedChatPage />} />
+            
+            {/* 관리자 페이지들 */}
+            <Route
+              path="/upload"
+              element={
+                <AdminRoute>
+                  <AdminUploadPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/agent"
+              element={
+                <AdminRoute>
+                  <AgentAdminPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/timing-dashboard"
+              element={
+                <AdminRoute>
+                  <TimingDashboard />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/adminagent"
+              element={
+                <AdminRoute>
+                  <AdminAgentPage />
+                </AdminRoute>
+              }
+            />
+            <Route path="/auto-reply" element={<AutoReplyPage />} />
+            <Route
+              path="/agent-test"
+              element={
+                <AdminRoute>
+                  <AgentTestPage />
+                </AdminRoute>
+              }
+            />
+            <Route path="/admin-analytics" element={<AdminRoute><AdminAnalyticsLayout /></AdminRoute>}>
+              <Route index element={<Navigate to="/admin-analytics/kpi" replace />} />
+              <Route path="kpi" element={<AdminAnalyticsKpi />} />
+              <Route path="behavior" element={<AdminAnalyticsBehavior />} />
+              <Route path="conversion" element={<AdminAnalyticsConversion />} />
+              <Route path="funnel" element={<AdminAnalyticsFunnel />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/chat" replace />} />
+          </Routes>
+        </div>
       </AuthProvider>
     </BrowserRouter>
   )

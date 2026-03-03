@@ -14,6 +14,16 @@ router = APIRouter()
 
 PATH_EXCEL_KEY = "path_excel"
 
+# 관리자 분석 제외 user_id 세트 (admin_logs 직접 조회 시 사용)
+def _get_excluded_user_ids():
+    try:
+        client = supabase_service.get_admin_client()
+        result = client.rpc("get_admin_analytics_excluded_user_ids").execute()
+        data = result.data or []
+        return {r.get("user_id") for r in data if r.get("user_id") is not None}
+    except Exception:
+        return set()
+
 
 class PathRowPayload(BaseModel):
     step: str
@@ -109,6 +119,68 @@ async def get_auth_user_cumulative_timeseries(user: dict = Depends(get_current_u
         )
 
 
+@router.get("/stats/active-users/rolling")
+async def get_active_users_rolling(user: dict = Depends(get_current_user)):
+    """
+    오늘 기준 롤링 창(1일~14일) 활성 사용자 수. 활성 사용자=로그인 유저 중 해당 기간에 질문한 유저. 1일=오늘만, 2일=어제+오늘, …, 7일=1주, 14일=2주. 관리자만.
+    """
+    if not is_admin_account(email=user.get("email")):
+        raise HTTPException(status_code=403, detail="Admin only")
+    try:
+        client = supabase_service.get_admin_client()
+        result = client.rpc("get_admin_logs_active_users_rolling").execute()
+        data = result.data or []
+        rows = []
+        for row in data:
+            if isinstance(row, dict):
+                days = row.get("days")
+                active = row.get("active_users", 0)
+                rows.append({
+                    "days": int(days) if days is not None else 0,
+                    "active_users": int(active) if active is not None else 0,
+                })
+        return {"series": rows}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get active users rolling: {str(e)}. Run migration 30_get_admin_logs_active_users_rolling.sql if needed.",
+        )
+
+
+@router.get("/stats/conversion/g2u-pctr")
+async def get_g2u_pctr(user: dict = Depends(get_current_user)):
+    """
+    G2U(게스트→유저 전환율) 및 PCTR(전환 전 평균 질문 수). 관리자만.
+    """
+    if not is_admin_account(email=user.get("email")):
+        raise HTTPException(status_code=403, detail="Admin only")
+    try:
+        client = supabase_service.get_admin_client()
+        result = client.rpc("get_admin_logs_g2u_pctr").execute()
+        data = result.data
+        if not data or not isinstance(data, list) or len(data) == 0:
+            return {
+                "g2u_converted_count": 0,
+                "g2u_guest_only_count": 0,
+                "g2u_rate": 0.0,
+                "pctr_avg": 0.0,
+                "pctr_groups_count": 0,
+            }
+        row = data[0] if isinstance(data[0], dict) else {}
+        return {
+            "g2u_converted_count": int(row.get("g2u_converted_count") or 0),
+            "g2u_guest_only_count": int(row.get("g2u_guest_only_count") or 0),
+            "g2u_rate": float(row.get("g2u_rate") or 0),
+            "pctr_avg": float(row.get("pctr_avg") or 0),
+            "pctr_groups_count": int(row.get("pctr_groups_count") or 0),
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get G2U/PCTR: {str(e)}. Run migration 31_get_admin_logs_g2u_pctr.sql if needed.",
+        )
+
+
 @router.get("/stats/questions/cumulative-timeseries")
 async def get_questions_cumulative_timeseries(user: dict = Depends(get_current_user)):
     """
@@ -140,6 +212,130 @@ async def get_questions_cumulative_timeseries(user: dict = Depends(get_current_u
         raise HTTPException(
             status_code=500,
             detail=f"Failed to get question timeseries: {str(e)}. Run migration 20_get_admin_logs_question_cumulative_timeseries.sql if needed.",
+        )
+
+
+@router.get("/stats/retention/day-series")
+async def get_retention_day_series(
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
+    """
+    admin_logs 기준 태생일(최초 방문일) 코호트별 Day-1~7 리텐션 시계열.
+    쿼리: from_date, to_date (YYYY-MM-DD, 선택). 관리자만.
+    """
+    if not is_admin_account(email=user.get("email")):
+        raise HTTPException(status_code=403, detail="Admin only")
+
+    cohort_from = None
+    cohort_to = None
+    if from_date:
+        try:
+            from datetime import datetime
+            cohort_from = datetime.strptime(from_date, "%Y-%m-%d").date().isoformat()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="from_date must be YYYY-MM-DD")
+    if to_date:
+        try:
+            from datetime import datetime
+            cohort_to = datetime.strptime(to_date, "%Y-%m-%d").date().isoformat()
+        except ValueError:
+            raise HTTPException(status_code=400, detail="to_date must be YYYY-MM-DD")
+
+    try:
+        client = supabase_service.get_admin_client()
+        payload = {}
+        if cohort_from is not None:
+            payload["cohort_day_from"] = cohort_from
+        if cohort_to is not None:
+            payload["cohort_day_to"] = cohort_to
+        result = client.rpc("get_admin_logs_retention_day_series", payload).execute()
+        data = result.data or []
+        rows = []
+        for row in data:
+            if not isinstance(row, dict):
+                continue
+            rows.append({
+                "cohort_day": row.get("cohort_day"),
+                "cohort_users": int(row.get("cohort_users") or 0),
+                "day_1_users": int(row.get("day_1_users") or 0),
+                "day_2_users": int(row.get("day_2_users") or 0),
+                "day_3_users": int(row.get("day_3_users") or 0),
+                "day_4_users": int(row.get("day_4_users") or 0),
+                "day_5_users": int(row.get("day_5_users") or 0),
+                "day_6_users": int(row.get("day_6_users") or 0),
+                "day_7_users": int(row.get("day_7_users") or 0),
+                "day_1_rate": float(row.get("day_1_rate") or 0),
+                "day_2_rate": float(row.get("day_2_rate") or 0),
+                "day_3_rate": float(row.get("day_3_rate") or 0),
+                "day_4_rate": float(row.get("day_4_rate") or 0),
+                "day_5_rate": float(row.get("day_5_rate") or 0),
+                "day_6_rate": float(row.get("day_6_rate") or 0),
+                "day_7_rate": float(row.get("day_7_rate") or 0),
+            })
+        return {"series": rows}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get retention day series: {str(e)}. Run migration 27_get_admin_logs_retention_day_series.sql if needed.",
+        )
+
+
+@router.get("/stats/retention/cohort-users")
+async def get_retention_cohort_users(
+    cohort_day: str,
+    day_n: Optional[int] = None,
+    user: dict = Depends(get_current_user),
+):
+    """
+    특정 코호트(태생일)의 유저 목록. day_n 지정 시 해당 Day-N 달성 유저만.
+    관리자만. 반환: [{ user_id, email }, ...]
+    """
+    if not is_admin_account(email=user.get("email")):
+        raise HTTPException(status_code=403, detail="Admin only")
+    if not cohort_day:
+        raise HTTPException(status_code=400, detail="cohort_day required (YYYY-MM-DD)")
+    try:
+        from datetime import datetime
+        cohort_day_date = datetime.strptime(cohort_day, "%Y-%m-%d").date().isoformat()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="cohort_day must be YYYY-MM-DD")
+    if day_n is not None and (day_n < 1 or day_n > 7):
+        raise HTTPException(status_code=400, detail="day_n must be 1..7 or omitted")
+
+    try:
+        client = supabase_service.get_admin_client()
+        payload = {"p_cohort_day": cohort_day_date}
+        if day_n is not None:
+            payload["p_day_n"] = day_n
+        result = client.rpc("get_admin_logs_retention_cohort_users", payload).execute()
+        data = result.data or []
+        rows = []
+        for row in data:
+            if not isinstance(row, dict):
+                continue
+            latest = None
+            if row.get("latest_log_id") is not None or row.get("latest_timestamp") is not None:
+                ch = row.get("latest_conversation_history")
+                conv_hist = ch if isinstance(ch, list) else []
+                latest = {
+                    "id": row.get("latest_log_id"),
+                    "timestamp": row.get("latest_timestamp"),
+                    "userQuestion": row.get("latest_user_question") or "",
+                    "finalAnswer": row.get("latest_final_answer") or "",
+                    "conversationHistory": conv_hist,
+                }
+            rows.append({
+                "user_id": str(row.get("user_id")) if row.get("user_id") else None,
+                "email": row.get("email") or "",
+                "latestLog": latest,
+            })
+        return {"users": rows}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get cohort users: {str(e)}. Run migration 29_get_admin_logs_retention_cohort_users.sql if needed.",
         )
 
 
@@ -207,9 +403,10 @@ async def get_latest_conversation_by_same_person(
 
     try:
         client = supabase_service.get_admin_client()
+        excluded_ids = _get_excluded_user_ids()
         result = (
             client.table("admin_logs")
-            .select("id, timestamp, user_question, final_answer, conversation_history")
+            .select("id, timestamp, user_question, final_answer, conversation_history, user_id")
             .eq("is_same_person", is_same_person.strip())
             .order("timestamp", desc=True)
             .limit(1)
@@ -219,6 +416,8 @@ async def get_latest_conversation_by_same_person(
         if not rows:
             return {"log": None}
         row = rows[0]
+        if row.get("user_id") in excluded_ids:
+            return {"log": None}
         return {
             "log": {
                 "id": row.get("id"),
@@ -266,14 +465,15 @@ async def get_no_user_id_row_distribution(user: dict = Depends(get_current_user)
 
 @router.get("/stats/behavior/null-same-person-rows")
 async def get_null_same_person_rows(user: dict = Depends(get_current_user)):
-    """is_same_person이 null인 admin_logs 행 목록 (표용). 관리자만."""
+    """is_same_person이 null인 admin_logs 행 목록 (표용). 관리자만. 제외 이메일 유저 행은 제외."""
     if not is_admin_account(email=user.get("email")):
         raise HTTPException(status_code=403, detail="Admin only")
     try:
         client = supabase_service.get_admin_client()
+        excluded_ids = _get_excluded_user_ids()
         result = (
             client.table("admin_logs")
-            .select("id, timestamp, user_question")
+            .select("id, timestamp, user_question, user_id")
             .is_("is_same_person", "null")
             .order("timestamp", desc=True)
             .limit(2000)
@@ -281,6 +481,8 @@ async def get_null_same_person_rows(user: dict = Depends(get_current_user)):
         )
         rows = []
         for r in result.data or []:
+            if r.get("user_id") in excluded_ids:
+                continue
             uq = (r.get("user_question") or "")[:150]
             if len(r.get("user_question") or "") > 150:
                 uq += "…"
@@ -321,16 +523,17 @@ async def get_no_user_id_same_person_list(user: dict = Depends(get_current_user)
 
 @router.get("/stats/behavior/log-by-id")
 async def get_log_by_id(log_id: str, user: dict = Depends(get_current_user)):
-    """admin_logs 한 건 조회 (모달용). 관리자만."""
+    """admin_logs 한 건 조회 (모달용). 관리자만. 제외 이메일 유저면 빈 응답."""
     if not is_admin_account(email=user.get("email")):
         raise HTTPException(status_code=403, detail="Admin only")
     if not log_id or not log_id.strip():
         raise HTTPException(status_code=400, detail="log_id required")
     try:
         client = supabase_service.get_admin_client()
+        excluded_ids = _get_excluded_user_ids()
         result = (
             client.table("admin_logs")
-            .select("id, timestamp, user_question, final_answer, conversation_history")
+            .select("id, timestamp, user_question, final_answer, conversation_history, user_id")
             .eq("id", log_id.strip())
             .limit(1)
             .execute()
@@ -339,6 +542,8 @@ async def get_log_by_id(log_id: str, user: dict = Depends(get_current_user)):
         if not data:
             return {"log": None}
         r = data[0]
+        if r.get("user_id") in excluded_ids:
+            return {"log": None}
         return {
             "log": {
                 "id": r.get("id"),

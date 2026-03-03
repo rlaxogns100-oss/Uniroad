@@ -1,0 +1,304 @@
+{
+  "school": "서강대학교",
+  "filename_contains": "정시모집",
+  "doc_id": 60,
+  "documents_found": 1,
+  "document_ids": [
+    60
+  ],
+  "chunks_found": 177,
+  "chunks_used": 177,
+  "context_chars": 75362,
+  "manifest_items": 220,
+  "model": "gpt-5.2-chat-4",
+  "api_version": "2024-02-15-preview",
+  "max_iterations": 3,
+  "status": "FAIL",
+  "iterations": [
+    {
+      "iteration": 1,
+      "extract_usage": {
+        "prompt_tokens": 43384,
+        "completion_tokens": 1490,
+        "total_tokens": 44874
+      },
+      "extract_raw_len": 4358,
+      "check_usage": {
+        "prompt_tokens": 11405,
+        "completion_tokens": 858,
+        "total_tokens": 12263
+      },
+      "check_raw_len": 2090,
+      "status": "RETRY",
+      "tracks_count": 5,
+      "structural_errors_count": 4,
+      "completeness_missing_count": 10
+    },
+    {
+      "iteration": 2,
+      "extract_usage": {
+        "prompt_tokens": 45139,
+        "completion_tokens": 3261,
+        "total_tokens": 48400
+      },
+      "extract_raw_len": 10550,
+      "check_usage": {
+        "prompt_tokens": 12922,
+        "completion_tokens": 726,
+        "total_tokens": 13648
+      },
+      "check_raw_len": 1686,
+      "status": "RETRY",
+      "tracks_count": 5,
+      "structural_errors_count": 1,
+      "completeness_missing_count": 8
+    },
+    {
+      "iteration": 3,
+      "extract_usage": {
+        "prompt_tokens": 46593,
+        "completion_tokens": 1796,
+        "total_tokens": 48389
+      },
+      "extract_raw_len": 5689,
+      "check_usage": {
+        "prompt_tokens": 11654,
+        "completion_tokens": 546,
+        "total_tokens": 12200
+      },
+      "check_raw_len": 1255,
+      "status": "RETRY",
+      "tracks_count": 1,
+      "structural_errors_count": 2,
+      "completeness_missing_count": 6
+    }
+  ],
+  "reports": {
+    "structural_errors": [
+      "track_0_component_0_step_0_expression_missing",
+      "track_0_component_0_step_1_expression_missing"
+    ],
+    "completeness": {
+      "is_complete": false,
+      "missing_items": [
+        {
+          "type": "track",
+          "track_name": "수능(농어촌학생)",
+          "detail": "문맥에 존재하는 정시 전형이나 추출 결과 tracks에 포함되지 않음",
+          "severity": "high"
+        },
+        {
+          "type": "track",
+          "track_name": "수능(기초생활보장대상자)",
+          "detail": "문맥에 존재하는 정시 전형이나 추출 결과 tracks에 포함되지 않음",
+          "severity": "high"
+        },
+        {
+          "type": "track",
+          "track_name": "수능(장애인대상자)",
+          "detail": "문맥에 존재하는 정시 전형이나 추출 결과 tracks에 포함되지 않음",
+          "severity": "high"
+        },
+        {
+          "type": "track",
+          "track_name": "수능(특성화고교졸업자)",
+          "detail": "문맥에 존재하는 정시 전형이나 추출 결과 tracks에 포함되지 않음",
+          "severity": "high"
+        },
+        {
+          "type": "allocation",
+          "track_name": "수능(일반)",
+          "detail": "학교폭력 조치사항에 따른 감점/과락 규칙이 components 또는 conversion_steps에 반영되지 않음",
+          "severity": "medium"
+        },
+        {
+          "type": "formula",
+          "track_name": "수능(일반)",
+          "detail": "수능 최저학력기준 충족 여부에 따른 지원 가능/불가 분기 규칙이 계산 흐름에 명시되지 않음",
+          "severity": "medium"
+        }
+      ],
+      "notes": [
+        "문맥상 정시 수능 전형은 총 5개(일반, 농어촌학생, 기초생활보장대상자, 장애인대상자, 특성화고교졸업자)이나 추출 결과에는 수능(일반)만 포함됨",
+        "수능 성적 산출 방식(A/B형 비교, 탐구 변환표준점수)은 근거 페이지와 함께 비교적 충실히 추출됨",
+        "다른 정원 외 전형들은 일반 전형과 동일한 산출 구조를 공유하더라도 개별 track으로 명시되어야 완결성 기준을 충족함"
+      ]
+    }
+  },
+  "result": {
+    "university": "서강대학교",
+    "year": 2026,
+    "admission_type": "정시",
+    "tracks": [
+      {
+        "track_id": "CSAT_GENERAL",
+        "track_name": "수능(일반)",
+        "unit_or_major": null,
+        "stage_model": "single",
+        "total_points": 100,
+        "components": [
+          {
+            "component_id": "CSAT",
+            "component_name": "수능",
+            "allocated_points": 100,
+            "raw_inputs": [
+              "국어_표준점수",
+              "수학_표준점수",
+              "탐구1_백분위",
+              "탐구2_백분위",
+              "영어_등급",
+              "한국사_등급"
+            ],
+            "component_final_var": "CSAT_TOTAL_SCORE",
+            "conversion_steps": [
+              {
+                "step_id": "STEP_TAMGU_CONVERT_1",
+                "step_name": "탐구1 백분위 → 변환표준점수",
+                "formula_type": "table_result",
+                "expression": null,
+                "piecewise": [],
+                "grade_map": {},
+                "variables": [
+                  "탐구1_백분위"
+                ],
+                "requires_runtime_data": true,
+                "runtime_keys": [
+                  "탐구영역_백분위_변환표준점수_변환표"
+                ],
+                "cannot_compute_reason": "탐구영역 백분위 환산 변환표준점수는 수능성적 발표 이후 별도 공지 예정",
+                "source_page": 35,
+                "evidence_text": "탐구영역 백분위 환산 자체 변환표준점수는 2026학년도 수능성적 발표일 이후 홈페이지 공지 예정"
+              },
+              {
+                "step_id": "STEP_TAMGU_CONVERT_2",
+                "step_name": "탐구2 백분위 → 변환표준점수",
+                "formula_type": "table_result",
+                "expression": null,
+                "piecewise": [],
+                "grade_map": {},
+                "variables": [
+                  "탐구2_백분위"
+                ],
+                "requires_runtime_data": true,
+                "runtime_keys": [
+                  "탐구영역_백분위_변환표준점수_변환표"
+                ],
+                "cannot_compute_reason": "탐구영역 백분위 환산 변환표준점수는 수능성적 발표 이후 별도 공지 예정",
+                "source_page": 35,
+                "evidence_text": "탐구영역 백분위 환산 자체 변환표준점수는 2026학년도 수능성적 발표일 이후 홈페이지 공지 예정"
+              },
+              {
+                "step_id": "STEP_BONUS",
+                "step_name": "영어·한국사 등급별 가산점 부여",
+                "formula_type": "grade_map",
+                "expression": null,
+                "piecewise": [],
+                "grade_map": {
+                  "영어": {
+                    "1": 100,
+                    "2": 99.5,
+                    "3": 98.5,
+                    "4": 97,
+                    "5": 95,
+                    "6": 92.5,
+                    "7": 89.5,
+                    "8": 86,
+                    "9": 82
+                  },
+                  "한국사": {
+                    "1": 10,
+                    "2": 10,
+                    "3": 10,
+                    "4": 10,
+                    "5": 9.5,
+                    "6": 9.0,
+                    "7": 8.5,
+                    "8": 8.0,
+                    "9": 7.5
+                  }
+                },
+                "variables": [
+                  "영어_등급",
+                  "한국사_등급"
+                ],
+                "requires_runtime_data": false,
+                "runtime_keys": [],
+                "cannot_compute_reason": null,
+                "source_page": 35,
+                "evidence_text": "영어, 한국사 등급별 가산점 표 제시"
+              },
+              {
+                "step_id": "STEP_A",
+                "step_name": "A형 점수 산출",
+                "formula_type": "absolute",
+                "expression": "국어_표준점수*1.1 + 수학_표준점수*1.3 + (탐구1_변환표준점수 + 탐구2_변환표준점수)*0.6 + 영어_가산점 + 한국사_가산점",
+                "piecewise": [],
+                "grade_map": {},
+                "variables": [
+                  "국어_표준점수",
+                  "수학_표준점수",
+                  "탐구1_변환표준점수",
+                  "탐구2_변환표준점수",
+                  "영어_가산점",
+                  "한국사_가산점"
+                ],
+                "requires_runtime_data": true,
+                "runtime_keys": [
+                  "탐구영역_백분위_변환표준점수_변환표"
+                ],
+                "cannot_compute_reason": "탐구영역 변환표준점수 변환표 미공개",
+                "source_page": 35,
+                "evidence_text": "국어 표준점수×1.1 + 수학 표준점수×1.3 + (탐구 변환표준점수 합)×0.6 + 영어·한국사 가산점"
+              },
+              {
+                "step_id": "STEP_B",
+                "step_name": "B형 점수 산출",
+                "formula_type": "absolute",
+                "expression": "국어_표준점수*1.3 + 수학_표준점수*1.1 + (탐구1_변환표준점수 + 탐구2_변환표준점수)*0.6 + 영어_가산점 + 한국사_가산점",
+                "piecewise": [],
+                "grade_map": {},
+                "variables": [
+                  "국어_표준점수",
+                  "수학_표준점수",
+                  "탐구1_변환표준점수",
+                  "탐구2_변환표준점수",
+                  "영어_가산점",
+                  "한국사_가산점"
+                ],
+                "requires_runtime_data": true,
+                "runtime_keys": [
+                  "탐구영역_백분위_변환표준점수_변환표"
+                ],
+                "cannot_compute_reason": "탐구영역 변환표준점수 변환표 미공개",
+                "source_page": 35,
+                "evidence_text": "국어 표준점수×1.3 + 수학 표준점수×1.1 + (탐구 변환표준점수 합)×0.6 + 영어·한국사 가산점"
+              },
+              {
+                "step_id": "STEP_FINAL",
+                "step_name": "A/B형 중 최고점 선택",
+                "formula_type": "absolute",
+                "expression": "max(A형_점수, B형_점수)",
+                "piecewise": [],
+                "grade_map": {},
+                "variables": [
+                  "A형_점수",
+                  "B형_점수"
+                ],
+                "requires_runtime_data": false,
+                "runtime_keys": [],
+                "cannot_compute_reason": null,
+                "source_page": 35,
+                "evidence_text": "지원자의 점수를 A, B 유형으로 각각 산출한 후 그 중 상위 점수를 자동으로 본교에서 반영함"
+              }
+            ],
+            "source_page": 12,
+            "evidence_text": "전형요소 및 반영 비율: 대학수학능력시험 성적 100%"
+          }
+        ],
+        "final_expression": "CSAT_TOTAL_SCORE",
+        "source_page": 12,
+        "evidence_text": "일괄 합산 | 대학수학능력시험 성적 100%"
+      }
+    ]
+  }
+}

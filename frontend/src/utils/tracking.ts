@@ -6,6 +6,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid'
+import { API_BASE } from '../config'
 
 // 세션 ID 관리
 const SESSION_KEY = 'uniroad_session_id'
@@ -125,7 +126,7 @@ export async function trackPageView(
     // 토큰 가져오기 (있으면)
     const token = localStorage.getItem('access_token')
     
-    await fetch('/api/tracking/page-view', {
+    await fetch(`${API_BASE}/api/tracking/page-view`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -165,7 +166,7 @@ export async function trackUserAction(
     // 토큰 가져오기 (있으면)
     const token = localStorage.getItem('access_token')
     
-    await fetch('/api/tracking/user-action', {
+    await fetch(`${API_BASE}/api/tracking/user-action`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -229,6 +230,44 @@ export function initializeTracking(): void {
       })
     }
   })
+}
+
+function sendGA4Event(eventName: string, params?: Record<string, string>): void {
+  try {
+    if (typeof window === 'undefined') return
+    const gtag = (window as any).gtag
+    if (typeof gtag !== 'function') return
+    gtag('event', eventName, params)
+  } catch (e) {
+    console.warn(`GA4 ${eventName} 이벤트 전송 실패:`, e)
+  }
+}
+
+/** GA4 권장 이벤트: 회원가입 완료 시 호출 */
+export function trackGA4SignUp(method: 'email' | 'google' | 'kakao'): void {
+  sendGA4Event('sign_up', { method })
+}
+
+/** GA4 권장 이벤트: 로그인 완료 시 호출 */
+export function trackGA4Login(method: 'email' | 'google' | 'kakao'): void {
+  sendGA4Event('login', { method })
+}
+
+/** Meta Pixel 이벤트 전송 */
+function sendMetaPixelEvent(eventName: string, params?: Record<string, any>): void {
+  try {
+    if (typeof window === 'undefined') return
+    const fbq = (window as any).fbq
+    if (typeof fbq !== 'function') return
+    fbq('track', eventName, params)
+  } catch (e) {
+    console.warn(`Meta Pixel ${eventName} 이벤트 전송 실패:`, e)
+  }
+}
+
+/** Meta Pixel: 회원가입 완료 시 호출 */
+export function trackMetaSignUp(method: 'email' | 'google' | 'kakao'): void {
+  sendMetaPixelEvent('CompleteRegistration', { content_name: method })
 }
 
 // 특정 이벤트 추적 헬퍼

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import ShareModal from './ShareModal'
 
 interface ChatMessageProps {
   message: string
@@ -9,14 +10,24 @@ interface ChatMessageProps {
   isStreaming?: boolean  // 스트리밍 중인지 여부
   onRegenerate?: () => void  // 재생성 콜백
   imageUrl?: string  // 이미지 첨부 시 미리보기 URL
-  showLoginPrompt?: boolean  // 로그인 유도 메시지 표시 여부
   onLoginClick?: () => void  // 로그인 버튼 클릭 콜백
+  isMasked?: boolean  // 마스킹 여부 (비로그인 3회째 질문)
+  // Agent 디버그 데이터 (관리자용)
+  agentData?: {
+    routerOutput: any
+    functionResults: any
+    mainAgentOutput: string | null
+    rawAnswer?: string | null
+    logs: string[]
+  } | null
+  isAdmin?: boolean  // 관리자 여부
+  onAgentClick?: () => void  // Agent 버튼 클릭 콜백
 }
 
-export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming, onRegenerate, imageUrl, showLoginPrompt, onLoginClick }: ChatMessageProps) {
+export default function ChatMessage({ message, isUser, sources, source_urls, userQuery, isStreaming, onRegenerate, imageUrl, onLoginClick, isMasked, agentData, isAdmin, onAgentClick }: ChatMessageProps) {
   const [showFactCheck, setShowFactCheck] = useState(false)
   const [showGlow, setShowGlow] = useState(false)
-  const [liked, setLiked] = useState<boolean | null>(null)  // null: 선택 안함, true: 좋아요, false: 싫어요
+  const [showShareModal, setShowShareModal] = useState(false)  // 공유 모달 상태
   
   // AI 답변 스트리밍이 완료되면 글로우 효과 트리거
   useEffect(() => {
@@ -59,26 +70,13 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
     alert('답변이 복사되었습니다.')
   }
   
-  // 좋아요
-  const handleLike = () => {
-    setLiked(liked === true ? null : true)
-  }
-  
-  // 싫어요
-  const handleDislike = () => {
-    setLiked(liked === false ? null : false)
-  }
-  
-  // 공유하기
+  // 공유하기 - 모달 열기
   const handleShare = () => {
-    if (navigator.share) {
-      navigator.share({
-        title: '유니로드 답변',
-        text: getCleanedMessage(),
-      }).catch(() => {})
-    } else {
-      handleCopy()
+    if (!userQuery) {
+      alert('공유할 질문이 없습니다.')
+      return
     }
+    setShowShareModal(true)
   }
   
   // 재생성
@@ -132,7 +130,9 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
   // 【】로 감싸진 타이틀을 파싱하는 헬퍼 함수
   const parseTitles = (text: string) => {
     const parts: React.ReactNode[] = []
-    const titleRegex = /【([^】]+)】/g
+    // 타이틀 내부의 ** 볼드 마크다운도 함께 처리
+    // 【**제목**】 또는 **【제목】** 형태 모두 처리
+    const titleRegex = /(?:\*\*)?【(?:\*\*)?([^】]+?)(?:\*\*)?】(?:\*\*)?/g
     let lastIndex = 0
     let match
     let keyIndex = 0
@@ -147,10 +147,12 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
         )
       }
 
-      // 타이틀 부분 (18.5px, 볼드, 대괄호 제거)
+      // 타이틀 부분 (18.5px, 볼드, 대괄호 및 ** 제거)
+      // match[1]에서 추가로 ** 제거
+      const titleContent = match[1].replace(/\*\*/g, '')
       parts.push(
         <span key={`title-${keyIndex++}`} className="text-[18.5px] font-bold">
-          {match[1]}
+          {titleContent}
         </span>
       )
 
@@ -282,6 +284,10 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
 
     // 남은 섹션 마커 제거 (맨 처음/끝에 있는 것들)
     cleanedMessage = cleanedMessage.replace(/===SECTION_(START|END)(:\w+)?===/g, '')
+    
+    // --- 구분선을 ___DIVIDER___ 마커로 변환 (백엔드에서 보내는 형식)
+    // 줄바꿈은 유지하면서 ---만 마커로 변환 (모바일에서 빈 줄 1개만 표시되도록)
+    cleanedMessage = cleanedMessage.replace(/\n*---\n*/g, '\n___DIVIDER___\n')
 
     // 연속 줄바꿈 정리
     cleanedMessage = cleanedMessage.replace(/\n{3,}/g, '\n\n').trim()
@@ -465,6 +471,40 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
     return message.replace(/^\[이미지 첨부\]\s*/, '')
   }
 
+  const renderMaskedLoginCta = (compact: boolean = false) => (
+    <div className={`text-center ${compact ? 'p-4' : 'p-6'}`}>
+      <div className={`${compact ? 'text-3xl mb-3' : 'text-4xl mb-4'}`}>🔒</div>
+      <h3 className={`${compact ? 'text-base' : 'text-lg'} font-bold text-gray-900 mb-2`}>
+        로그인하고 답변을 확인하세요
+      </h3>
+      <p className={`${compact ? 'text-xs' : 'text-sm'} text-gray-600 mb-4`}>
+        더 많은 입시 정보와 개인별로 갈 수 있는 대학을 확인해보세요!
+      </p>
+      <button
+        onClick={onLoginClick}
+        className={`${compact ? 'px-5 py-2.5 text-sm' : 'px-6 py-3'} bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 text-white font-medium rounded-lg transition-all shadow-lg hover:shadow-xl flex items-center gap-2 mx-auto`}
+      >
+        <svg className={`${compact ? 'w-4 h-4' : 'w-5 h-5'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
+        </svg>
+        로그인하기
+      </button>
+    </div>
+  )
+
+  const getMobileCtaSlots = (): Array<'top' | 'center' | 'bottom'> => {
+    const lineBreakCount = (message.match(/\n/g) || []).length
+    const estimatedLength = message.replace(/\s+/g, ' ').length + lineBreakCount * 40
+
+    if (estimatedLength < 520) {
+      return ['center'] // 짧은 답변
+    }
+    if (estimatedLength < 1400) {
+      return ['top', 'bottom'] // 중간 길이 답변
+    }
+    return ['top', 'center', 'bottom'] // 긴 답변
+  }
+
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       {isUser ? (
@@ -486,26 +526,46 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
         </div>
       ) : (
         // AI 답변: Gemini 스타일 (말풍선 없이, 폰트/간격 조정)
-        <div className="w-full">
-          <div className="text-gray-900 ai-response mb-4">
+        <div className="w-full relative">
+          {/* 마스킹 오버레이 - 비로그인 3회째 질문 시 */}
+          {isMasked && (
+            <div className="absolute inset-0 z-10 bg-white/80 backdrop-blur-md rounded-lg overflow-hidden">
+              {/* 데스크톱: 중앙 1회 */}
+              <div className="hidden sm:flex h-full items-center justify-center">
+                {renderMaskedLoginCta(false)}
+              </div>
+
+              {/* 모바일: 답변 길이에 따라 1/2/3개 CTA를 유동 배치 */}
+              <div className="sm:hidden absolute inset-0 pointer-events-none">
+                {getMobileCtaSlots().map((slot, index) => {
+                  const positionClass =
+                    slot === 'top'
+                      ? 'top-5 left-1/2 -translate-x-1/2'
+                      : slot === 'center'
+                        ? 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2'
+                        : 'bottom-5 left-1/2 -translate-x-1/2'
+
+                  return (
+                    <div
+                      key={`${slot}-${index}`}
+                      className={`absolute ${positionClass} w-[88%] max-w-sm pointer-events-auto`}
+                    >
+                      <div className="rounded-xl bg-white/90 shadow-md border border-gray-100">
+                        {renderMaskedLoginCta(true)}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+          
+          <div className={`text-gray-900 ai-response mb-4 ${isMasked ? 'blur-sm select-none' : ''}`}>
             {renderMessage()}
           </div>
           
-          {/* 로그인 유도 버튼 - Rate Limit 초과 시 */}
-          {showLoginPrompt && (
-            <button
-              onClick={onLoginClick}
-              className="mt-4 px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white font-medium rounded-lg transition-colors flex items-center gap-2"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 16l-4-4m0 0l4-4m-4 4h14m-5 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h7a3 3 0 013 3v1" />
-              </svg>
-              로그인하기
-            </button>
-          )}
-          
-          {/* 버튼 영역 - 스트리밍 완료 후에만 표시, 로그인 유도 시 숨김 */}
-          {!isStreaming && !showLoginPrompt && (
+          {/* 버튼 영역 - 스트리밍 완료 후에만 표시, 마스킹 시 숨김 */}
+          {!isStreaming && !isMasked && (
           <div className="flex gap-1 mt-3 items-center">
             {/* 복사 */}
             <button
@@ -518,33 +578,15 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
               </svg>
             </button>
             
-            {/* 좋아요 */}
+            {/* 공유 */}
             <button
-              onClick={handleLike}
-              className={`custom-tooltip p-2 rounded-lg transition-colors ${
-                liked === true 
-                  ? 'text-blue-600 bg-blue-100 hover:bg-blue-200' 
-                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
-              }`}
-              data-tooltip="좋아요"
+              onClick={handleShare}
+              disabled={!userQuery}
+              className="custom-tooltip p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              data-tooltip="공유"
             >
-              <svg className="w-5 h-5" fill={liked === true ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" />
-              </svg>
-            </button>
-            
-            {/* 싫어요 */}
-            <button
-              onClick={handleDislike}
-              className={`custom-tooltip p-2 rounded-lg transition-colors ${
-                liked === false 
-                  ? 'text-red-600 bg-red-100 hover:bg-red-200' 
-                  : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200'
-              }`}
-              data-tooltip="싫어요"
-            >
-              <svg className="w-5 h-5" fill={liked === false ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 14H5.236a2 2 0 01-1.789-2.894l3.5-7A2 2 0 018.736 3h4.018a2 2 0 01.485.06l3.76.94m-7 10v5a2 2 0 002 2h.096c.5 0 .905-.405.905-.904 0-.715.211-1.413.608-2.008L17 13V4m-7 10h2m5-10h2a2 2 0 012 2v6a2 2 0 01-2 2h-2.5" />
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
               </svg>
             </button>
             
@@ -585,10 +627,36 @@ export default function ChatMessage({ message, isUser, sources, source_urls, use
               </svg>
               출처 확인하기{countCiteTags() > 0 && `(${countCiteTags()})`}
             </button>
+            
+            {/* Agent 디버그 버튼 (관리자 전용) */}
+            {isAdmin && (
+              <button
+                onClick={onAgentClick}
+                className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                  agentData ? 'text-purple-600 hover:bg-purple-50' : 'text-gray-400 cursor-not-allowed'
+                }`}
+                disabled={!agentData}
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+                </svg>
+                Agent
+              </button>
+            )}
           </div>
           )}
         </div>
       )}
+      
+      {/* 공유 모달 */}
+      <ShareModal
+        isOpen={showShareModal}
+        onClose={() => setShowShareModal(false)}
+        userQuery={userQuery || ''}
+        assistantResponse={message}
+        sources={sources}
+        sourceUrls={source_urls}
+      />
     </div>
   )
 }

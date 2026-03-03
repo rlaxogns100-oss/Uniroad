@@ -24,6 +24,6 @@ GEMINI_FLASH_MODEL = "gemini-3-flash-preview"  # 대화/판단용 (고품질)
 GEMINI_LITE_MODEL = "gemini-2.5-flash-lite"    # 문서 처리용 (고속)
 
 # Rate Limiting 설정
-RATE_LIMIT_REGISTERED_USER = 50  # 로그인 유저 일일 제한
-RATE_LIMIT_GUEST = 10            # 게스트 IP 일일 제한
-RATE_LIMIT_RESET_HOUR_KST = 0    # 자정 초기화 (00:00 KST)
+RATE_LIMIT_REGISTERED_USER = 100  # 로그인 유저 일일 제한
+RATE_LIMIT_GUEST = 0              # 게스트 IP 일일 제한 (0회 무료, 1회째부터 마스킹)
+RATE_LIMIT_RESET_HOUR_KST = 0     # 자정 초기화 (00:00 KST)

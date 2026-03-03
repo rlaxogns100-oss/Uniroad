@@ -22,6 +22,7 @@ class BotConfigUpdate(BaseModel):
     rest_minutes: Optional[int] = None
     keywords: Optional[List[str]] = None
     banned_keywords: Optional[List[str]] = None  # 금지 키워드 목록
+    ai_model_provider: Optional[str] = None  # AI 모델 제공자 (gemini 또는 azure)
 
 
 class BotStartRequest(BaseModel):
@@ -165,8 +166,8 @@ async def get_comments(cafe_id: str, limit: int = 100, offset: int = 0):
         comments: 댓글 기록 리스트 (원글/쿼리/함수결과 포함)
         total: 전체 개수
     """
-    if limit > 500:
-        limit = 500
+    if limit > 5000:
+        limit = 5000
     if limit < 1:
         limit = 1
     if offset < 0:

@@ -25,13 +25,28 @@ interface ThinkingProcessProps {
   logs: string[]
 }
 
+// iteration별 제목 매핑
+const getTitleByIteration = (iteration: number, type: 'query' | 'search' | 'answer'): string => {
+  const titles: Record<number, { query: string; search: string }> = {
+    1: { query: '질문 이해하기', search: '정보 수집하기' },
+    2: { query: '한번 더 고민하기', search: '꼼꼼하게 검토하기' },
+    3: { query: '최종 고민하기', search: '마지막 탐색하기' }
+  }
+  
+  if (type === 'answer') {
+    return '답변 작성하기'
+  }
+  
+  return titles[iteration]?.[type] || (type === 'query' ? '질문 분석하기' : '정보 검색하기')
+}
+
 // 로그에서 메시지와 상세 정보 분리
-const parseLog = (log: string): { message: string; step?: string; detail?: any } => {
+const parseLog = (log: string): { message: string; step?: string; iteration?: number; detail?: any } => {
   const parts = log.split('|||')
   if (parts.length === 2) {
     try {
       const parsed = JSON.parse(parts[1])
-      return { message: parts[0], step: parsed.step, detail: parsed.detail }
+      return { message: parts[0], step: parsed.step, iteration: parsed.iteration, detail: parsed.detail }
     } catch {
       return { message: log }
     }
@@ -59,9 +74,62 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
     let currentSearchResults: SearchResult[] = []
     
     logs.forEach(log => {
-      const { message, step, detail } = parseLog(log)
+      const { message, step, iteration, detail } = parseLog(log)
       
-      // Router 완료 단계 (상세 정보 포함)
+      // Thinking 모드: 쿼리 생성 완료 (iteration별 제목)
+      if (step === 'query_complete' && detail?.queries) {
+        currentQueries = detail.queries
+        const queryCount = detail.count || currentQueries.length
+        const iterNum = iteration || 1
+        const title = getTitleByIteration(iterNum, 'query')
+        
+        if (iterNum === 1) {
+          setCurrentStatus('검색 전략을 수립하고 있어요...')
+        } else if (iterNum === 2) {
+          setCurrentStatus('추가 정보를 찾고 있어요...')
+        } else {
+          setCurrentStatus('마지막으로 확인하고 있어요...')
+        }
+        
+        newSteps.push({
+          title,
+          description: `질문을 분석하여 ${queryCount}개의 검색 쿼리를 생성했습니다.`,
+          queries: currentQueries
+        })
+      }
+      
+      // Thinking 모드: 검색 완료 (iteration별 제목)
+      if (step === 'search_complete' && detail?.results) {
+        currentSearchResults = detail.results
+        const totalCount = detail.total_count || 0
+        const iterNum = iteration || 1
+        const title = getTitleByIteration(iterNum, 'search')
+        
+        if (iterNum === 1) {
+          setCurrentStatus('검색 결과를 분석하고 있어요...')
+        } else if (iterNum === 2) {
+          setCurrentStatus('추가 자료를 검토하고 있어요...')
+        } else {
+          setCurrentStatus('최종 검토 중이에요...')
+        }
+        
+        newSteps.push({
+          title,
+          description: `${totalCount}개의 관련 자료를 찾았습니다.`,
+          searchResults: currentSearchResults
+        })
+      }
+      
+      // Thinking 모드: 답변 작성 시작
+      if (step === 'answer_start') {
+        setCurrentStatus('답변을 작성하고 있어요...')
+        newSteps.push({
+          title: '답변 작성하기',
+          description: '수집한 정보를 종합하여 질문에 맞는 명확하고 이해하기 쉬운 답변을 작성하고 있습니다.'
+        })
+      }
+      
+      // 일반 모드 호환: Router 완료 단계 (상세 정보 포함)
       if (step === 'router_complete' && detail?.function_calls) {
         currentQueries = detail.function_calls
         const queryCount = detail.count || currentQueries.length
@@ -99,19 +167,7 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
         }
       }
       
-      // 검색 완료 (상세 정보 포함)
-      if (step === 'search_complete' && detail?.results) {
-        currentSearchResults = detail.results
-        const totalCount = detail.total_count || 0
-        setCurrentStatus('검색 결과를 분석하고 있어요...')
-        newSteps.push({
-          title: '정보 수집하기',
-          description: `${totalCount}개의 관련 자료를 찾았습니다.`,
-          searchResults: currentSearchResults
-        })
-      }
-      
-      // Function 단계 (기존 호환)
+      // Function 단계 (기존 호환 - 일반 모드)
       if ((message.includes('[2/3]') || message.includes('Functions')) && !step) {
         if (message.includes('🔄')) {
           setCurrentStatus('관련 정보를 검색하고 있어요...')
@@ -135,7 +191,7 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
         }
       }
       
-      // Main Agent 단계
+      // Main Agent 단계 (일반 모드만 - Thinking 모드는 answer_start step 사용)
       if (message.includes('[3/3]') || message.includes('Main Agent')) {
         if (message.includes('🔄')) {
           setCurrentStatus('답변을 작성하고 있어요...')

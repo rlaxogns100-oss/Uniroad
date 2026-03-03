@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>계정 삭제 요청 - 유니로드</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, 'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+      line-height: 1.8;
+      color: #333;
+      background-color: #f9fafb;
+      padding: 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      padding: 40px;
+      border-radius: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    h1 {
+      font-size: 28px;
+      font-weight: 700;
+      color: #1f2937;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+    .subtitle {
+      text-align: center;
+      color: #6b7280;
+      margin-bottom: 40px;
+      font-size: 14px;
+    }
+    h2 {
+      font-size: 18px;
+      font-weight: 600;
+      color: #374151;
+      margin-top: 32px;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #e5e7eb;
+    }
+    p {
+      margin-bottom: 12px;
+      color: #4b5563;
+    }
+    .app-info {
+      background-color: #f3f4f6;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 24px;
+    }
+    .app-info p {
+      margin-bottom: 8px;
+    }
+    .app-info strong {
+      color: #1f2937;
+    }
+    .step-list {
+      counter-reset: step-counter;
+      list-style: none;
+      padding: 0;
+      margin: 20px 0;
+    }
+    .step-list li {
+      counter-increment: step-counter;
+      position: relative;
+      padding-left: 50px;
+      margin-bottom: 24px;
+      min-height: 40px;
+    }
+    .step-list li::before {
+      content: counter(step-counter);
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 16px;
+    }
+    .step-title {
+      font-weight: 600;
+      color: #1f2937;
+      font-size: 16px;
+      margin-bottom: 8px;
+    }
+    .step-desc {
+      color: #6b7280;
+      font-size: 14px;
+    }
+    .email-box {
+      background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+      border: 2px solid #3b82f6;
+      border-radius: 12px;
+      padding: 24px;
+      text-align: center;
+      margin: 24px 0;
+    }
+    .email-box p {
+      color: #1e40af;
+      font-weight: 500;
+      margin-bottom: 12px;
+    }
+    .email-link {
+      display: inline-block;
+      font-size: 20px;
+      font-weight: 700;
+      color: #2563eb;
+      text-decoration: none;
+      padding: 12px 24px;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+      transition: all 0.2s;
+    }
+    .email-link:hover {
+      background: #2563eb;
+      color: white;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 8px rgba(37, 99, 235, 0.3);
+    }
+    .data-section {
+      background-color: #fef3c7;
+      border-left: 4px solid #f59e0b;
+      padding: 16px 20px;
+      margin: 20px 0;
+      border-radius: 0 8px 8px 0;
+    }
+    .data-section h3 {
+      color: #92400e;
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    .data-section ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+    .data-section li {
+      color: #92400e;
+      font-size: 14px;
+      margin-bottom: 6px;
+    }
+    .retention-info {
+      background-color: #f0fdf4;
+      border-left: 4px solid #22c55e;
+      padding: 16px 20px;
+      margin: 20px 0;
+      border-radius: 0 8px 8px 0;
+    }
+    .retention-info h3 {
+      color: #166534;
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 12px;
+    }
+    .retention-info p {
+      color: #166534;
+      font-size: 14px;
+      margin-bottom: 0;
+    }
+    .warning-box {
+      background-color: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin: 20px 0;
+    }
+    .warning-box p {
+      color: #991b1b;
+      font-size: 14px;
+      margin: 0;
+    }
+    .warning-box strong {
+      color: #7f1d1d;
+    }
+    .back-link {
+      display: inline-block;
+      margin-top: 40px;
+      padding: 12px 24px;
+      background-color: #3b82f6;
+      color: white;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 500;
+      transition: background-color 0.2s;
+    }
+    .back-link:hover {
+      background-color: #2563eb;
+    }
+    .footer {
+      text-align: center;
+      margin-top: 40px;
+      padding-top: 20px;
+      border-top: 1px solid #e5e7eb;
+      color: #9ca3af;
+      font-size: 13px;
+    }
+    @media (max-width: 640px) {
+      body {
+        padding: 12px;
+      }
+      .container {
+        padding: 24px 20px;
+      }
+      h1 {
+        font-size: 22px;
+      }
+      h2 {
+        font-size: 16px;
+      }
+      .email-link {
+        font-size: 16px;
+        padding: 10px 20px;
+      }
+      .step-list li {
+        padding-left: 44px;
+      }
+      .step-list li::before {
+        width: 32px;
+        height: 32px;
+        font-size: 14px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>계정 및 데이터 삭제 요청</h1>
+    <p class="subtitle">Account & Data Deletion Request</p>
+
+    <div class="app-info">
+      <p><strong>앱 이름:</strong> 유니로드 (UniRoad)</p>
+      <p><strong>개발자:</strong> 유니로드</p>
+      <p><strong>웹사이트:</strong> <a href="https://uni2road.com" style="color: #2563eb;">uni2road.com</a></p>
+    </div>
+
+    <p>
+      유니로드는 이용자의 개인정보를 소중히 여기며, 언제든지 계정 삭제 및 관련 데이터 삭제를 요청하실 수 있습니다.
+      아래 절차에 따라 삭제를 요청해 주세요.
+    </p>
+
+    <h2>삭제 요청 절차</h2>
+    
+    <ol class="step-list">
+      <li>
+        <div class="step-title">이메일 작성</div>
+        <div class="step-desc">아래 이메일 주소로 계정 삭제 요청 메일을 보내주세요. 제목에 <strong>"[계정 삭제 요청]"</strong>을 포함해 주세요.</div>
+      </li>
+      <li>
+        <div class="step-title">본인 확인 정보 기재</div>
+        <div class="step-desc">가입 시 사용한 <strong>이메일 주소</strong>와 <strong>이름</strong>을 메일 본문에 기재해 주세요.</div>
+      </li>
+      <li>
+        <div class="step-title">요청 처리</div>
+        <div class="step-desc">요청 접수 후 <strong>영업일 기준 7일 이내</strong>에 처리가 완료되며, 완료 시 확인 메일을 발송해 드립니다.</div>
+      </li>
+    </ol>
+
+    <div class="email-box">
+      <p>계정 삭제 요청 이메일</p>
+      <a href="mailto:ceo@uni2road.com?subject=[계정 삭제 요청] 유니로드 회원 탈퇴" class="email-link">
+        ceo@uni2road.com
+      </a>
+    </div>
+
+    <h2>삭제되는 데이터</h2>
+    
+    <div class="data-section">
+      <h3>계정 삭제 시 삭제되는 정보</h3>
+      <ul>
+        <li>회원 계정 정보 (이메일, 이름, 프로필 사진)</li>
+        <li>채팅 내역 및 상담 기록</li>
+        <li>입력한 성적 정보 및 관심 대학 정보</li>
+        <li>서비스 이용 기록 및 설정</li>
+      </ul>
+    </div>
+
+    <h2>데이터 보관 기간</h2>
+    
+    <div class="retention-info">
+      <h3>삭제 요청 후 데이터 처리</h3>
+      <p>
+        계정 삭제 요청이 처리되면 모든 개인정보는 <strong>즉시 삭제</strong>됩니다.<br>
+        단, 관계 법령에 따라 보존이 필요한 정보는 해당 기간 동안 별도 보관 후 파기됩니다.
+      </p>
+    </div>
+
+    <div class="warning-box">
+      <p><strong>주의:</strong> 계정 삭제 후에는 모든 데이터가 영구적으로 삭제되며, 복구가 불가능합니다. 삭제 전 필요한 정보는 미리 백업해 주세요.</p>
+    </div>
+
+    <h2>문의</h2>
+    <p>
+      계정 삭제와 관련하여 궁금한 점이 있으시면 <a href="mailto:ceo@uni2road.com" style="color: #2563eb; font-weight: 500;">ceo@uni2road.com</a>으로 문의해 주세요.
+    </p>
+
+    <div class="footer">
+      <a href="/chat" class="back-link">유니로드로 돌아가기</a>
+      <p style="margin-top: 20px;">© 2026 유니로드. All rights reserved.</p>
+    </div>
+  </div>
+</body>
+</html>

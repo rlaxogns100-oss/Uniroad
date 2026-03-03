@@ -28,6 +28,18 @@ class UpdateSessionRequest(BaseModel):
     title: str
 
 
+class MigrateMessageItem(BaseModel):
+    role: str  # 'user' or 'assistant'
+    content: str
+    sources: Optional[List[str]] = None
+    source_urls: Optional[List[str]] = None
+
+
+class MigrateMessagesRequest(BaseModel):
+    messages: List[MigrateMessageItem]
+    browser_session_id: str  # 기존 브라우저 세션 ID
+
+
 class SessionResponse(BaseModel):
     id: str
     user_id: str
@@ -94,10 +106,13 @@ async def create_session(
 ):
     """
     새 채팅 세션 생성 (DB insert 없이 id만 반환, 첫 메시지 시 session_chat_messages에 기록)
+    
+    주의: 매번 새로운 UUID를 생성해야 함. browser_session_id는 트래킹용으로만 사용.
     """
     try:
         now = datetime.now().isoformat()
-        session_id = request.browser_session_id or str(uuid.uuid4())
+        # 항상 새로운 UUID 생성 (browser_session_id는 트래킹 참조용으로만 저장)
+        session_id = str(uuid.uuid4())
         return {
             "id": session_id,
             "user_id": user["user_id"],
@@ -235,4 +250,63 @@ async def save_context(
     세션의 대화 컨텍스트 저장 (session_chat_messages 기반이므로 no-op, 컨텍스트는 메시지에서 유도)
     """
     return {"message": "컨텍스트가 저장되었습니다"}
+
+
+@router.post("/migrate")
+async def migrate_messages(
+    request: MigrateMessagesRequest,
+    user: dict = Depends(get_current_user)
+):
+    """
+    비로그인 상태의 채팅 내역을 로그인한 사용자의 세션으로 마이그레이션
+    
+    - 새 세션 ID 생성
+    - 메시지들을 session_chat_messages에 user_id와 함께 저장
+    - 저장된 세션 ID 반환
+    """
+    try:
+        if not request.messages:
+            raise HTTPException(status_code=400, detail="마이그레이션할 메시지가 없습니다")
+        
+        # 새 세션 ID 생성
+        session_id = str(uuid.uuid4())
+        user_id = user["user_id"]
+        now = datetime.now()
+        
+        # 메시지들을 session_chat_messages에 저장
+        for idx, msg in enumerate(request.messages):
+            message_id = str(uuid.uuid4())
+            # 메시지 순서를 보장하기 위해 시간에 인덱스 추가
+            created_at = (now.replace(microsecond=idx * 1000)).isoformat()
+            
+            insert_data = {
+                "user_session": session_id,
+                "message_id": message_id,
+                "role": msg.role,
+                "content": msg.content,
+                "user_id": user_id,
+                "created_at": created_at,
+            }
+            
+            # sources와 source_urls가 있으면 추가
+            if msg.sources:
+                insert_data["sources"] = msg.sources
+            if msg.source_urls:
+                insert_data["source_urls"] = msg.source_urls
+            
+            supabase_service.client.table("session_chat_messages").insert(insert_data).execute()
+        
+        print(f"✅ 채팅 마이그레이션 완료: user_id={user_id}, session_id={session_id}, messages={len(request.messages)}")
+        
+        return {
+            "session_id": session_id,
+            "message_count": len(request.messages),
+            "message": "채팅 내역이 성공적으로 마이그레이션되었습니다"
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ 채팅 마이그레이션 실패: {e}")
+        raise HTTPException(status_code=500, detail=f"채팅 마이그레이션 실패: {str(e)}")
 

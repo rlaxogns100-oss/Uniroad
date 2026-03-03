@@ -4,12 +4,84 @@
 @tailwind components;
 @tailwind utilities;
 
+/* TWA 앱 스타일 */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  background-color: #ffffff;
+}
+
 body {
   margin: 0;
   font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, 
     'Helvetica Neue', 'Segoe UI', 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-user-select: text;
+  user-select: text;
+  overscroll-behavior: none;
+  background-color: #ffffff;
+}
+
+input, textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* 모바일 스크롤바 숨기기 */
+@media (max-width: 768px) {
+  ::-webkit-scrollbar {
+    display: none;
+  }
+  body {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+/* 하단 네비게이션 여백 */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* Safe area 처리 */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0);
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* 모바일 상단/하단 영역 배경색 통일 */
+@supports (padding: env(safe-area-inset-top)) {
+  html {
+    background-color: #ffffff;
+  }
+  
+  body::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: env(safe-area-inset-top, 0);
+    background-color: #ffffff;
+    z-index: 9999;
+  }
+  
+  body::after {
+    content: '';
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: env(safe-area-inset-bottom, 0);
+    background-color: #ffffff;
+    z-index: 9999;
+  }
 }
 
 code {
@@ -54,12 +126,12 @@ code {
   font-weight: 600;
 }
 
-/* 다크모드 대응 */
-@media (prefers-color-scheme: dark) {
+/* 다크모드 대응 - 앱이 라이트모드만 지원하므로 시스템 다크모드 무시 */
+/* @media (prefers-color-scheme: dark) {
   .ai-response {
     color: #e3e3e3;
   }
-}
+} */
 
 /* 출처 확인하기 버튼 글로우 애니메이션 */
 @keyframes pulse-glow {
