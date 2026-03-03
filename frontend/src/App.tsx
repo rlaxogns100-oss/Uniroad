@@ -23,6 +23,7 @@ import SchoolRecordEvalPage from './pages/SchoolRecordEvalPage'
 import SchoolRecordDeepAnalysisPage from './pages/SchoolRecordDeepAnalysisPage'
 import SchoolGradeInputPage from './pages/SchoolGradeInputPage'
 import SchoolRecordGuidePage from './pages/SchoolRecordGuidePage'
+import { isAppBuild } from './config'
 import { useEffect } from 'react'
 import { initializeTracking, trackPageView } from './utils/tracking'
 
@@ -107,7 +108,7 @@ function App() {
             <Route path="/auth" element={<AuthPage />} />
             <Route path="/oauth-callback" element={<OAuthCallbackPage />} />
             <Route path="/policy" element={<PolicyPage />} />
-            <Route path="/" element={<LandingPage />} />
+            <Route path="/" element={isAppBuild() ? <Navigate to="/chat" replace /> : <LandingPage />} />
             
             {/* 로그인 후 채팅 페이지 */}
             <Route

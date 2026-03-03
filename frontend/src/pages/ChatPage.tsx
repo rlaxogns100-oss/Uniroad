@@ -2579,6 +2579,28 @@ export default function ChatPage() {
 
           {/* 하단 섹션 */}
           <div className="p-4 sm:p-6 pt-3 sm:pt-4">
+            <div className="mb-3 flex flex-nowrap items-center justify-center gap-2 text-[11px] sm:text-xs text-gray-500 whitespace-nowrap overflow-x-auto">
+              <a
+                href="https://uni2road.com/terms"
+                className="hover:text-gray-700 transition-colors shrink-0"
+              >
+                이용약관
+              </a>
+              <span className="text-gray-300 shrink-0">|</span>
+              <a
+                href="https://uni2road.com/policy"
+                className="hover:text-gray-700 transition-colors shrink-0"
+              >
+                개인정보처리방침
+              </a>
+              <span className="text-gray-300 shrink-0">|</span>
+              <a
+                href="https://uni2road.com/delete.html"
+                className="hover:text-gray-700 transition-colors shrink-0"
+              >
+                회원 탈퇴
+              </a>
+            </div>
             {!isAuthenticated && (
               <button
                 onClick={() => {
@@ -3885,6 +3907,13 @@ export default function ChatPage() {
             </div>
           </div>
         )}
+        <div className="px-4 sm:px-6 pb-2 sm:pb-3">
+          <div className="mx-auto max-w-[760px] overflow-x-auto">
+            <p className="inline-block whitespace-nowrap text-[10px] sm:text-[11px] text-gray-500">
+              사업자필수정보: 매장직결 | 사업자등록번호 140-29-01759 | 대표 김태훈 | 경기도 용인시 수지구 현암로125번길 11, 723동 704호 | 010-2808-9914 | rlaxogns100@snu.ac.kr | 통신판매업 신고 준비중
+            </p>
+          </div>
+        </div>
           </>
         ) : (
           <>
