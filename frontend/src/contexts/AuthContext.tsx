@@ -1,7 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
-import axios from 'axios'
 import { trackGA4SignUp, trackGA4Login, trackUserAction, trackMetaSignUp } from '../utils/tracking'
-import { migrateMessages } from '../api/client'
+import { api, migrateMessages } from '../api/client'
 import { isCapacitorApp } from '../config'
 
 interface User {
@@ -42,7 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (code) {
         console.log('OAuth code found, exchanging for token...')
         try {
-          const response = await axios.post('/api/auth/oauth/callback', { code })
+          const response = await api.post('/auth/oauth/callback', { code })
           const { access_token, refresh_token, user: userData, is_new_user } = response.data
 
           localStorage.setItem('access_token', access_token)
@@ -122,7 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const verifyToken = async (token: string) => {
     try {
-      const response = await axios.get('/api/auth/me', {
+      const response = await api.get('/auth/me', {
         headers: { Authorization: `Bearer ${token}` }
       })
       // 서버에서 검증된 사용자 정보로 업데이트
@@ -141,13 +140,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signIn = async (email: string, password: string, skipRedirect?: boolean): Promise<User | null> => {
     try {
-      const response = await axios.post('/api/auth/signin', { email, password }, { timeout: 15000 })
+      const response = await api.post('/auth/signin', { email, password }, { timeout: 15000 })
       const { access_token, user: userData } = response.data
       let verifiedUser = userData
 
       // 로그인 직후에도 /me 기준 is_premium을 즉시 동기화
       try {
-        const meResponse = await axios.get('/api/auth/me', {
+        const meResponse = await api.get('/auth/me', {
           headers: { Authorization: `Bearer ${access_token}` }
         })
         verifiedUser = meResponse.data
@@ -185,7 +184,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signUp = async (email: string, password: string, name?: string): Promise<User | null> => {
     try {
-      const response = await axios.post('/api/auth/signup', { email, password, name })
+      const response = await api.post('/auth/signup', { email, password, name })
       const { access_token, user: userData } = response.data
       
       setAccessToken(access_token)
@@ -209,7 +208,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const redirectTo = isCapacitorApp()
         ? 'https://uni2road.com/oauth-callback'
         : `${window.location.origin}/chat`
-      const response = await axios.post('/api/auth/oauth/url', {
+      const response = await api.post('/auth/oauth/url', {
         provider: 'google',
         redirect_to: redirectTo
       })
@@ -235,7 +234,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const redirectTo = isCapacitorApp()
         ? 'https://uni2road.com/oauth-callback'
         : `${window.location.origin}/chat`
-      const response = await axios.post('/api/auth/oauth/url', {
+      const response = await api.post('/auth/oauth/url', {
         provider: 'kakao',
         redirect_to: redirectTo
       })
@@ -275,7 +274,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     try {
-      await axios.post('/api/auth/signout')
+      await api.post('/auth/signout')
     } catch (e) {
       console.error('로그아웃 오류:', e)
     }

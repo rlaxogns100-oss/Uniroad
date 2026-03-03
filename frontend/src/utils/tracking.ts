@@ -125,17 +125,20 @@ export async function trackPageView(
     
     // 토큰 가져오기 (있으면)
     const token = localStorage.getItem('access_token')
-    
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 4000)
     await fetch(`${API_BASE}/api/tracking/page-view`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(token && { 'Authorization': `Bearer ${token}` })
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
+      signal: controller.signal
     })
-  } catch (error) {
-    console.error('페이지 뷰 추적 실패:', error)
+    clearTimeout(timeoutId)
+  } catch {
+    // 추적 실패는 무시 (네트워크/서버 미연결 시 앱 사용에 영향 없음)
   }
 }
 
@@ -165,17 +168,20 @@ export async function trackUserAction(
     
     // 토큰 가져오기 (있으면)
     const token = localStorage.getItem('access_token')
-    
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 4000)
     await fetch(`${API_BASE}/api/tracking/user-action`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         ...(token && { 'Authorization': `Bearer ${token}` })
       },
-      body: JSON.stringify(data)
+      body: JSON.stringify(data),
+      signal: controller.signal
     })
-  } catch (error) {
-    console.error('사용자 행동 추적 실패:', error)
+    clearTimeout(timeoutId)
+  } catch {
+    // 추적 실패는 무시 (네트워크/서버 미연결 시 앱 사용에 영향 없음)
   }
 }
 

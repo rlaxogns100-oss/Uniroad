@@ -64,6 +64,24 @@ const fetchWithAuthRetry = async (
   return response
 }
 
+const normalizeSseText = (text: string): string => text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+
+const extractSseDataPayload = (block: string): string | null => {
+  const dataLines = block
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line.startsWith('data:'))
+  if (dataLines.length === 0) return null
+  return dataLines.map((line) => line.slice(5).trimStart()).join('\n')
+}
+
+const splitSseBlocks = (buffer: string): { blocks: string[]; remainder: string } => {
+  const normalized = normalizeSseText(buffer)
+  const parts = normalized.split('\n\n')
+  const remainder = parts.pop() || ''
+  return { blocks: parts, remainder }
+}
+
 export const api = axios.create({
   baseURL: API_BASE_URL,
   headers: {
@@ -72,12 +90,19 @@ export const api = axios.create({
   timeout: 180000, // 180초 (멀티에이전트 파이프라인은 시간이 더 걸릴 수 있음)
 })
 
+// iOS/Android WebView에서는 런타임에 API base가 달라질 수 있어 요청마다 재계산한다.
+api.interceptors.request.use((config) => {
+  config.baseURL = getEffectiveApiBaseUrl()
+  return config
+})
+
 export interface ChatRequest {
   message: string
   session_id?: string
   thinking?: boolean  // Thinking 모드 활성화 여부
   score_id?: string
   use_school_record?: boolean  // 생기부 컨텍스트 사용 여부
+  use_linked_naesin?: boolean // '@내신 성적' 선택 시 연동 내신 카드 강제
 }
 
 // 멀티에이전트 응답 타입
@@ -162,8 +187,16 @@ export interface ScoreReviewRequiredEvent {
   pending_id: string
   title_auto: string
   scores: Record<string, any>
-  constraints: Record<string, any>
-  actions: string[]
+  constraints?: Record<string, any>
+  actions?: string[]
+  /** true면 연동된 모의고사 성적 카드 확인 → continue-after-score-confirm 호출 */
+  use_existing_score_id?: boolean
+}
+
+export interface SchoolGradeSavedEvent {
+  overall_average: number
+  core_average: number
+  semester_averages?: Record<string, { overall: string; core: string }>
 }
 
 export interface ScoreSetSuggestItem {
@@ -175,6 +208,7 @@ export interface ScoreSetItem {
   id: string
   name: string
   scores: Record<string, any>
+  created_at?: string
   updated_at?: string
 }
 
@@ -220,26 +254,34 @@ const sendMessageNonStream = async (
   onError?: (error: string) => void,
   abortSignal?: AbortSignal,
   token?: string,
-  useSchoolRecord?: boolean
+  useSchoolRecord?: boolean,
+  thinking?: boolean,
+  onScoreReviewRequired?: (payload: ScoreReviewRequiredEvent) => void,
+  scoreId?: string,
+  onSchoolGradeSaved?: (payload: SchoolGradeSavedEvent) => void,
+  useLinkedNaesin?: boolean,
+  skipScoreReview?: boolean,
 ): Promise<void> => {
   const apiUrl = getEffectiveApiBaseUrl()
-  console.log('[sendMessageNonStream] Starting non-streaming request')
+  console.log('[sendMessageNonStream] Starting non-streaming v2 request')
   console.log('API_BASE_URL:', apiUrl)
   
   try {
     onLog('🔍 질문을 분석하는 중...')
-    
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-    }
-    
-    const response = await fetchWithAuthRetry(`${apiUrl}/chat/`, {
+
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    // iOS WebView 등 ReadableStream 이슈 환경에서도 동일한 v2 이벤트를 텍스트로 파싱해 처리
+    const response = await fetchWithAuthRetry(`${apiUrl}/chat/v2/stream`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
         message,
         session_id: sessionId,
+        thinking: thinking || false,
+        score_id: scoreId || null,
+        skip_score_review: !!scoreId || !!skipScoreReview,
         use_school_record: useSchoolRecord || false,
+        use_linked_naesin: useLinkedNaesin || false,
       }),
       signal: abortSignal,
     }, apiUrl, token)
@@ -271,32 +313,60 @@ const sendMessageNonStream = async (
       return
     }
 
-    const rawText = await response.text()
-    let data: any
-    try {
-      data = JSON.parse(rawText)
-    } catch (parseError) {
-      console.error('[sendMessageNonStream] Response is not JSON. URL:', apiUrl, 'Preview:', rawText.slice(0, 200))
-      onError?.('서버 응답 형식 오류입니다. API 주소를 확인해 주세요.')
-      return
+    const text = await response.text()
+    let fullResponse = ''
+    let finalData: any = null
+
+    const blocks = normalizeSseText(text).split('\n\n')
+    for (const block of blocks) {
+      const payload = extractSseDataPayload(block)
+      if (!payload) continue
+      try {
+        const event = JSON.parse(payload)
+        if (event.type === 'status') {
+          const logMessage = event.detail
+            ? `${event.message || ''}|||${JSON.stringify({ step: event.step, detail: event.detail })}`
+            : event.message || ''
+          onLog(logMessage)
+        } else if (event.type === 'log') {
+          onLog(event.content || '')
+        } else if (event.type === 'chunk') {
+          fullResponse += event.text || ''
+        } else if (event.type === 'score_review_required') {
+          onScoreReviewRequired?.(event as ScoreReviewRequiredEvent)
+          return
+        } else if (event.type === 'school_grade_saved') {
+          onSchoolGradeSaved?.(event as SchoolGradeSavedEvent)
+          return
+        } else if (event.type === 'done') {
+          finalData = event
+        } else if (event.type === 'error') {
+          onError?.(event.message || '알 수 없는 오류')
+          return
+        }
+      } catch (e) {
+        console.warn('[sendMessageNonStream] SSE 파싱 오류:', e)
+      }
     }
-    console.log('[sendMessageNonStream] Response received:', data)
+
     onLog('✨ 답변 완료!')
-    
     const chatResponse: ChatResponse = {
-      response: data.response || '',
-      raw_answer: data.response || '',
-      sources: data.sources || [],
-      source_urls: data.source_urls || [],
-      used_chunks: data.used_chunks || [],
-      router_output: data.router_output,
-      function_results: data.function_results,
-      orchestration_result: data.orchestration_result,
-      sub_agent_results: data.sub_agent_results,
-      metadata: data.metadata
+      response: finalData?.response || fullResponse,
+      raw_answer: finalData?.response || fullResponse,
+      sources: finalData?.sources || [],
+      source_urls: finalData?.source_urls || [],
+      used_chunks: finalData?.used_chunks || [],
+      router_output: finalData?.router_output,
+      function_results: finalData?.function_results,
+      orchestration_result: undefined,
+      sub_agent_results: undefined,
+      metadata: {
+        timing: finalData?.timing,
+        pipeline_time: finalData?.pipeline_time,
+      },
+      require_login: finalData?.require_login || false,
+      score_id: finalData?.score_id,
     }
-    
-    console.log('[sendMessageNonStream] Calling onResult with:', chatResponse)
     onResult(chatResponse)
     
   } catch (error: any) {
@@ -323,7 +393,10 @@ export const sendMessageStream = async (
   thinking?: boolean,  // Thinking 모드
   onScoreReviewRequired?: (payload: ScoreReviewRequiredEvent) => void,
   scoreId?: string,
-  useSchoolRecord?: boolean
+  useSchoolRecord?: boolean,
+  onSchoolGradeSaved?: (payload: SchoolGradeSavedEvent) => void,
+  useLinkedNaesin?: boolean,
+  skipScoreReview?: boolean,
 ): Promise<void> => {
   const IS_CAPACITOR_APP = isCapacitorApp()
   console.log('[sendMessageStream] IS_CAPACITOR_APP:', IS_CAPACITOR_APP)
@@ -331,7 +404,22 @@ export const sendMessageStream = async (
   // iOS WebView에서 SSE ReadableStream이 제대로 동작하지 않아 비스트리밍 API 사용
   if (IS_CAPACITOR_APP) {
     console.log('[sendMessageStream] Using non-streaming API for iOS')
-    return sendMessageNonStream(message, sessionId, onLog, onResult, onError, abortSignal, token, useSchoolRecord)
+    return sendMessageNonStream(
+      message,
+      sessionId,
+      onLog,
+      onResult,
+      onError,
+      abortSignal,
+      token,
+      useSchoolRecord,
+      thinking,
+      onScoreReviewRequired,
+      scoreId,
+      onSchoolGradeSaved,
+      useLinkedNaesin,
+      skipScoreReview,
+    )
   }
   
   console.log('[sendMessageStream] Using streaming API for web')
@@ -353,7 +441,9 @@ export const sendMessageStream = async (
         session_id: sessionId,
         thinking: thinking || false,
         score_id: scoreId || null,
+        skip_score_review: !!scoreId || !!skipScoreReview,
         use_school_record: useSchoolRecord || false,
+        use_linked_naesin: useLinkedNaesin || false,
       }),
       signal: abortSignal,
     }, API_BASE_URL, token)
@@ -406,16 +496,15 @@ export const sendMessageStream = async (
 
       buffer += decoder.decode(value, { stream: true })
       
-      // SSE 메시지 파싱 (data: {...}\n\n 형식)
-      const lines = buffer.split('\n\n')
-      buffer = lines.pop() || ''  // 마지막 불완전한 청크는 버퍼에 유지
+      const { blocks, remainder } = splitSseBlocks(buffer)
+      buffer = remainder
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        
+      for (const block of blocks) {
+        const payload = extractSseDataPayload(block)
+        if (!payload) continue
+
         try {
-          const jsonStr = line.slice(6)  // 'data: ' 제거
-          const event = JSON.parse(jsonStr)
+          const event = JSON.parse(payload)
           
           if (event.type === 'status') {
             // 상태 업데이트 - detail 정보를 JSON으로 직렬화하여 전달
@@ -443,6 +532,9 @@ export const sendMessageStream = async (
           } else if (event.type === 'score_review_required') {
             onScoreReviewRequired?.(event as ScoreReviewRequiredEvent)
             return
+          } else if (event.type === 'school_grade_saved') {
+            onSchoolGradeSaved?.(event as SchoolGradeSavedEvent)
+            return
           } else if (event.type === 'done') {
             // 완료
             finalData = event
@@ -452,7 +544,7 @@ export const sendMessageStream = async (
             return
           }
         } catch (e) {
-          console.warn('SSE 파싱 오류:', e, line)
+          console.warn('SSE 파싱 오류:', e, payload)
         }
       }
     }
@@ -490,6 +582,332 @@ export const sendMessageStream = async (
   }
 }
 
+/** 내신 카드에서 수정한 성적 (확인 시 서버에 반영) */
+export interface NaesinGradeSummary {
+  overallAverage: string
+  coreAverage: string
+  semesterAverages: Record<string, { overall: string; core: string }>
+}
+
+/** 내신 카드 '확인' 후 답변 생성만 스트리밍 (사용량 차감 없음) */
+export const sendContinueAfterNaesin = async (
+  sessionId: string,
+  onLog: (log: string) => void,
+  onResult: (result: ChatResponse) => void,
+  onError?: (error: string) => void,
+  abortSignal?: AbortSignal,
+  onChunk?: (chunk: string) => void,
+  scoreId?: string,
+  token?: string,
+  gradeSummary?: NaesinGradeSummary
+): Promise<void> => {
+  try {
+    onLog('답변을 생성하는 중...')
+    const apiUrl = getEffectiveApiBaseUrl()
+    const body: { session_id: string; score_id: string | null; grade_summary?: NaesinGradeSummary } = {
+      session_id: sessionId,
+      score_id: scoreId || null,
+    }
+    if (gradeSummary) {
+      body.grade_summary = gradeSummary
+    }
+    const response = await fetchWithAuthRetry(`${apiUrl}/chat/v2/stream/continue-after-naesin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: abortSignal,
+    }, apiUrl, token)
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      if (response.status === 401) {
+        onError?.(AUTH_REQUIRED_ERROR)
+        return
+      }
+      try {
+        const parsed = JSON.parse(errorText)
+        onError?.(parsed.detail || errorText)
+      } catch {
+        onError?.(errorText || '요청에 실패했습니다.')
+      }
+      return
+    }
+
+    if (isCapacitorApp()) {
+      const text = await response.text()
+      let fullResponse = ''
+      let finalData: any = null
+
+      const blocks = normalizeSseText(text).split('\n\n')
+      for (const block of blocks) {
+        const payload = extractSseDataPayload(block)
+        if (!payload) continue
+        try {
+          const event = JSON.parse(payload)
+          if (event.type === 'status') {
+            const logMessage = event.detail
+              ? `${event.message || ''}|||${JSON.stringify({ step: event.step, detail: event.detail })}`
+              : event.message || ''
+            onLog(logMessage)
+          } else if (event.type === 'chunk') {
+            const chunkText = event.text || ''
+            fullResponse += chunkText
+            onChunk?.(chunkText)
+          } else if (event.type === 'done') {
+            finalData = event
+            onLog('✨ 답변 완료!')
+          } else if (event.type === 'error') {
+            onError?.(event.message || '알 수 없는 오류')
+            return
+          }
+        } catch (e) {
+          console.warn('SSE 파싱 오류:', e, payload)
+        }
+      }
+
+      const chatResponse: ChatResponse = {
+        response: finalData?.response || fullResponse,
+        raw_answer: finalData?.response || fullResponse,
+        sources: finalData?.sources || [],
+        source_urls: finalData?.source_urls || [],
+        used_chunks: finalData?.used_chunks || [],
+        router_output: finalData?.router_output,
+        function_results: finalData?.function_results,
+        orchestration_result: undefined,
+        sub_agent_results: undefined,
+        metadata: { timing: finalData?.timing, pipeline_time: finalData?.pipeline_time },
+        require_login: false,
+        score_id: finalData?.score_id,
+      }
+      onResult(chatResponse)
+      return
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) {
+      onError?.('스트리밍을 지원하지 않습니다')
+      return
+    }
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let fullResponse = ''
+    let finalData: any = null
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const { blocks, remainder } = splitSseBlocks(buffer)
+      buffer = remainder
+
+      for (const block of blocks) {
+        const payload = extractSseDataPayload(block)
+        if (!payload) continue
+        try {
+          const event = JSON.parse(payload)
+          if (event.type === 'status') {
+            const logMessage = event.detail
+              ? `${event.message || ''}|||${JSON.stringify({ step: event.step, detail: event.detail })}`
+              : event.message || ''
+            onLog(logMessage)
+          } else if (event.type === 'chunk') {
+            const chunkText = event.text || ''
+            fullResponse += chunkText
+            onChunk?.(chunkText)
+          } else if (event.type === 'done') {
+            finalData = event
+            onLog('✨ 답변 완료!')
+          } else if (event.type === 'error') {
+            onError?.(event.message || '알 수 없는 오류')
+            return
+          }
+        } catch (e) {
+          console.warn('SSE 파싱 오류:', e, payload)
+        }
+      }
+    }
+
+    const chatResponse: ChatResponse = {
+      response: finalData?.response || fullResponse,
+      raw_answer: finalData?.response || fullResponse,
+      sources: finalData?.sources || [],
+      source_urls: finalData?.source_urls || [],
+      used_chunks: finalData?.used_chunks || [],
+      router_output: finalData?.router_output,
+      function_results: finalData?.function_results,
+      orchestration_result: undefined,
+      sub_agent_results: undefined,
+      metadata: { timing: finalData?.timing, pipeline_time: finalData?.pipeline_time },
+      require_login: false,
+      score_id: finalData?.score_id,
+    }
+    onResult(chatResponse)
+  } catch (error: any) {
+    if (error?.name === 'AbortError') return
+    console.error('continue-after-naesin 오류:', error)
+    onError?.(error?.message || '네트워크 오류가 발생했습니다')
+  }
+}
+
+/** 모의고사 성적 카드 '확인' 후 답변 생성만 스트리밍 (사용량 차감 없음) */
+export const sendContinueAfterScoreConfirm = async (
+  sessionId: string,
+  scoreId: string,
+  onLog: (log: string) => void,
+  onResult: (result: ChatResponse) => void,
+  onError?: (error: string) => void,
+  abortSignal?: AbortSignal,
+  onChunk?: (chunk: string) => void,
+  token?: string
+): Promise<void> => {
+  try {
+    onLog('답변을 생성하는 중...')
+    const apiUrl = getEffectiveApiBaseUrl()
+    const response = await fetchWithAuthRetry(
+      `${apiUrl}/chat/v2/stream/continue-after-score-confirm`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId, score_id: scoreId }),
+        signal: abortSignal,
+      },
+      apiUrl,
+      token
+    )
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      if (response.status === 401) {
+        onError?.(AUTH_REQUIRED_ERROR)
+        return
+      }
+      try {
+        const parsed = JSON.parse(errorText)
+        onError?.(parsed.detail || errorText)
+      } catch {
+        onError?.(errorText || '요청에 실패했습니다.')
+      }
+      return
+    }
+
+    if (isCapacitorApp()) {
+      const text = await response.text()
+      let fullResponse = ''
+      let finalData: any = null
+
+      const blocks = normalizeSseText(text).split('\n\n')
+      for (const block of blocks) {
+        const payload = extractSseDataPayload(block)
+        if (!payload) continue
+        try {
+          const event = JSON.parse(payload)
+          if (event.type === 'status') {
+            const logMessage = event.detail
+              ? `${event.message || ''}|||${JSON.stringify({ step: event.step, detail: event.detail })}`
+              : event.message || ''
+            onLog(logMessage)
+          } else if (event.type === 'chunk') {
+            const chunkText = event.text || ''
+            fullResponse += chunkText
+            onChunk?.(chunkText)
+          } else if (event.type === 'done') {
+            finalData = event
+            onLog('✨ 답변 완료!')
+          } else if (event.type === 'error') {
+            onError?.(event.message || '알 수 없는 오류')
+            return
+          }
+        } catch (e) {
+          console.warn('SSE 파싱 오류:', e, payload)
+        }
+      }
+
+      const chatResponse: ChatResponse = {
+        response: finalData?.response || fullResponse,
+        raw_answer: finalData?.response || fullResponse,
+        sources: finalData?.sources || [],
+        source_urls: finalData?.source_urls || [],
+        used_chunks: finalData?.used_chunks || [],
+        router_output: finalData?.router_output,
+        function_results: finalData?.function_results,
+        orchestration_result: undefined,
+        sub_agent_results: undefined,
+        metadata: { timing: finalData?.timing, pipeline_time: finalData?.pipeline_time },
+        require_login: false,
+        score_id: finalData?.score_id,
+      }
+      onResult(chatResponse)
+      return
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) {
+      onError?.('스트리밍을 지원하지 않습니다')
+      return
+    }
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let fullResponse = ''
+    let finalData: any = null
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const { blocks, remainder } = splitSseBlocks(buffer)
+      buffer = remainder
+
+      for (const block of blocks) {
+        const payload = extractSseDataPayload(block)
+        if (!payload) continue
+        try {
+          const event = JSON.parse(payload)
+          if (event.type === 'status') {
+            const logMessage = event.detail
+              ? `${event.message || ''}|||${JSON.stringify({ step: event.step, detail: event.detail })}`
+              : event.message || ''
+            onLog(logMessage)
+          } else if (event.type === 'chunk') {
+            const chunkText = event.text || ''
+            fullResponse += chunkText
+            onChunk?.(chunkText)
+          } else if (event.type === 'done') {
+            finalData = event
+            onLog('✨ 답변 완료!')
+          } else if (event.type === 'error') {
+            onError?.(event.message || '알 수 없는 오류')
+            return
+          }
+        } catch (e) {
+          console.warn('SSE 파싱 오류:', e, payload)
+        }
+      }
+    }
+
+    const chatResponse: ChatResponse = {
+      response: finalData?.response || fullResponse,
+      raw_answer: finalData?.response || fullResponse,
+      sources: finalData?.sources || [],
+      source_urls: finalData?.source_urls || [],
+      used_chunks: finalData?.used_chunks || [],
+      router_output: finalData?.router_output,
+      function_results: finalData?.function_results,
+      orchestration_result: undefined,
+      sub_agent_results: undefined,
+      metadata: { timing: finalData?.timing, pipeline_time: finalData?.pipeline_time },
+      require_login: false,
+      score_id: finalData?.score_id,
+    }
+    onResult(chatResponse)
+  } catch (error: any) {
+    if (error?.name === 'AbortError') return
+    console.error('continue-after-score-confirm 오류:', error)
+    onError?.(error?.message || '네트워크 오류가 발생했습니다')
+  }
+}
+
 // 비스트리밍 이미지 채팅 API (iOS WebView용)
 const sendMessageNonStreamWithImage = async (
   message: string,
@@ -500,7 +918,9 @@ const sendMessageNonStreamWithImage = async (
   onError?: (error: string) => void,
   abortSignal?: AbortSignal,
   token?: string,
-  useSchoolRecord?: boolean
+  useSchoolRecord?: boolean,
+  useLinkedNaesin?: boolean,
+  skipScoreReview?: boolean,
 ): Promise<void> => {
   try {
     onLog('🖼️ 이미지를 분석하는 중...')
@@ -510,6 +930,8 @@ const sendMessageNonStreamWithImage = async (
     formData.append('session_id', sessionId)
     formData.append('image', image)
     formData.append('use_school_record', useSchoolRecord ? 'true' : 'false')
+    formData.append('use_linked_naesin', useLinkedNaesin ? 'true' : 'false')
+    formData.append('skip_score_review', skipScoreReview ? 'true' : 'false')
     
     const headers: Record<string, string> = {}
     
@@ -560,12 +982,12 @@ const sendMessageNonStreamWithImage = async (
     let fullResponse = ''
     let finalData: any = null
     
-    const lines = text.split('\n\n')
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue
+    const blocks = normalizeSseText(text).split('\n\n')
+    for (const block of blocks) {
+      const payload = extractSseDataPayload(block)
+      if (!payload) continue
       try {
-        const jsonStr = line.slice(6)
-        const event = JSON.parse(jsonStr)
+        const event = JSON.parse(payload)
         if (event.type === 'chunk') {
           fullResponse += event.text || ''
         } else if (event.type === 'done') {
@@ -617,13 +1039,16 @@ export const sendMessageStreamWithImage = async (
   token?: string,  // 인증 토큰
   onScoreReviewRequired?: (payload: ScoreReviewRequiredEvent) => void,
   scoreId?: string,
-  useSchoolRecord?: boolean
+  useSchoolRecord?: boolean,
+  onSchoolGradeSaved?: (payload: SchoolGradeSavedEvent) => void,
+  useLinkedNaesin?: boolean,
+  skipScoreReview?: boolean,
 ): Promise<void> => {
   const IS_CAPACITOR_APP = isCapacitorApp()
   
   // iOS WebView에서 SSE ReadableStream이 제대로 동작하지 않아 비스트리밍 API 사용
   if (IS_CAPACITOR_APP) {
-    return sendMessageNonStreamWithImage(message, sessionId, image, onLog, onResult, onError, abortSignal, token, useSchoolRecord)
+    return sendMessageNonStreamWithImage(message, sessionId, image, onLog, onResult, onError, abortSignal, token, useSchoolRecord, useLinkedNaesin, skipScoreReview)
   }
   
   try {
@@ -635,6 +1060,8 @@ export const sendMessageStreamWithImage = async (
     formData.append('session_id', sessionId)
     formData.append('image', image)
     formData.append('use_school_record', useSchoolRecord ? 'true' : 'false')
+    formData.append('use_linked_naesin', useLinkedNaesin ? 'true' : 'false')
+    formData.append('skip_score_review', skipScoreReview ? 'true' : 'false')
     if (scoreId) {
       formData.append('score_id', scoreId)
     }
@@ -703,16 +1130,15 @@ export const sendMessageStreamWithImage = async (
 
       buffer += decoder.decode(value, { stream: true })
       
-      // SSE 메시지 파싱 (data: {...}\n\n 형식)
-      const lines = buffer.split('\n\n')
-      buffer = lines.pop() || ''
+      const { blocks, remainder } = splitSseBlocks(buffer)
+      buffer = remainder
 
-      for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        
+      for (const block of blocks) {
+        const payload = extractSseDataPayload(block)
+        if (!payload) continue
+
         try {
-          const jsonStr = line.slice(6)
-          const event = JSON.parse(jsonStr)
+          const event = JSON.parse(payload)
           
           if (event.type === 'status') {
             // 상태 업데이트 - detail 정보를 JSON으로 직렬화하여 전달
@@ -727,6 +1153,9 @@ export const sendMessageStreamWithImage = async (
           } else if (event.type === 'score_review_required') {
             onScoreReviewRequired?.(event as ScoreReviewRequiredEvent)
             return
+          } else if (event.type === 'school_grade_saved') {
+            onSchoolGradeSaved?.(event as SchoolGradeSavedEvent)
+            return
           } else if (event.type === 'done') {
             finalData = event
             onLog('✨ 이미지 분석 완료!')
@@ -735,7 +1164,7 @@ export const sendMessageStreamWithImage = async (
             return
           }
         } catch (e) {
-          console.warn('SSE 파싱 오류:', e, line)
+          console.warn('SSE 파싱 오류:', e, payload)
         }
       }
     }
@@ -883,6 +1312,7 @@ export interface UserProfile {
   created_at: string
   updated_at: string
   image_url?: string | null
+  banner_image_url?: string | null
   is_premium?: boolean
   display_name?: string | null
   bio?: string | null
@@ -897,10 +1327,10 @@ export const getProfile = async (token: string): Promise<UserProfile> => {
   return response.data
 }
 
-// 프로필 수정 (image_url, display_name, bio, description 등)
+// 프로필 수정 (image_url, banner_image_url, display_name, bio, description 등)
 export const updateProfile = async (
   token: string,
-  payload: { image_url?: string; display_name?: string; bio?: string; description?: string }
+  payload: { image_url?: string; banner_image_url?: string; display_name?: string; bio?: string; description?: string }
 ): Promise<UserProfile> => {
   const response = await api.patch<UserProfile>('/profile/me', payload, {
     headers: { Authorization: `Bearer ${token}` }
@@ -912,7 +1342,7 @@ export const updateProfile = async (
 export const uploadProfileAvatar = async (token: string, file: File): Promise<UserProfile> => {
   const form = new FormData()
   form.append('file', file)
-  const apiUrl = API_BASE ? `${API_BASE}/api` : '/api'
+  const apiUrl = getEffectiveApiBaseUrl()
   const res = await fetch(`${apiUrl}/profile/me/avatar`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
@@ -923,6 +1353,40 @@ export const uploadProfileAvatar = async (token: string, file: File): Promise<Us
     throw new Error(err.detail || '업로드 실패')
   }
   return res.json()
+}
+
+// 프로필 배경 이미지 업로드 (user_profiles.metadata.banner_image_url 에 저장)
+export const uploadProfileBanner = async (token: string, file: File): Promise<UserProfile> => {
+  const form = new FormData()
+  form.append('file', file)
+  const apiUrl = getEffectiveApiBaseUrl()
+  const res = await fetch(`${apiUrl}/profile/me/banner`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }))
+    throw new Error(err.detail || '업로드 실패')
+  }
+  return res.json()
+}
+
+// 생기부 연동 상태 (연동 완료 개수 표시용)
+export const getSchoolRecordStatus = async (token: string): Promise<{ linked: boolean }> => {
+  const response = await api.get<{ linked: boolean }>('/school-record/status', {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return response.data
+}
+
+export const getMySchoolGradeInput = async (
+  token: string
+): Promise<{ school_grade_input: Record<string, any> }> => {
+  const response = await api.get<{ school_grade_input: Record<string, any> }>('/profile/me/school-grade-input', {
+    headers: { Authorization: `Bearer ${token}` }
+  })
+  return response.data || { school_grade_input: {} }
 }
 
 // 프로필 저장/수정
@@ -1048,11 +1512,17 @@ export const listScoreSets = async (
   sessionId: string,
   token?: string
 ): Promise<ScoreSetItem[]> => {
-  const response = await api.get('/chat/v2/score-sets', {
-    params: { session_id: sessionId },
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
-  })
-  return response.data?.items || []
+  try {
+    const response = await api.get('/chat/v2/score-sets', {
+      params: { session_id: sessionId },
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    })
+    return response.data?.items || []
+  } catch (e: any) {
+    // 모바일 등에서 경로 404 시 빈 목록으로 처리해 "Not Found" 문구 노출 방지
+    if (e?.response?.status === 404) return []
+    throw e
+  }
 }
 
 export const createScoreSet = async (

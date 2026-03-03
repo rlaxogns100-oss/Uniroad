@@ -49,11 +49,27 @@ async def run_orchestration_agent(
         # function_calls 추출
         function_calls = result.get("function_calls", [])
         if score_id:
-            for call in function_calls:
+            # 모의고사 score_id가 있으면 consult_susi는 제거하고 consult_jungsi로 강제 전환
+            filtered_calls = [c for c in function_calls if c.get("function") != "consult_susi"]
+            has_jungsi = any(c.get("function") == "consult_jungsi" for c in filtered_calls)
+            if not has_jungsi:
+                susi_call = next((c for c in function_calls if c.get("function") == "consult_susi"), None)
+                susi_params = susi_call.get("params", {}) if susi_call else {}
+                filtered_calls.append({
+                    "function": "consult_jungsi",
+                    "params": {
+                        "university": susi_params.get("university", []),
+                        "department": susi_params.get("department", []),
+                        "range": susi_params.get("range", []),
+                        "score_id": score_id,
+                    }
+                })
+            for call in filtered_calls:
                 if call.get("function") == "consult_jungsi":
                     params = call.setdefault("params", {})
                     params.pop("j_scores", None)
                     params["score_id"] = score_id
+            function_calls = filtered_calls
         print(f"   ✅ Router 완료: {len(function_calls)}개 함수 호출 ({timing['router']}ms)")
         
         # 2. function_calls 실행 (RAG 검색)
@@ -172,11 +188,29 @@ def run_orchestration_agent_stream(
         
         function_calls = result.get("function_calls", [])
         if score_id:
-            for call in function_calls:
+            # 모의고사 score_id가 있으면 consult_susi는 제거하고 consult_jungsi로 강제 전환
+            filtered_calls = [c for c in function_calls if c.get("function") != "consult_susi"]
+            has_jungsi = any(c.get("function") == "consult_jungsi" for c in filtered_calls)
+            if not has_jungsi:
+                # 기존 consult_susi 파라미터에서 대학/학과/범위 추출
+                susi_call = next((c for c in function_calls if c.get("function") == "consult_susi"), None)
+                susi_params = susi_call.get("params", {}) if susi_call else {}
+                filtered_calls.append({
+                    "function": "consult_jungsi",
+                    "params": {
+                        "university": susi_params.get("university", []),
+                        "department": susi_params.get("department", []),
+                        "range": susi_params.get("range", []),
+                        "score_id": score_id,
+                    }
+                })
+            # consult_jungsi에 score_id 주입
+            for call in filtered_calls:
                 if call.get("function") == "consult_jungsi":
                     params = call.setdefault("params", {})
                     params.pop("j_scores", None)
                     params["score_id"] = score_id
+            function_calls = filtered_calls
         
         # Router 완료 시 검색 쿼리 상세 정보 포함
         queries_detail = []

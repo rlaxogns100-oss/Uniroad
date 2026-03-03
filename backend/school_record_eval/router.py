@@ -307,12 +307,23 @@ async def upload_school_record_pdf(
     started_at = time.perf_counter()
 
     filename = (file.filename or "").strip()
-    if not filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="PDF 파일만 업로드 가능합니다.")
+    content_type = (file.content_type or "").strip().lower()
 
     file_bytes = await file.read()
     if not file_bytes:
         raise HTTPException(status_code=400, detail="빈 파일입니다.")
+    header_bytes = file_bytes[:1024]
+    has_pdf_signature = b"%PDF-" in header_bytes
+    has_pdf_extension = filename.lower().endswith(".pdf")
+    has_pdf_mime = content_type in ("application/pdf", "application/x-pdf")
+    if not (has_pdf_extension or has_pdf_mime or has_pdf_signature):
+        raise HTTPException(status_code=400, detail="PDF 파일만 업로드 가능합니다.")
+
+    if not filename:
+        filename = f"school_record_{int(time.time())}.pdf"
+    elif not filename.lower().endswith(".pdf"):
+        filename = f"{filename}.pdf"
+
     if len(file_bytes) > MAX_PDF_SIZE:
         raise HTTPException(status_code=400, detail=f"파일 크기는 {MAX_PDF_SIZE_MB}MB 이하여야 합니다.")
     file_hash = _build_pdf_file_hash(file_bytes)
@@ -368,7 +379,7 @@ async def upload_school_record_pdf(
     if len(extracted.strip()) < MIN_EXTRACTED_TEXT_CHARS:
         raise HTTPException(
             status_code=400,
-            detail="텍스트를 거의 추출하지 못했습니다. 텍스트 선택 가능한 PDF이거나 선명한 스캔본인지 확인해 주세요.",
+            detail="스캔본(이미지 PDF)은 현재 지원하지 않습니다. 정부24 또는 카카오톡 전자문서지갑에서 저장한 원본 PDF를 업로드해 주세요.",
         )
 
     parse_started_at = time.perf_counter()

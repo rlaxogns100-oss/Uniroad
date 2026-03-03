@@ -23,6 +23,8 @@ from services.multi_agent.router_agent import route_query
 from services.score_review import (
     run_router_and_profile_parallel,
     resolve_score_id_from_message,
+    extract_naesin_candidate,
+    build_school_grade_input_from_card,
 )
 from utils.school_record_context import build_school_record_context_text
 from school_record_eval.report_context import build_school_record_report_context_text
@@ -159,7 +161,9 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = "default"
     thinking: Optional[bool] = False  # Thinking 모드 활성화 여부
     score_id: Optional[str] = None
+    skip_score_review: Optional[bool] = False  # True면 연동된 성적로 바로 답변(성적 확인 카드 생략)
     use_school_record: Optional[bool] = False  # 생기부 컨텍스트 사용 여부
+    use_linked_naesin: Optional[bool] = False  # '@내신 성적' 명시 선택 시 연동 내신 카드 강제
 
 
 class ChatResponse(BaseModel):
@@ -187,6 +191,20 @@ class ScoreReviewApproveRequest(BaseModel):
 class ScoreReviewSkipSessionRequest(BaseModel):
     pending_id: Optional[str] = None
     session_id: str
+
+
+class ContinueAfterNaesinRequest(BaseModel):
+    """내신 카드 확인 후 답변 생성 요청 (사용량 차감 없음)"""
+    session_id: str
+    score_id: Optional[str] = None
+    # 카드에서 수정한 성적 반영 (있으면 프로필 업데이트 후 답변 생성)
+    grade_summary: Optional[Dict[str, Any]] = None  # overall_average, core_average, semester_averages
+
+
+class ContinueAfterScoreConfirmRequest(BaseModel):
+    """모의고사 성적 카드 확인 후 답변 생성 요청 (사용량 차감 없음)"""
+    session_id: str
+    score_id: str
 
 
 class ScoreSetCreateRequest(BaseModel):
@@ -887,42 +905,71 @@ async def chat_stream_v2_with_image(
 위 이미지 분석 결과를 참고하여 사용자의 질문에 답변해주세요."""
 
             yield f"data: {json.dumps({'type': 'status', 'step': 'agent_start', 'message': '답변을 생성하는 중...'}, ensure_ascii=False)}\n\n"
-            
-            if not use_school_record:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
+
+            # 내신/수시 짧은 입력 감지 (score review 보다 먼저)
+            naesin = extract_naesin_candidate(enhanced_message)
+            if naesin.has_candidate and user_id:
+                _nloop = asyncio.new_event_loop()
+                asyncio.set_event_loop(_nloop)
                 try:
-                    gate = loop.run_until_complete(
-                        _prepare_score_review_gate(
-                            message=enhanced_message,
-                            history=history,
-                            user_id=user_id,
-                            session_id=session_id,
-                            score_id_override=active_score_id,
+                    _nloop.run_until_complete(
+                        supabase_service.update_user_profile_metadata(
+                            user_id, "school_grade_input", naesin.school_grade_input
                         )
                     )
                 finally:
-                    loop.close()
+                    _nloop.close()
+                naesin_event = {
+                    "type": "school_grade_saved",
+                    "overall_average": naesin.overall_average,
+                    "core_average": naesin.core_average,
+                    "semester_averages": naesin.school_grade_input.get("gradeSummary", {}).get("semesterAverages", {}),
+                }
+                yield f"data: {json.dumps(naesin_event, ensure_ascii=False)}\n\n"
+                # 확인 버튼을 눌러야 답변 생성 시작 → 여기서 스트림 종료, 히스토리에만 사용자 메시지 저장
+                history.append({"role": "user", "content": enhanced_message})
+                conversation_sessions[cache_key] = history[-20:]
+                return
 
-                gate_mode = gate.get("mode")
-                if gate_mode == "review":
-                    review_event = {
-                        "type": "score_review_required",
-                        "pending_id": gate.get("pending_id"),
-                        "title_auto": gate.get("title_auto"),
-                        "scores": gate.get("scores", {}),
-                        "constraints": {
-                            "title_max_length": 10,
-                            "standard_score": {"min": 0, "max": 200},
-                            "percentile": {"min": 0, "max": 100},
-                            "grade": {"min": 1, "max": 9},
-                        },
-                        "actions": ["edit", "approve", "skip_session"],
-                    }
-                    yield f"data: {json.dumps(review_event, ensure_ascii=False)}\n\n"
-                    return
-                if gate_mode in {"auto", "pass"}:
-                    active_score_id = gate.get("score_id") or active_score_id
+            if not use_school_record:
+                # 내신으로 이미 처리된 메시지는 정시 성적 리뷰 건너뜀 (내신 카드만 보이고 답변 계속)
+                if not (naesin.has_candidate and user_id):
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        gate = loop.run_until_complete(
+                            _prepare_score_review_gate(
+                                message=enhanced_message,
+                                history=history,
+                                user_id=user_id,
+                                session_id=session_id,
+                                score_id_override=active_score_id,
+                            )
+                        )
+                    finally:
+                        loop.close()
+
+                    gate_mode = gate.get("mode")
+                    if gate_mode == "review":
+                        review_event = {
+                            "type": "score_review_required",
+                            "pending_id": gate.get("pending_id"),
+                            "title_auto": gate.get("title_auto"),
+                            "scores": gate.get("scores", {}),
+                            "constraints": {
+                                "title_max_length": 10,
+                                "standard_score": {"min": 0, "max": 200},
+                                "percentile": {"min": 0, "max": 100},
+                                "grade": {"min": 1, "max": 9},
+                            },
+                            "actions": ["edit", "approve", "skip_session"],
+                        }
+                        yield f"data: {json.dumps(review_event, ensure_ascii=False)}\n\n"
+                        history.append({"role": "user", "content": enhanced_message})
+                        conversation_sessions[cache_key] = history[-20:]
+                        return
+                    if gate_mode in {"auto", "pass"}:
+                        active_score_id = gate.get("score_id") or active_score_id
 
             # 4단계: 멀티에이전트 or 생기부 전용 에이전트 실행
             event_iter = (
@@ -1120,8 +1167,75 @@ async def chat_stream_v2(
         source_urls = []
         used_chunks = []
         active_score_id = request.score_id
+        message_for_pipeline = message
         
         try:
+            # 연동 내신 카드 강제는 프론트에서 명시적으로 요청한 경우(use_linked_naesin)만 수행
+            _msg_raw = (message or "").strip()
+            _msg_norm = _msg_raw.replace("＠", "@")
+            _msg_lower = _msg_norm.replace("\n", " ").lower()
+            _msg_compact = _msg_lower.replace(" ", "")
+            _is_linked_naesin_query = bool(getattr(request, "use_linked_naesin", False))
+            if _is_linked_naesin_query:
+                if not user_id:
+                    yield f"data: {json.dumps({'type': 'error', 'message': '내신 연동 기반 추천은 로그인 후 사용할 수 있습니다.'}, ensure_ascii=False)}\n\n"
+                    return
+                _nloop_naesin = asyncio.new_event_loop()
+                asyncio.set_event_loop(_nloop_naesin)
+                try:
+                    meta = _nloop_naesin.run_until_complete(supabase_service.get_user_profile_metadata(user_id))
+                except Exception as _e:
+                    meta = {}
+                    print(f"⚠️ get_user_profile_metadata(연동 내신): {_e}")
+                finally:
+                    _nloop_naesin.close()
+                sgi = (meta or {}).get("school_grade_input") or {}
+                gs = sgi.get("gradeSummary") or {}
+                has_gs = gs.get("overallAverage") is not None or gs.get("coreAverage") is not None or (gs.get("semesterAverages") and len(gs.get("semesterAverages", {})) > 0)
+                if has_gs:
+                    try:
+                        ov = float(gs.get("overallAverage") or gs.get("coreAverage") or 0)
+                    except (TypeError, ValueError):
+                        ov = 2.5
+                    try:
+                        co = float(gs.get("coreAverage") or gs.get("overallAverage") or 0)
+                    except (TypeError, ValueError):
+                        co = 2.5
+                    sem_avgs = gs.get("semesterAverages") or {}
+                else:
+                    yield f"data: {json.dumps({'type': 'error', 'message': '연동된 내신 성적이 없습니다. 내신 성적과 모의고사 성적을 먼저 연동해 주세요.'}, ensure_ascii=False)}\n\n"
+                    return
+                naesin_event = {
+                    "type": "school_grade_saved",
+                    "overall_average": ov,
+                    "core_average": co,
+                    "semester_averages": sem_avgs,
+                }
+                if not getattr(request, "skip_score_review", False):
+                    # 기존 동작: 카드 표시 후 확인/수정 단계 진행
+                    yield f"data: {json.dumps(naesin_event, ensure_ascii=False)}\n\n"
+                    history.append({"role": "user", "content": message})
+                    conversation_sessions[cache_key] = history[-20:]
+                    return
+                # 카드 생략 모드: 연동 내신 요약을 파이프라인 입력에만 주입해 바로 답변 생성
+                sem_lines = []
+                for k in ["1-1", "1-2", "2-1", "2-2", "3-1", "3-2"]:
+                    v = (sem_avgs or {}).get(k) or {}
+                    o = v.get("overall")
+                    c = v.get("core")
+                    if o is not None or c is not None:
+                        sem_lines.append(f"{k} 전체 {o if o is not None else '-'} / 국영수탐 {c if c is not None else '-'}")
+                sem_text = "\n".join(sem_lines) if sem_lines else "학기별 데이터 없음"
+                message_for_pipeline = (
+                    f"{message}\n\n"
+                    f"[연동 내신 성적 요약]\n"
+                    f"- 전체 평균 내신: {ov}\n"
+                    f"- 국영수탐 평균 내신: {co}\n"
+                    f"- 학기별:\n{sem_text}\n"
+                    f"- 위 연동 내신 성적을 기준으로 답변하세요.\n"
+                    f"- 답변의 첫 문장은 반드시 '@내신 성적을 기반으로 분석해 드릴게요.' 또는 '@내신 성적을 기준으로 ...' 처럼 '@내신 성적'을 포함한 문장으로 자연스럽게 시작하세요."
+                )
+
             if use_school_record:
                 if not user_id:
                     yield f"data: {json.dumps({'type': 'error', 'message': '생기부 분석 기능은 로그인 후 사용할 수 있습니다.'}, ensure_ascii=False)}\n\n"
@@ -1157,42 +1271,117 @@ async def chat_stream_v2(
                         return
 
             else:
-                # 성적 리뷰 게이트 (Router/Profile 동시 실행)
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    gate = loop.run_until_complete(
-                        _prepare_score_review_gate(
-                            message=message,
-                            history=history,
-                            user_id=user_id,
-                            session_id=session_id,
-                            score_id_override=active_score_id,
+                # 메시지의 성적 토큰(@내성적N 등)으로 선택된 score_id가 있으면 내신 파싱보다 우선한다.
+                if not active_score_id and user_id:
+                    _loop_sid = asyncio.new_event_loop()
+                    asyncio.set_event_loop(_loop_sid)
+                    try:
+                        active_score_id = _loop_sid.run_until_complete(
+                            resolve_score_id_from_message(user_id, message)
+                        ) or active_score_id
+                    finally:
+                        _loop_sid.close()
+
+                naesin_has_candidate = False
+                # 내신/수시 짧은 입력 감지 (연동 내신/저장 성적 토큰은 위·아래 분기에서 우선 처리)
+                if not active_score_id:
+                    naesin = extract_naesin_candidate(message)
+                    naesin_has_candidate = bool(naesin.has_candidate and user_id)
+                    if naesin_has_candidate and user_id:
+                        _nloop2 = asyncio.new_event_loop()
+                        asyncio.set_event_loop(_nloop2)
+                        try:
+                            _nloop2.run_until_complete(
+                                supabase_service.update_user_profile_metadata(
+                                    user_id, "school_grade_input", naesin.school_grade_input
+                                )
+                            )
+                        finally:
+                            _nloop2.close()
+                        naesin_event = {
+                            "type": "school_grade_saved",
+                            "overall_average": naesin.overall_average,
+                            "core_average": naesin.core_average,
+                            "semester_averages": naesin.school_grade_input.get("gradeSummary", {}).get("semesterAverages", {}),
+                        }
+                        yield f"data: {json.dumps(naesin_event, ensure_ascii=False)}\n\n"
+                        history.append({"role": "user", "content": message})
+                        conversation_sessions[cache_key] = history[-20:]
+                        return
+
+                # 모의고사(@새성적_0 등) 선택 시: 카드 먼저 띄우고, 확인 후 답변 생성
+                # 연동된 성적으로 바로 답변할 때(skip_score_review)는 성적 확인 카드 생략
+                if active_score_id and user_id and not getattr(request, "skip_score_review", False):
+                    _loop_ss = asyncio.new_event_loop()
+                    asyncio.set_event_loop(_loop_ss)
+                    try:
+                        row = _loop_ss.run_until_complete(
+                            supabase_service.get_user_score_set_by_id(active_score_id, user_id)
                         )
-                    )
-                finally:
-                    loop.close()
+                    finally:
+                        _loop_ss.close()
+                    if row:
+                        name = (row.get("name") or "성적").replace("@", "").strip()
+                        scores = row.get("scores") or {}
+                        review_event = {
+                            "type": "score_review_required",
+                            "pending_id": active_score_id,
+                            "title_auto": f"@{name}" if not name.startswith("@") else name,
+                            "scores": scores,
+                            "use_existing_score_id": True,
+                            "constraints": {
+                                "title_max_length": 10,
+                                "standard_score": {"min": 0, "max": 200},
+                                "percentile": {"min": 0, "max": 100},
+                                "grade": {"min": 1, "max": 9},
+                            },
+                            "actions": ["edit", "approve", "skip_session"],
+                        }
+                        yield f"data: {json.dumps(review_event, ensure_ascii=False)}\n\n"
+                        history.append({"role": "user", "content": message})
+                        conversation_sessions[cache_key] = history[-20:]
+                        return
 
-                gate_mode = gate.get("mode")
-                if gate_mode == "review":
-                    review_event = {
-                        "type": "score_review_required",
-                        "pending_id": gate.get("pending_id"),
-                        "title_auto": gate.get("title_auto"),
-                        "scores": gate.get("scores", {}),
-                        "constraints": {
-                            "title_max_length": 10,
-                            "standard_score": {"min": 0, "max": 200},
-                            "percentile": {"min": 0, "max": 100},
-                            "grade": {"min": 1, "max": 9},
-                        },
-                        "actions": ["edit", "approve", "skip_session"],
-                    }
-                    yield f"data: {json.dumps(review_event, ensure_ascii=False)}\n\n"
-                    return
+                # 내신으로 이미 처리된 메시지는 정시 성적 리뷰 건너뜀
+                if not naesin_has_candidate:
+                    # 성적 리뷰 게이트 (Router/Profile 동시 실행)
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    try:
+                        gate = loop.run_until_complete(
+                            _prepare_score_review_gate(
+                                message=message_for_pipeline,
+                                history=history,
+                                user_id=user_id,
+                                session_id=session_id,
+                                score_id_override=active_score_id,
+                            )
+                        )
+                    finally:
+                        loop.close()
 
-                if gate_mode in {"auto", "pass"}:
-                    active_score_id = gate.get("score_id") or active_score_id
+                    gate_mode = gate.get("mode")
+                    if gate_mode == "review":
+                        review_event = {
+                            "type": "score_review_required",
+                            "pending_id": gate.get("pending_id"),
+                            "title_auto": gate.get("title_auto"),
+                            "scores": gate.get("scores", {}),
+                            "constraints": {
+                                "title_max_length": 10,
+                                "standard_score": {"min": 0, "max": 200},
+                                "percentile": {"min": 0, "max": 100},
+                                "grade": {"min": 1, "max": 9},
+                            },
+                            "actions": ["edit", "approve", "skip_session"],
+                        }
+                        yield f"data: {json.dumps(review_event, ensure_ascii=False)}\n\n"
+                        history.append({"role": "user", "content": message})
+                        conversation_sessions[cache_key] = history[-20:]
+                        return
+
+                    if gate_mode in {"auto", "pass"}:
+                        active_score_id = gate.get("score_id") or active_score_id
 
             if not use_school_record and thinking_mode:
                 # ========================================
@@ -1211,7 +1400,7 @@ async def chat_stream_v2(
                 loop = asyncio.new_event_loop()
                 
                 try:
-                    router_result = loop.run_until_complete(router.route(message, history))
+                    router_result = loop.run_until_complete(router.route(message_for_pipeline, history))
                     router_output = router_result
                     
                     function_calls = router_result.get("function_calls", [])
@@ -1287,7 +1476,7 @@ async def chat_stream_v2(
                     # 3. MainAgentThinking으로 분석 및 재질문
                     # (답변 작성하기 로그는 실제 답변 생성 시 main_agent_thinking.py에서 전송)
                     
-                    for chunk in generate_thinking_stream(message, history, initial_results):
+                    for chunk in generate_thinking_stream(message_for_pipeline, history, initial_results):
                         chunk_type = chunk.get("type")
                         
                         if chunk_type == "log":
@@ -1365,7 +1554,7 @@ async def chat_stream_v2(
                 # 기본 모드: 기존 파이프라인 사용
                 # ========================================
                 for event in run_orchestration_agent_stream(
-                    message,
+                    message_for_pipeline,
                     history,
                     user_id=user_id,
                     score_id=active_score_id,
@@ -1451,6 +1640,237 @@ async def chat_stream_v2(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no"  # Nginx 버퍼링 비활성화
         }
+    )
+
+
+@router.post("/v2/stream/continue-after-naesin")
+async def chat_stream_continue_after_naesin(
+    request: ContinueAfterNaesinRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    내신 카드에서 '확인'을 눌렀을 때 호출. 이미 저장된 마지막 사용자 메시지로 답변 생성만 스트리밍.
+    사용량 차감 없음 (같은 질문의 연속 요청).
+    """
+    user, auth_failed = await optional_auth_with_state(authorization)
+    if auth_failed or (authorization and authorization.startswith("Bearer ") and user is None):
+        raise HTTPException(status_code=401, detail=AUTH_EXPIRED_DETAIL)
+    user_id = user["user_id"] if user else None
+    if not user_id:
+        raise HTTPException(status_code=401, detail="내신 확인 후 답변 생성은 로그인 후 이용할 수 있습니다.")
+
+    session_id = request.session_id
+    cache_key = get_cache_key(user_id, session_id)
+    if cache_key not in conversation_sessions or not conversation_sessions[cache_key]:
+        raise HTTPException(status_code=400, detail="대기 중인 내신 확인이 없습니다.")
+    history = conversation_sessions[cache_key]
+    if history[-1]["role"] != "user":
+        raise HTTPException(status_code=400, detail="대기 중인 내신 확인이 없습니다.")
+
+    message = history[-1]["content"]
+    score_id = request.score_id
+
+    # 카드에서 수정한 성적이 있으면 프로필에 반영
+    if request.grade_summary and user_id:
+        gs = request.grade_summary
+        try:
+            school_grade_input = build_school_grade_input_from_card(
+                overall_average=gs.get("overall_average") or gs.get("overallAverage") or "",
+                core_average=gs.get("core_average") or gs.get("coreAverage") or "",
+                semester_averages=gs.get("semester_averages") or gs.get("semesterAverages") or {},
+            )
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(
+                    supabase_service.update_user_profile_metadata(
+                        user_id, "school_grade_input", school_grade_input
+                    )
+                )
+            finally:
+                loop.close()
+        except Exception as e:
+            print(f"⚠️ continue-after-naesin grade_summary 반영 실패(무시): {e}")
+    full_response = ""
+    timing = {}
+    function_results = {}
+    router_output = {}
+    sources = []
+    source_urls = []
+    used_chunks = []
+
+    def generate_continue():
+        nonlocal full_response, timing, function_results, router_output, sources, source_urls, used_chunks
+        try:
+            for event in run_orchestration_agent_stream(
+                message,
+                history,
+                user_id=user_id,
+                score_id=score_id,
+            ):
+                event_type = event.get("type")
+                if event_type == "status":
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                elif event_type == "chunk":
+                    full_response += event.get("text", "")
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                elif event_type == "done":
+                    timing = event.get("timing", {})
+                    function_results = event.get("function_results", {})
+                    router_output = event.get("router_output", {})
+                    full_response = event.get("response", full_response)
+                    sources = event.get("sources", [])
+                    source_urls = event.get("source_urls", [])
+                    used_chunks = event.get("used_chunks", [])
+                elif event_type == "error":
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    return
+
+            history.append({"role": "assistant", "content": full_response})
+            conversation_sessions[cache_key] = history[-20:]
+
+            try:
+                if not should_skip_logging(user_id=user_id):
+                    _save_messages_to_session_chat(
+                        user_session=session_id,
+                        user_id=user_id,
+                        user_content=message,
+                        assistant_content=full_response,
+                        sources=sources,
+                        source_urls=source_urls,
+                    )
+            except Exception as e:
+                print(f"❌ continue-after-naesin 메시지 저장 실패: {e}")
+
+            done_event = {
+                "type": "done",
+                "response": full_response,
+                "timing": timing,
+                "router_output": router_output,
+                "function_results": function_results,
+                "sources": sources,
+                "source_urls": source_urls,
+                "used_chunks": used_chunks,
+                "score_id": score_id,
+            }
+            yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        generate_continue(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/v2/stream/continue-after-score-confirm")
+async def chat_stream_continue_after_score_confirm(
+    request: ContinueAfterScoreConfirmRequest,
+    authorization: Optional[str] = Header(None),
+):
+    """
+    모의고사 성적 카드에서 '확인'을 눌렀을 때 호출. 마지막 사용자 메시지로 해당 score_id 기준 답변만 스트리밍.
+    사용량 차감 없음.
+    """
+    user, auth_failed = await optional_auth_with_state(authorization)
+    if auth_failed or (authorization and authorization.startswith("Bearer ") and user is None):
+        raise HTTPException(status_code=401, detail=AUTH_EXPIRED_DETAIL)
+    user_id = user["user_id"] if user else None
+    if not user_id:
+        raise HTTPException(status_code=401, detail="성적 확인 후 답변 생성은 로그인 후 이용할 수 있습니다.")
+
+    session_id = request.session_id
+    score_id = request.score_id
+    cache_key = get_cache_key(user_id, session_id)
+    if cache_key not in conversation_sessions or not conversation_sessions[cache_key]:
+        raise HTTPException(status_code=400, detail="대기 중인 성적 확인이 없습니다.")
+    history = conversation_sessions[cache_key]
+    if history[-1]["role"] != "user":
+        raise HTTPException(status_code=400, detail="대기 중인 성적 확인이 없습니다.")
+
+    message = history[-1]["content"]
+    full_response = ""
+    timing = {}
+    function_results = {}
+    router_output = {}
+    sources = []
+    source_urls = []
+    used_chunks = []
+
+    def generate_continue():
+        nonlocal full_response, timing, function_results, router_output, sources, source_urls, used_chunks
+        try:
+            for event in run_orchestration_agent_stream(
+                message,
+                history,
+                user_id=user_id,
+                score_id=score_id,
+            ):
+                event_type = event.get("type")
+                if event_type == "status":
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                elif event_type == "chunk":
+                    full_response += event.get("text", "")
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                elif event_type == "done":
+                    timing = event.get("timing", {})
+                    function_results = event.get("function_results", {})
+                    router_output = event.get("router_output", {})
+                    full_response = event.get("response", full_response)
+                    sources = event.get("sources", [])
+                    source_urls = event.get("source_urls", [])
+                    used_chunks = event.get("used_chunks", [])
+                elif event_type == "error":
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    return
+
+            history.append({"role": "assistant", "content": full_response})
+            conversation_sessions[cache_key] = history[-20:]
+            try:
+                if not should_skip_logging(user_id=user_id):
+                    _save_messages_to_session_chat(
+                        user_session=session_id,
+                        user_id=user_id,
+                        user_content=message,
+                        assistant_content=full_response,
+                        sources=sources,
+                        source_urls=source_urls,
+                    )
+            except Exception as e:
+                print(f"❌ continue-after-score-confirm 메시지 저장 실패: {e}")
+
+            done_event = {
+                "type": "done",
+                "response": full_response,
+                "timing": timing,
+                "router_output": router_output,
+                "function_results": function_results,
+                "sources": sources,
+                "source_urls": source_urls,
+                "used_chunks": used_chunks,
+                "score_id": score_id,
+            }
+            yield f"data: {json.dumps(done_event, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)}, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        generate_continue(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -2171,5 +2591,3 @@ async def reset_session(
 async def get_agents():
     """가용 에이전트 목록 조회"""
     return {"agents": AVAILABLE_AGENTS}
-
-

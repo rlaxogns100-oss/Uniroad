@@ -2,13 +2,14 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import axios from 'axios'
 import App from './App.tsx'
-import { API_BASE, isCapacitorApp } from './config'
+import { getApiBaseUrl, isCapacitorApp } from './config'
 import { setupAxiosAuth } from './utils/setupAxiosAuth'
 import './index.css'
 
 // Capacitor 앱 등에서 원격 API 사용 시 axios 기본 baseURL 설정 (AuthContext, useChat 등)
-if (API_BASE) {
-  axios.defaults.baseURL = API_BASE
+const runtimeApiBase = getApiBaseUrl()
+if (runtimeApiBase) {
+  axios.defaults.baseURL = runtimeApiBase
 }
 setupAxiosAuth()
 
@@ -35,4 +36,3 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     <App />
   </React.StrictMode>,
 )
-

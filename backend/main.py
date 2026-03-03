@@ -20,22 +20,35 @@ app = FastAPI(
     version="2.0.0",
 )
 
+# CORS 디버그: 모바일(WebView)에서 실제 Origin 확인용
+@app.middleware("http")
+async def log_request_origin(request, call_next):
+    origin = request.headers.get("origin")
+    # API 요청에 대해서만 출력해 로그 노이즈를 줄인다.
+    if request.url.path.startswith("/api/"):
+        print(f"[CORS] {request.method} {request.url.path} origin={origin!r}")
+    return await call_next(request)
+
 # CORS 설정 (프론트엔드 연결)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         settings.FRONTEND_URL,
+        "http://localhost",
         "http://localhost:5173",
         "http://localhost:5174",
         "http://localhost:5175",
+        "http://localhost:8000",
         "http://localhost:8147",
         "http://localhost:8148",
         "http://localhost:8150",
         "http://localhost:8151",
         "http://localhost:8152",
+        "http://127.0.0.1",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:5174",
         "http://127.0.0.1:5175",
+        "http://127.0.0.1:8000",
         "http://127.0.0.1:8147",
         "http://127.0.0.1:8148",
         "http://127.0.0.1:8149",
@@ -45,11 +58,14 @@ app.add_middleware(
         "http://localhost:3000",  # Next.js 호환
         "http://3.107.178.26",  # 프로덕션 서버
         "http://172.30.1.20:5173",  # 로컬 네트워크 접근
+        "http://172.30.1.67",
+        "http://172.30.1.67:8000",
+        "http://172.30.1.67:8150",
         "capacitor://localhost",    # Capacitor iOS/Android 앱 (번들 WebView)
         "ionic://localhost",
         "null",                     # iOS WebView가 로컬 페이지에서 null Origin 보낼 수 있음
     ],
-    allow_origin_regex=r"^(https?://(192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3})(:\d+)?$|(capacitor|ionic)://.*)",  # 같은 와이파이(로컬 IP) + Capacitor
+    allow_origin_regex=r"^(https?://(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$|(capacitor|ionic|file)://.*)",  # 로컬/사설망(172.16~172.31) + Capacitor
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

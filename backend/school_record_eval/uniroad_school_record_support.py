@@ -47,7 +47,7 @@ MIN_EXTRACTED_TEXT_CHARS = 50
 PDF_WORD_X_TOLERANCE = float(os.getenv("SCHOOL_RECORD_PDF_WORD_X_TOLERANCE", "2"))
 PDF_WORD_Y_TOLERANCE = float(os.getenv("SCHOOL_RECORD_PDF_WORD_Y_TOLERANCE", "2"))
 PDF_LINE_CLUSTER_TOLERANCE = float(os.getenv("SCHOOL_RECORD_PDF_LINE_CLUSTER_TOLERANCE", "1.8"))
-RULE_PARSER_VERSION = "v13"
+RULE_PARSER_VERSION = "v14"
 
 
 def _compact(text: str) -> str:
@@ -1146,6 +1146,12 @@ def _build_candidate_with_group_anchor(pending_fragment: str, line: str) -> Opti
     if not (_SCORE_TOKEN_PATTERN.fullmatch(third) or third.upper() in {"P", "NP"}):
         return None
 
+    # 현재 줄 첫 토큰이 과목 접미(예: I, Ⅱ, 평)라면 교과가 아니라 직전 과목의 일부다.
+    # 예: pending='영어심화 영어 독해', line='I 3 98/65.2 ...'
+    #  -> '영어심화 영어 독해 I 3 98/65.2 ...'
+    if _is_subject_suffix_token(tokens[0]):
+        return f"{fragment} {tokens[0]} {' '.join(tokens[1:])}".strip()
+
     group = tokens[0]
     tail = " ".join(tokens[1:])
     return f"{group} {fragment} {tail}".strip()
@@ -1233,21 +1239,101 @@ def _normalize_group_and_subject(subject_group: str, subject: str) -> Tuple[str,
     group = re.sub(r"\s+", " ", (subject_group or "").strip())
     subj = re.sub(r"\s+", " ", (subject or "").strip())
 
+    # OCR/표 줄바꿈으로 교과/과목이 뒤집힌 케이스 복구:
+    # 교과='포함)통합사회', 과목='사회(역사/도덕' -> 교과='사회(역사/도덕포함)', 과목='통합사회'
+    swapped_include_match = re.match(r"^(포함[)）])\s*(.+)$", group)
+    if (
+        swapped_include_match
+        and subj.startswith(("사회(", "사회（"))
+        and "역사/도덕" in subj
+        and not subj.endswith((")", "）"))
+    ):
+        include_token = swapped_include_match.group(1)
+        swapped_subject = swapped_include_match.group(2).strip()
+        if swapped_subject:
+            group = f"{subj}{include_token}"
+            subj = swapped_subject
+
     include_match = re.match(r"^(포함[)）])\s*(.+)$", subj)
     if include_match:
         include_token, rest = include_match.group(1), include_match.group(2).strip()
         group = f"{group} {include_token}".strip() if group else include_token
         subj = rest
 
+    # 교과 시작부의 고립된 '포함)' 꼬리 정리.
+    # 예: '포함) 과학' -> '과학'
+    include_group_prefix = re.match(r"^(포함[)）])\s*(.+)$", group)
+    if include_group_prefix:
+        include_rest = include_group_prefix.group(2).strip()
+        if include_rest:
+            group = include_rest
+
+    # OCR로 '교양'의 '양'이 과목 앞에 붙고, 교과 꼬리('/교')가 과목 칸으로 밀린 케이스 복구.
+    # 예: 교과='양일본어I 기술·가정/제2', 과목='외국어/한문/교'
+    #  -> 교과='기술·가정/제2외국어/한문/교양', 과목='일본어I'
+    if (
+        group.startswith("양")
+        and (subj.endswith("/교") or subj == "외국어/한문/교")
+    ):
+        m = re.match(r"^양\s*([^\s].*?)\s+(.+)$", group)
+        if m:
+            moved_subject = m.group(1).strip()
+            moved_group_prefix = m.group(2).strip()
+            if moved_subject and moved_group_prefix:
+                group = f"{moved_group_prefix}{subj}양"
+                subj = moved_subject
+
     if subj.startswith("양") and (group.endswith("/교") or group.endswith("교")):
         group = f"{group}양"
         subj = subj[1:].strip()
 
+    # 사회(역사/도덕포함) 교과의 열 뒤집힘/분절 보정.
+    # 예:
+    # - 교과='통합사회 포함)', 과목='사회(역사/도덕' -> 교과='사회(역사/도덕포함)', 과목='통합사회'
+    # - 교과='사회 포함)', 과목='·문화 사회(역사/도덕' -> 교과='사회(역사/도덕포함)', 과목='사회·문화'
+    social_token_match = re.search(r"사회[（(]역사/도덕", subj)
+    if social_token_match:
+        prefix = subj[: social_token_match.start()].strip()
+        subject_from_group = re.sub(r"^포함[)）]\s*", "", group).strip()
+        subject_from_group = re.sub(r"\s*포함[)）]\s*$", "", subject_from_group).strip()
+        subject_from_group = re.sub(r"\s*사회[（(]역사/도덕.*$", "", subject_from_group).strip()
+
+        if prefix:
+            if prefix.startswith(("·", ".", "・", "ㆍ")) and subject_from_group:
+                subject_from_group = f"{subject_from_group}{prefix}"
+            elif not subject_from_group:
+                subject_from_group = prefix
+            elif subject_from_group == "사회":
+                subject_from_group = f"{subject_from_group}{prefix}"
+
+        if subject_from_group:
+            group = "사회(역사/도덕포함)"
+            subj = subject_from_group
+
+    # 사회 계열에서 교과에만 '... 포함)'이 남고 과목이 자기 자신으로 파싱된 경우 보정.
+    if (
+        re.search(r"\s*포함[)）]\s*$", group)
+        and "역사/도덕" not in group
+    ):
+        cleaned_group = re.sub(r"\s*포함[)）]\s*$", "", group).strip()
+        if cleaned_group and (not subj or _compact(subj) == _compact(cleaned_group)):
+            group = "사회(역사/도덕포함)"
+            subj = cleaned_group
+
     group = group.replace("제2 외국어", "제2외국어")
     group = group.replace("/교 양", "/교양")
     group = group.replace("교 양", "교양")
+    group = group.replace("・", "·")
+    group = group.replace("ㆍ", "·")
+    if ("사회" in group) and ("역사/도덕" in group) and ("포함" in group):
+        group = "사회(역사/도덕포함)"
+    group = re.sub(r"(역사/도덕)\s+(포함[)）])", r"\1\2", group)
+    group = re.sub(r"(?<=[가-힣A-Za-z])[.](?=[가-힣A-Za-z])", "·", group)
     subj = subj.replace("제2 외국어", "제2외국어")
     subj = subj.replace("비 평", "비평")
+    subj = subj.replace("・", "·")
+    subj = subj.replace("ㆍ", "·")
+    subj = re.sub(r"(?<=[가-힣A-Za-z])[.](?=[가-힣A-Za-z])", "·", subj)
     subj = re.sub(r"([가-힣A-Za-z])\s+([ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ])", r"\1\2", subj)
 
     return group, subj
@@ -1262,9 +1348,14 @@ def _parse_general_plain_row(line: str, current_term: Optional[str]) -> Tuple[Op
     score = ""
     avg = ""
     std = ""
+    ach = ""
+    count = ""
+    rank = ""
     leading: List[str] = []
     trailing: List[str] = []
     credit = ""
+    pass_ach = ""
+    pass_rank = ""
 
     if score_idx >= 2:
         credit = tokens[score_idx - 1]
@@ -1275,8 +1366,16 @@ def _parse_general_plain_row(line: str, current_term: Optional[str]) -> Tuple[Op
         if not leading or not trailing:
             return None, current_term
         score, avg, std = _parse_score_avg_std(tokens[score_idx])
+        ach, count = _parse_ach_count(trailing[0])
+        if not ach:
+            return None, current_term
+        for tok in trailing[1:]:
+            if re.fullmatch(r"\d+(?:\.\d+)?", tok):
+                rank = tok
+                break
     else:
-        # 3학년 일반선택의 "3 P P" 형태(성취평가 미산출/이수) 처리
+        # 3학년 일반선택의 "3 P P" 형태(성취평가 미산출/이수) 처리.
+        # 관측 패턴상 첫 P/NP는 성취도, 둘째 P/NP는 석차등급으로 취급한다.
         pass_idx = next(
             (
                 i
@@ -1291,20 +1390,18 @@ def _parse_general_plain_row(line: str, current_term: Optional[str]) -> Tuple[Op
             return None, current_term
         credit = tokens[pass_idx - 1]
         leading = tokens[: pass_idx - 1]
-        trailing = tokens[pass_idx + 1 :]
-        if not leading or not trailing:
+        trailing = tokens[pass_idx + 2 :]
+        if not leading:
             return None, current_term
-        score = tokens[pass_idx].upper()
-
-    ach, count = _parse_ach_count(trailing[0])
-    if not ach:
-        return None, current_term
-
-    rank = ""
-    for tok in trailing[1:]:
-        if re.fullmatch(r"\d+(?:\.\d+)?", tok):
-            rank = tok
-            break
+        pass_ach = tokens[pass_idx].upper()
+        pass_rank = tokens[pass_idx + 1].upper()
+        ach = pass_ach
+        rank = pass_rank
+        # 일부 OCR에서 추가 토큰이 붙는 경우를 위해 보조값만 추출
+        if trailing:
+            ach2, count2 = _parse_ach_count(trailing[0])
+            if not count and count2:
+                count = count2
 
     term, head_parts = _split_term_prefix(leading, current_term)
     if not head_parts:
@@ -2716,17 +2813,31 @@ def _normalize_academic_subjects(parsed_school_record: Dict[str, Any]) -> None:
             return f"c:{curriculum}"
         return ""
 
-    def _normalize_table_rows(rows: List[Dict[str, Any]]) -> None:
+    def _normalize_table_rows(rows: List[Dict[str, Any]], table_key: str) -> None:
         if not rows:
             return
 
-        for row in rows:
+        corrected_row_indices: set[int] = set()
+        for idx, row in enumerate(rows):
+            before_group = str(row.get("교과") or "")
+            before_subject = str(row.get("과목") or "")
             group, subject = _normalize_group_and_subject(
-                str(row.get("교과") or ""),
-                str(row.get("과목") or ""),
+                before_group,
+                before_subject,
             )
             row["교과"] = group
             row["과목"] = subject
+            if _compact(before_group) != _compact(group) or _compact(before_subject) != _compact(subject):
+                corrected_row_indices.add(idx)
+
+            # 구버전 파싱 보정: 일반선택의 "3 P P"가 원점수/성취도로 잘못 들어간 경우
+            # 원점수=P, 성취도=P(또는 NP), 석차등급 공백 -> 원점수 공백, 석차등급=P(또는 NP)
+            raw_score = str(row.get("원점수") or "").strip().upper()
+            ach = str(row.get("성취도") or "").strip().upper()
+            rank = str(row.get("석차등급") or "").strip().upper()
+            if raw_score in {"P", "NP"} and ach in {"P", "NP"} and not rank:
+                row["원점수"] = ""
+                row["석차등급"] = ach
 
         # 교과 셀이 페이지 분리로 "포함) 과학"처럼 끊긴 경우 보정
         for idx in range(1, len(rows)):
@@ -2743,8 +2854,16 @@ def _normalize_academic_subjects(parsed_school_record: Dict[str, Any]) -> None:
         terms: List[Optional[str]] = [_normalize_semester_term(str(row.get("학기") or "")) for row in rows]
         first_explicit_two = next((i for i, t in enumerate(terms) if t == "2"), None)
 
-        # 1학기/2학기가 한 표에 붙으면서 학기값이 일부 누락된 경우:
-        # 과목 반복이 처음 시작되는 지점을 2학기 경계로 간주
+        def _has_key_overlap(boundary_idx: int) -> bool:
+            if boundary_idx <= 0 or boundary_idx >= len(rows):
+                return False
+            before_keys = {_normalize_row_key(r) for r in rows[:boundary_idx]}
+            after_keys = {_normalize_row_key(r) for r in rows[boundary_idx:]}
+            before_keys.discard("")
+            after_keys.discard("")
+            return bool(before_keys & after_keys)
+
+        # 1차 경계 후보: 과목(없으면 교과) 키가 처음 반복되는 지점
         seen_keys: Dict[str, int] = {}
         duplicate_boundary: Optional[int] = None
         for idx, row in enumerate(rows):
@@ -2756,15 +2875,53 @@ def _normalize_academic_subjects(parsed_school_record: Dict[str, Any]) -> None:
                 break
             seen_keys[key] = idx
 
-        if duplicate_boundary is not None and duplicate_boundary >= 4:
+        # 2차 경계 후보: 교과 시퀀스(예: 국어-수학-영어)가 다시 시작되는 지점
+        curriculum_boundary: Optional[int] = None
+        curriculum_keys = [_compact(str(r.get("교과") or "")) for r in rows]
+        prefix = [k for k in curriculum_keys[:3] if k]
+        if len(prefix) < 2:
+            prefix = [k for k in curriculum_keys[:2] if k]
+        if len(prefix) >= 2:
+            window = len(prefix)
+            scan_start = 2 if len(rows) <= 6 else 4
+            for idx in range(scan_start, len(curriculum_keys) - window + 1):
+                segment = curriculum_keys[idx : idx + window]
+                if segment and segment == prefix and _has_key_overlap(idx):
+                    curriculum_boundary = idx
+                    break
+
+        min_boundary_index = 2 if len(rows) <= 6 else 4
+        split_boundary_candidates = [
+            b for b in (duplicate_boundary, curriculum_boundary)
+            if b is not None and b >= min_boundary_index
+        ]
+        split_boundary = min(split_boundary_candidates) if split_boundary_candidates else None
+
+        force_duplicate_boundary = False
+        if split_boundary is not None:
             should_split_from_duplicate = (
-                first_explicit_two is None or first_explicit_two >= duplicate_boundary
+                first_explicit_two is None or first_explicit_two >= split_boundary
             )
+            if (
+                not should_split_from_duplicate
+                and first_explicit_two is not None
+                and first_explicit_two < split_boundary
+            ):
+                corrected_between = any(
+                    first_explicit_two <= idx < split_boundary
+                    for idx in corrected_row_indices
+                )
+                if corrected_between:
+                    # 교과/과목 복구가 필요한 구간에서 학기 '2'가 먼저 등장하면
+                    # 페이지 하단 잡음 숫자를 학기로 오인한 경우가 많다.
+                    # 과목 반복 경계를 우선 신뢰해 1/2학기를 재분리한다.
+                    should_split_from_duplicate = True
+                    force_duplicate_boundary = True
             if should_split_from_duplicate:
-                for idx in range(duplicate_boundary, len(rows)):
+                for idx in range(split_boundary, len(rows)):
                     rows[idx]["학기"] = "2"
-                for idx in range(duplicate_boundary):
-                    if not _normalize_semester_term(str(rows[idx].get("학기") or "")):
+                for idx in range(split_boundary):
+                    if force_duplicate_boundary or not _normalize_semester_term(str(rows[idx].get("학기") or "")):
                         rows[idx]["학기"] = "1"
 
         # 남은 공백 학기는 앞/첫 값을 전파해 채움
@@ -2799,7 +2956,7 @@ def _normalize_academic_subjects(parsed_school_record: Dict[str, Any]) -> None:
             if not isinstance(rows, list):
                 continue
             dict_rows = [row for row in rows if isinstance(row, dict)]
-            _normalize_table_rows(dict_rows)
+            _normalize_table_rows(dict_rows, table_key)
 
 
 def _build_forms_from_pdf_text(extracted_text: str) -> Dict[str, Any]:

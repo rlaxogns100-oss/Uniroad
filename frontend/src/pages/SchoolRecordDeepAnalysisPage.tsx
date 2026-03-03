@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
 import { getApiBaseUrl } from '../config'
-import SchoolRecordRegisterModal, { RegisterMethod } from '../components/SchoolRecordRegisterModal'
+import { getStudentGuideMethods, type GuideMethodId } from '../data/schoolRecordGuide'
 
 type ParsedSchoolRecordPreview = Record<string, any>
+type DetailSheetKey = 'attendance' | 'volunteer' | 'academic' | 'behavior'
 
 type Grade = 1 | 2 | 3
 type CreativeGrade = { autonomousNotes: string; clubNotes: string; careerNotes: string }
@@ -12,6 +13,37 @@ type IndividualGrade = { content: string }
 
 const emptyCreativeGrade = (): CreativeGrade => ({ autonomousNotes: '', clubNotes: '', careerNotes: '' })
 const emptyAcademicGrade = (): AcademicGrade => ({ subjects: ['', '', ''], notes: ['', '', ''] })
+const PDF_EXTENSION_RE = /\.pdf$/i
+const PDF_MIME_HINT_RE = /pdf/i
+const SCAN_UNSUPPORTED_MESSAGE =
+  '스캔본(이미지 PDF)은 아직 분석할 수 없어요. 카카오톡 전자문서지갑 또는 정부24에서 저장한 원본 PDF를 업로드해 주세요.'
+
+const normalizePdfFilename = (rawName?: string): string => {
+  const trimmed = (rawName || '').trim()
+  if (!trimmed) return `school_record_${Date.now()}.pdf`
+  return PDF_EXTENSION_RE.test(trimmed) ? trimmed : `${trimmed}.pdf`
+}
+
+const isClearlyNonPdfFile = (file: File): boolean => {
+  const name = (file.name || '').trim()
+  const mime = (file.type || '').trim().toLowerCase()
+  if (PDF_EXTENSION_RE.test(name)) return false
+  if (!mime) return false
+  return !PDF_MIME_HINT_RE.test(mime)
+}
+
+const isLikelyScanPdfError = (message: string): boolean => {
+  const normalized = (message || '').toLowerCase()
+  if (!normalized) return false
+  return (
+    normalized.includes('텍스트를 거의 추출하지 못했습니다') ||
+    normalized.includes('pdf 텍스트 추출 실패') ||
+    normalized.includes('pdf 페이지를 읽을 수 없습니다')
+  )
+}
+
+const normalizePdfUploadError = (message: string): string =>
+  isLikelyScanPdfError(message) ? SCAN_UNSUPPORTED_MESSAGE : message
 
 const INNER_SCHOOL_RECORD_TABS: Array<{ id: string; label: string }> = [
   { id: 'creative', label: '창의적체험활동상황' },
@@ -20,13 +52,17 @@ const INNER_SCHOOL_RECORD_TABS: Array<{ id: string; label: string }> = [
   { id: 'behavior', label: '행동특성 및 종합의견' },
 ]
 
+export interface SchoolRecordDeepAnalysisPageProps {
+  onBack?: () => void
+}
+
 /**
  * 학교생활기록부 연동/수정 페이지
  * - PDF 업로드 → 파싱 결과 확인/수정 → 저장
  */
-export default function SchoolRecordDeepAnalysisPage() {
+function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) {
+  const { onBack } = props
   const { isAuthenticated, accessToken } = useAuth()
-  const baseUrl = getApiBaseUrl()
   const [innerSchoolRecordTab, setInnerSchoolRecordTab] = useState(0)
   const [formsSaveStatus, setFormsSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'err'>('idle')
   const [formsLoading, setFormsLoading] = useState(false)
@@ -50,6 +86,54 @@ export default function SchoolRecordDeepAnalysisPage() {
   const [standaloneEditMode, setStandaloneEditMode] = useState(false)
   /** 전용 뷰: STEP 아코디언 열림 (0~3 = STEP 01~04) */
   const [openAccordionStep, setOpenAccordionStep] = useState<number | null>(null)
+  /** 토스형 요약 카드 상세 바텀 시트 */
+  const [detailSheet, setDetailSheet] = useState<DetailSheetKey | null>(null)
+  /** 데이터 없음 상태에서 PDF 다운로드 방법 안내 아코디언 */
+  const [pdfGuideOpen, setPdfGuideOpen] = useState(false)
+  const [pdfGuideMethodId, setPdfGuideMethodId] = useState<GuideMethodId>('gov24')
+  const pdfFileInputRef = React.useRef<HTMLInputElement | null>(null)
+  const getApiPrefix = React.useCallback(() => {
+    const apiBase = getApiBaseUrl()
+    return apiBase ? `${apiBase}/api` : '/api'
+  }, [])
+  const buildHeadersWithAuth = React.useCallback((headers: HeadersInit | undefined, token: string) => {
+    const next = new Headers(headers || {})
+    next.set('Authorization', `Bearer ${token}`)
+    return next
+  }, [])
+  const refreshAccessToken = React.useCallback(async (): Promise<string | null> => {
+    const refreshToken = (localStorage.getItem('refresh_token') || '').trim()
+    if (!refreshToken) return null
+    try {
+      const res = await fetch(`${getApiPrefix()}/auth/refresh?refresh_token=${encodeURIComponent(refreshToken)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (!res.ok) return null
+      const data = await res.json().catch(() => ({}))
+      const nextAccessToken = String(data?.access_token || '').trim()
+      if (!nextAccessToken) return null
+      localStorage.setItem('access_token', nextAccessToken)
+      const nextRefreshToken = String(data?.refresh_token || '').trim()
+      if (nextRefreshToken) localStorage.setItem('refresh_token', nextRefreshToken)
+      return nextAccessToken
+    } catch {
+      return null
+    }
+  }, [getApiPrefix])
+  const fetchWithTokenRefresh = React.useCallback(
+    async (url: string, init: RequestInit = {}): Promise<Response> => {
+      const initialToken = (localStorage.getItem('access_token') || accessToken || '').trim()
+      if (!initialToken) throw new Error('로그인 후 이용해 주세요.')
+      let res = await fetch(url, { ...init, headers: buildHeadersWithAuth(init.headers, initialToken) })
+      if (res.status !== 401) return res
+      const refreshed = await refreshAccessToken()
+      if (!refreshed) return res
+      res = await fetch(url, { ...init, headers: buildHeadersWithAuth(init.headers, refreshed) })
+      return res
+    },
+    [accessToken, buildHeadersWithAuth, refreshAccessToken]
+  )
 
   // 생기부 세특 평가와 동일한 폼 상태 (학년별)
   const [creativeGrade, setCreativeGrade] = useState<Grade>(1)
@@ -84,15 +168,14 @@ export default function SchoolRecordDeepAnalysisPage() {
     if (formsFetchedRef.current) return
     formsFetchedRef.current = true
     setFormsLoading(true)
-    fetch(`${baseUrl}/api/school-record/forms`, { headers: { Authorization: `Bearer ${accessToken}` } })
-      .then((res) => {
+    const run = async () => {
+      try {
+        const res = await fetchWithTokenRefresh(`${getApiPrefix()}/school-record/forms`)
         if (res.status === 401) {
           formsFetchedRef.current = false
-          return { forms: {} }
+          return
         }
-        return res.ok ? res.json() : { forms: {} }
-      })
-      .then((data) => {
+        const data = res.ok ? await res.json().catch(() => ({ forms: {} })) : { forms: {} }
         const f = data?.forms || {}
         if (f.creativeActivity) {
           if (f.creativeActivity.byGrade && typeof f.creativeActivity.byGrade === 'object') {
@@ -157,13 +240,16 @@ export default function SchoolRecordDeepAnalysisPage() {
             : null
         )
         setParsedPreview(f?.parsedSchoolRecord && typeof f.parsedSchoolRecord === 'object' ? f.parsedSchoolRecord : null)
-      })
-      .catch(() => {})
-      .finally(() => setFormsLoading(false))
-  }, [isAuthenticated, accessToken, baseUrl])
+      } catch {
+        formsFetchedRef.current = false
+      } finally {
+        setFormsLoading(false)
+      }
+    }
+    void run()
+  }, [isAuthenticated, accessToken, fetchWithTokenRefresh, getApiPrefix])
 
   const handleSaveForms = async () => {
-    if (!accessToken) return
     setFormsSaveStatus('saving')
     try {
       const payload =
@@ -174,11 +260,12 @@ export default function SchoolRecordDeepAnalysisPage() {
             : innerSchoolRecordTab === 2
               ? { individualDev: { showInputs: true, byGrade: individualDev } }
               : { behaviorOpinion: { showInputs: true, opinions: behaviorOpinion } }
-      const res = await fetch(`${baseUrl}/api/school-record/forms`, {
+      const res = await fetchWithTokenRefresh(`${getApiPrefix()}/school-record/forms`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
+      if (res.status === 401) throw new Error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.')
       if (!res.ok) throw new Error('저장 실패')
       setFormsSaveStatus('ok')
       setTimeout(() => setFormsSaveStatus('idle'), 2000)
@@ -188,9 +275,10 @@ export default function SchoolRecordDeepAnalysisPage() {
     }
   }
 
-  const handleUploadSchoolRecordPdf = (fileOverride?: File) => {
+  const handleUploadSchoolRecordPdf = async (fileOverride?: File) => {
     const fileToUse = fileOverride ?? pdfFile
-    if (!accessToken) {
+    const hasToken = Boolean((localStorage.getItem('access_token') || accessToken || '').trim())
+    if (!hasToken) {
       setPdfUploadMessage(null)
       setPdfUploadError('로그인 후 업로드할 수 있습니다.')
       return false
@@ -198,6 +286,11 @@ export default function SchoolRecordDeepAnalysisPage() {
     if (!fileToUse) {
       setPdfUploadMessage(null)
       setPdfUploadError('PDF 파일을 먼저 선택해 주세요.')
+      return false
+    }
+    if (isClearlyNonPdfFile(fileToUse)) {
+      setPdfUploadMessage(null)
+      setPdfUploadError('PDF 파일만 업로드할 수 있습니다.')
       return false
     }
 
@@ -211,50 +304,38 @@ export default function SchoolRecordDeepAnalysisPage() {
     setUploadStage('uploading')
 
     const formData = new FormData()
-    formData.append('file', fileToUse)
-    const url = `${baseUrl}/api/school-record/forms/upload-pdf`
-    const xhr = new XMLHttpRequest()
+    const uploadFilename = normalizePdfFilename(fileToUse.name)
+    formData.append('file', fileToUse, uploadFilename)
+    const url = `${getApiPrefix()}/school-record/forms/upload-pdf`
+    setUploadProgress(15)
 
-    xhr.upload.addEventListener('progress', (e) => {
-      if (e.lengthComputable && e.total > 0) {
-        const pct = Math.round((e.loaded / e.total) * 100)
-        setUploadProgress(pct)
-        if (pct >= 100) setUploadStage('processing')
-      }
-    })
-
-    xhr.addEventListener('load', () => {
+    try {
+      const res = await fetchWithTokenRefresh(url, {
+        method: 'POST',
+        body: formData,
+      })
       setUploadProgress(100)
-      if (xhr.status < 200 || xhr.status >= 300) {
-        let errMsg = 'PDF 업로드에 실패했습니다.'
-        try {
-          const data = JSON.parse(xhr.responseText || '{}')
-          errMsg = data?.detail || data?.error || errMsg
-        } catch {
-          if (xhr.responseText) errMsg = xhr.responseText.slice(0, 200)
-        }
-        setPdfUploadError(errMsg)
+      if (res.status === 401) {
+        setPdfUploadError('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.')
         setPdfUploading(false)
         setUploadProgress(0)
         setUploadStage('uploading')
-        return
+        return false
       }
-      let data: Record<string, any> = {}
-      try {
-        data = JSON.parse(xhr.responseText || '{}')
-      } catch {
-        setPdfUploadError('응답을 읽을 수 없습니다.')
+      const data: Record<string, any> = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        setPdfUploadError(normalizePdfUploadError(data?.detail || data?.error || 'PDF 업로드에 실패했습니다.'))
         setPdfUploading(false)
         setUploadProgress(0)
         setUploadStage('uploading')
-        return
+        return false
       }
       if (!data?.ok) {
-        setPdfUploadError(data?.detail || data?.error || 'PDF 업로드에 실패했습니다.')
+        setPdfUploadError(normalizePdfUploadError(data?.detail || data?.error || 'PDF 업로드에 실패했습니다.'))
         setPdfUploading(false)
         setUploadProgress(0)
         setUploadStage('uploading')
-        return
+        return false
       }
       const pageCount = Number(data?.meta?.page_count || 0)
       const charCount = Number(data?.meta?.char_count || 0)
@@ -278,36 +359,21 @@ export default function SchoolRecordDeepAnalysisPage() {
             : null
       )
       setPdfFile(null)
+      setRegisterModalOpen(false)
       setPdfUploading(false)
       setUploadProgress(0)
       setUploadStage('uploading')
-    })
-
-    xhr.addEventListener('error', () => {
+      return true
+    } catch {
       setPdfUploadError('네트워크 오류로 업로드에 실패했습니다.')
       setPdfUploading(false)
       setUploadProgress(0)
       setUploadStage('uploading')
-    })
-
-    xhr.addEventListener('abort', () => {
-      setPdfUploading(false)
-      setUploadProgress(0)
-      setUploadStage('uploading')
-    })
-
-    xhr.open('POST', url)
-    xhr.setRequestHeader('Authorization', `Bearer ${accessToken}`)
-    xhr.send(formData)
-    return true
+      return false
+    }
   }
 
   const handleSaveParsedSchoolRecord = async (options?: { showChangedOnlyAfterSave?: boolean }) => {
-    if (!accessToken) {
-      setSchoolRecordSaveMessage(null)
-      setSchoolRecordSaveError('로그인 후 저장할 수 있습니다.')
-      return
-    }
     if (!parsedPreview?.sections) {
       setSchoolRecordSaveMessage(null)
       setSchoolRecordSaveError('저장할 생기부 데이터가 없습니다.')
@@ -318,14 +384,17 @@ export default function SchoolRecordDeepAnalysisPage() {
     setSchoolRecordSaveMessage(null)
     setSchoolRecordSaveError(null)
     try {
-      const res = await fetch(`${baseUrl}/api/school-record/forms/save-parsed`, {
+      const res = await fetchWithTokenRefresh(`${getApiPrefix()}/school-record/forms/save-parsed`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           parsedPreview,
           pdfImportMeta,
         }),
       })
+      if (res.status === 401) {
+        throw new Error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.')
+      }
       const data = await res.json().catch(() => ({}))
       if (!res.ok || !data?.ok) {
         throw new Error(data?.detail || data?.error || '저장에 실패했습니다.')
@@ -356,22 +425,19 @@ export default function SchoolRecordDeepAnalysisPage() {
     setStandaloneEditMode(false)
   }, [parsedPreview])
 
-  const handleRegisterModalSave = (registerMethod: RegisterMethod, value: { docNumber?: string; file?: File }) => {
-    if (registerMethod === 'file' && value.file) {
-      const started = handleUploadSchoolRecordPdf(value.file)
-      if (started) setRegisterModalOpen(false)
-    }
-    if (registerMethod === 'doc_number' && value.docNumber) {
-      setRegisterModalOpen(false)
-      setPdfUploadMessage('문서열람번호 연동은 준비 중입니다.')
-    }
+  const handleFileUploadFromModal = () => {
+    void handleUploadSchoolRecordPdf(pdfFile ?? undefined)
   }
 
   const parsedSections = (parsedPreview?.sections || {}) as Record<string, any>
-  const attendanceRows = Array.isArray(parsedSections?.attendance?.rows) ? parsedSections.attendance.rows : []
+  const attendanceRows = (
+    Array.isArray(parsedSections?.attendance?.rows) ? parsedSections.attendance.rows : []
+  ) as Array<Record<string, unknown>>
   const certificateItems = Array.isArray(parsedSections?.certificates?.items) ? parsedSections.certificates.items : []
   const certificateRows = Array.isArray(parsedSections?.certificates?.rows) ? parsedSections.certificates.rows : []
-  const volunteerRows = Array.isArray(parsedSections?.volunteerActivity?.rows) ? parsedSections.volunteerActivity.rows : []
+  const volunteerRows = (
+    Array.isArray(parsedSections?.volunteerActivity?.rows) ? parsedSections.volunteerActivity.rows : []
+  ) as Array<Record<string, unknown>>
   const academicByGrade = (parsedSections?.academicDevelopment?.by_grade || {}) as Record<string, Array<{ subject?: string; note?: string }>>
   const academicGeneralElective = (parsedSections?.academicDevelopment?.general_elective || {}) as Record<string, { rows: any[]; 이수단위합계?: number | null }>
   const academicCareerElective = (parsedSections?.academicDevelopment?.career_elective || {}) as Record<string, { rows: any[]; 이수단위합계?: number | null }>
@@ -390,6 +456,70 @@ export default function SchoolRecordDeepAnalysisPage() {
     const rows = academicByGrade[g] || []
     individualContentByGrade[g] = rows.map((r) => `[${r?.subject ?? '과목'}]\n${r?.note ?? ''}`).join('\n\n').trim()
   })
+
+  const toSafeNumber = (value: unknown): number => {
+    const numeric = Number(String(value ?? '').replace(/[^0-9.-]/g, ''))
+    return Number.isFinite(numeric) ? numeric : 0
+  }
+
+  const hasParsedData = Boolean(parsedPreview?.sections)
+  const quickGuideMethods = React.useMemo(
+    () => getStudentGuideMethods('student').filter((method) => method.id === 'gov24' || method.id === 'kakao'),
+    []
+  )
+
+  React.useEffect(() => {
+    if (!quickGuideMethods.some((method) => method.id === pdfGuideMethodId)) {
+      setPdfGuideMethodId(quickGuideMethods[0]?.id ?? 'gov24')
+    }
+  }, [quickGuideMethods, pdfGuideMethodId])
+
+  const currentPdfGuideMethod = quickGuideMethods.find((method) => method.id === pdfGuideMethodId) || quickGuideMethods[0]
+
+  const attendanceSummary = React.useMemo(() => {
+    const sumByFields = (fields: string[]) =>
+      attendanceRows.reduce((total, row) => total + fields.reduce((s, key) => s + toSafeNumber(row?.[key]), 0), 0)
+
+    return {
+      absence: sumByFields(['결석_질병', '결석_미인정', '결석_기타']),
+      tardy: sumByFields(['지각_질병', '지각_미인정', '지각_기타']),
+      earlyLeave: sumByFields(['조퇴_질병', '조퇴_미인정', '조퇴_기타']),
+      result: sumByFields(['결과_질병', '결과_미인정', '결과_기타']),
+    }
+  }, [attendanceRows])
+
+  const volunteerTotalHours = React.useMemo(
+    () => volunteerRows.reduce((total, row) => total + toSafeNumber(row?.hours), 0),
+    [volunteerRows]
+  )
+
+  const academicNoteCount = React.useMemo(
+    () =>
+      (['1', '2', '3'] as const).reduce((count, grade) => {
+        const rows = academicByGrade[grade] || []
+        return (
+          count +
+          rows.filter((row) => String(row?.note ?? '').trim().length > 0 || String(row?.subject ?? '').trim().length > 0).length
+        )
+      }, 0),
+    [academicByGrade]
+  )
+
+  const behaviorFilledGradeCount = React.useMemo(
+    () => (['1', '2', '3'] as const).filter((grade) => String(behaviorByGrade?.[grade] ?? '').trim().length > 0).length,
+    [behaviorByGrade]
+  )
+
+  const detailSheetPayload = React.useMemo(() => {
+    if (!detailSheet) return null
+    const payloadMap: Record<DetailSheetKey, { title: string; step: number }> = {
+      attendance: { title: '출결 상세 정보', step: 1 },
+      volunteer: { title: '봉사 상세 정보', step: 2 },
+      academic: { title: '교과학습 상세 정보', step: 3 },
+      behavior: { title: '행동특성 상세 정보', step: 4 },
+    }
+    return payloadMap[detailSheet]
+  }, [detailSheet])
 
   const normalizeDisplayText = (value: unknown): string => {
     const raw = String(value ?? '').replace(/\r\n/g, '\n').trim()
@@ -1012,130 +1142,319 @@ export default function SchoolRecordDeepAnalysisPage() {
   }
 
   return (
-    <div className="min-h-full bg-white">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-14">
-        {/* 전용 뷰(?tab=link): 참고 UI — 헤더(이름·학교·입학) + 업로드/수정 + STEP 아코디언 */}
-          <>
-            {/* 상단: 사용자 정보 + 액션(오른쪽 상단) */}
-            <div className="sticky top-0 z-30 -mx-4 px-4 sm:-mx-6 sm:px-6 py-3 bg-white/95 backdrop-blur border-b border-gray-200">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <h1 className="text-base sm:text-lg font-bold text-gray-900 font-sans truncate">생활기록부 연동하기</h1>
-                  <p className="mt-0.5 text-[11px] text-gray-600 font-sans">업로드 후 변경사항을 확인하고 저장하세요.</p>
-                </div>
+    <div className="min-h-full bg-[#F9FAFB] overflow-x-hidden">
+      <div className="mx-auto w-full max-w-5xl px-3 pb-24 pt-4 sm:px-6 sm:pb-28 sm:pt-6 pb-safe">
+        <div className="mb-4 sm:mb-6 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-extrabold text-[#191F28]">생활기록부 연동하기</h1>
+            <p className="mt-0.5 sm:mt-1 text-xs sm:text-sm font-medium text-[#6B7684]">PDF 파일을 업로드하면 핵심 정보를 분석해 드려요.</p>
+          </div>
+          {onBack && (
+            <button
+              type="button"
+              onClick={onBack}
+              className="shrink-0 inline-flex h-10 w-10 min-h-[44px] min-w-[44px] items-center justify-center rounded-full bg-white text-[#4E5968] shadow-sm transition hover:bg-gray-50 active:bg-gray-100 touch-manipulation"
+              title="돌아가기"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+              </svg>
+            </button>
+          )}
+        </div>
 
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setRegisterModalOpen(true)}
-                    disabled={pdfUploading}
-                    className="inline-flex items-center justify-center px-3 py-1.5 rounded-lg bg-[#0e6093] text-white text-xs font-semibold hover:bg-[#0b4f78] transition-colors font-sans disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                  >
-                    업로드
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => void handleSaveParsedSchoolRecord()}
-                    disabled={!parsedPreview?.sections || schoolRecordSaving || pdfUploading}
-                    className="inline-flex items-center justify-center px-3 py-1.5 rounded-lg bg-[#0e6093] text-white text-xs font-semibold hover:bg-[#0b4f78] transition-colors font-sans disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
-                  >
-                    {schoolRecordSaving ? '저장 중...' : '저장'}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setStandaloneEditMode((prev) => !prev)}
-                    disabled={!parsedPreview?.sections}
-                    className={`inline-flex items-center justify-center px-3 py-1.5 rounded-lg border text-xs font-semibold transition-colors font-sans ${
-                      standaloneEditMode
-                        ? 'border-uniroad-navy text-uniroad-navy bg-uniroad-navy-light hover:bg-slate-50'
-                        : 'border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
-                    } disabled:opacity-40 disabled:cursor-not-allowed`}
-                  >
-                    {standaloneEditMode ? '수정 완료' : '수정'}
-                  </button>
+        {(pdfUploading || pdfUploadMessage || pdfUploadError || schoolRecordSaving || schoolRecordSaveMessage || schoolRecordSaveError) && (
+          <div className="mb-4 rounded-[24px] bg-white p-8 shadow-sm">
+            {pdfUploading && (
+              <div className="w-full">
+                <p className="mb-2 text-sm font-semibold text-[#4E5968]">
+                  {uploadStage === 'processing' ? '텍스트 추출 및 파싱 중...' : `파일 업로드 중 (${uploadProgress}%)`}
+                </p>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                  <div
+                    className="h-full rounded-full bg-[#3182F6] transition-all duration-300"
+                    style={{ width: uploadStage === 'processing' ? '100%' : `${uploadProgress}%` }}
+                  />
                 </div>
               </div>
-            </div>
-
-            {/* 진행 상태/메시지 */}
-            {(pdfUploading || pdfUploadMessage || pdfUploadError || schoolRecordSaving || schoolRecordSaveMessage || schoolRecordSaveError) && (
-              <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50 px-4 py-3">
-                {pdfUploading && (
-                  <div className="w-full">
-                    <div className="flex items-center justify-between text-xs text-gray-600 mb-1 font-sans">
-                      <span>{uploadStage === 'processing' ? '텍스트 추출 및 파싱 중...' : `파일 업로드 중 (${uploadProgress}%)`}</span>
-                      {uploadStage === 'uploading' && <span>{uploadProgress}%</span>}
-                    </div>
-                    <div className="h-2 w-full rounded-full bg-gray-200 overflow-hidden">
-                      <div
-                        className="h-full bg-uniroad-navy transition-all duration-300 ease-out"
-                        style={{ width: uploadStage === 'processing' ? '100%' : `${uploadProgress}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-                {pdfUploadMessage && <p className="text-xs text-green-700 mt-2 font-sans">{pdfUploadMessage}</p>}
-                {pdfUploadError && <p className="text-xs text-red-600 mt-2 font-sans">{pdfUploadError}</p>}
-                {schoolRecordSaving && <p className="text-xs text-[#0e6093] mt-2 font-sans">저장 중...</p>}
-                {schoolRecordSaveMessage && <p className="text-xs text-green-700 mt-2 font-sans">{schoolRecordSaveMessage}</p>}
-                {schoolRecordSaveError && <p className="text-xs text-red-600 mt-2 font-sans">{schoolRecordSaveError}</p>}
-              </div>
             )}
-            {standaloneEditMode && (
-              <div className="mt-3 rounded-lg border border-[#0e6093]/30 bg-[#0e6093]/5 px-3 py-2 text-xs text-[#0e6093] font-sans">
-                수정 모드입니다. 각 칸을 직접 편집할 수 있습니다.
-              </div>
-            )}
+            {pdfUploadMessage && <p className="mt-2 text-sm font-semibold text-green-700">{pdfUploadMessage}</p>}
+            {pdfUploadError && <p className="mt-2 text-sm font-semibold text-red-600">{pdfUploadError}</p>}
+            {schoolRecordSaving && <p className="mt-2 text-sm font-semibold text-[#3182F6]">저장 중...</p>}
+            {schoolRecordSaveMessage && <p className="mt-2 text-sm font-semibold text-green-700">{schoolRecordSaveMessage}</p>}
+            {schoolRecordSaveError && <p className="mt-2 text-sm font-semibold text-red-600">{schoolRecordSaveError}</p>}
+          </div>
+        )}
 
-            {/* STEP 01~04: 리스트형 UI (참고 이미지 스타일) */}
-            <div className="mt-8 border-t border-[#0e6093]">
-              {[
-                { step: 1, label: '출결상황, 자격증 및 인증 취득상황' },
-                { step: 2, label: '창의적체험활동상황, 봉사활동실적' },
-                { step: 3, label: '교과학습발달상황' },
-                { step: 4, label: '행동특성 및 종합의견' },
-              ].map(({ step, label }) => {
-                const isOpen = openAccordionStep === step - 1
-                return (
-                  <div key={step} className="border-b border-gray-200">
-                    <button
-                      type="button"
-                      onClick={() => setOpenAccordionStep(isOpen ? null : step - 1)}
-                      className="w-full flex items-center gap-4 px-2 sm:px-4 py-5 text-left hover:bg-gray-50 transition-colors"
-                    >
-                      <span className="flex-shrink-0 rounded-full bg-[#0e6093] px-4 py-2 text-sm font-extrabold tracking-wide text-white font-sans">
-                        STEP {String(step).padStart(2, '0')}
-                      </span>
-                      <span className="flex-1 text-base font-semibold text-gray-900 font-sans">{label}</span>
-                      <svg
-                        className={`w-6 h-6 text-[#0e6093] flex-shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`}
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                      </svg>
-                    </button>
-                    {isOpen && (
-                      <div className="px-2 sm:px-4 py-4 border-t border-gray-200 bg-[#f7f9fc]">
-                        {renderStandaloneStepContent(step)}
+        {!hasParsedData ? (
+          <div className="flex min-h-[58vh] items-center justify-center">
+            <div className="w-full max-w-3xl text-center">
+              <p className="text-[40px] font-bold leading-tight tracking-[-0.02em] text-[#191F28] sm:text-[46px]">아직 생기부 데이터가 없어요</p>
+              <p className="mt-3 text-lg font-medium leading-8 text-[#6B7684]">정부24 또는 카카오톡 전자문서지갑에서 저장한 PDF를 업로드해 주세요.</p>
+              <p className="mt-2 text-sm font-semibold text-[#8B95A1]">스캔본(이미지 PDF)은 현재 지원하지 않아요.</p>
+
+              <div className="mt-6 text-left">
+                <button
+                  type="button"
+                  onClick={() => setPdfGuideOpen((prev) => !prev)}
+                  className="flex w-full items-center justify-between rounded-[24px] bg-white px-6 py-5 text-[#191F28] shadow-sm"
+                >
+                  <span className="text-base font-bold sm:text-lg">PDF 다운로드 방법 보기</span>
+                  <svg
+                    className={`h-5 w-5 text-[#6B7684] transition-transform ${pdfGuideOpen ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {pdfGuideOpen && (
+                  <div className="mt-3 space-y-3 rounded-2xl bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap gap-2">
+                      {quickGuideMethods.map((method) => {
+                        const active = method.id === pdfGuideMethodId
+                        return (
+                          <button
+                            key={method.id}
+                            type="button"
+                            onClick={() => setPdfGuideMethodId(method.id)}
+                            className={`rounded-xl px-3 py-2 text-sm font-bold transition ${
+                              active ? 'bg-[#191F28] text-white' : 'bg-[#F2F4F6] text-[#4E5968] hover:bg-[#E9EDF2]'
+                            }`}
+                          >
+                            {method.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {currentPdfGuideMethod && (
+                      <div className="rounded-2xl border border-[#EEF1F4] bg-[#F9FAFB] p-4">
+                        <p className="text-base font-extrabold text-[#191F28]">{currentPdfGuideMethod.label} 다운로드 방법</p>
+                        {currentPdfGuideMethod.links && currentPdfGuideMethod.links.length > 0 && (
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {currentPdfGuideMethod.links.map((item) => (
+                              <a
+                                key={item.href}
+                                href={item.href}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex h-8 items-center justify-center rounded-lg border border-[#D9E2EC] bg-white px-2.5 text-xs font-bold text-[#3182F6] transition hover:bg-[#F4F8FF]"
+                              >
+                                {item.label}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="mt-4 space-y-4">
+                          {currentPdfGuideMethod.sections.map((section) => (
+                            <section key={section.title} className="rounded-xl bg-white p-3">
+                              <p className="text-sm font-extrabold text-[#191F28]">{section.title}</p>
+                              {section.summary && <p className="mt-1 text-xs font-medium text-[#6B7684]">{section.summary}</p>}
+                              <ol className="mt-3 space-y-3">
+                                {section.steps.map((step, index) => (
+                                  <li key={`${section.title}-${step.title}-${index}`} className="rounded-lg border border-[#EEF1F4] bg-[#FBFCFD] p-3">
+                                    <div className="mb-2 flex items-center gap-2">
+                                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#E8F1FF] text-xs font-extrabold text-[#3182F6]">
+                                        {index + 1}
+                                      </span>
+                                      <p className="text-sm font-bold text-[#191F28]">{step.title}</p>
+                                    </div>
+                                    <p className="text-xs font-medium leading-5 text-[#4E5968]">{step.description}</p>
+                                    {step.image && (
+                                      <div className="mt-2 overflow-hidden rounded-lg border border-[#EEF1F4] bg-white p-1.5">
+                                        <img src={step.image} alt={step.title} className="h-auto w-full rounded-md" loading="lazy" />
+                                      </div>
+                                    )}
+                                  </li>
+                                ))}
+                              </ol>
+                            </section>
+                          ))}
+                        </div>
+
                       </div>
                     )}
                   </div>
-                )
-              })}
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <div className="rounded-[24px] bg-white p-8 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-[28px] font-bold tracking-[-0.02em] text-[#191F28]">연동 데이터</p>
+                  <p className="mt-2 text-sm font-medium leading-7 text-[#6B7684]">업로드된 생기부 핵심 항목을 카드로 확인할 수 있어요.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => void handleSaveParsedSchoolRecord()}
+                  disabled={!parsedPreview?.sections || schoolRecordSaving || pdfUploading}
+                  className="inline-flex h-11 items-center justify-center rounded-xl bg-[#3182F6] px-5 text-sm font-bold text-white shadow-sm transition hover:bg-[#1f6fe2] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {schoolRecordSaving ? '저장 중...' : '연동 데이터 저장'}
+                </button>
+              </div>
             </div>
 
-            <SchoolRecordRegisterModal
-              isOpen={registerModalOpen}
-              onClose={() => setRegisterModalOpen(false)}
-              onSave={handleRegisterModalSave}
-              isSaving={pdfUploading}
-            />
-          </>
+            <button
+              type="button"
+              onClick={() => setDetailSheet('attendance')}
+              className="w-full rounded-[24px] bg-white p-8 text-left shadow-sm transition hover:-translate-y-0.5"
+            >
+              <p className="text-[30px] font-bold leading-tight tracking-[-0.02em] text-[#191F28]">출결</p>
+              <p className="mt-4 text-[48px] font-bold leading-none tracking-[-0.03em] text-[#191F28]">{attendanceSummary.absence.toLocaleString('ko-KR')}</p>
+              <p className="mt-2 text-base font-semibold text-[#6B7684]">총 결석 일수</p>
+              <p className="mt-4 text-sm font-medium leading-7 text-[#4E5968]">
+                지각 {attendanceSummary.tardy.toLocaleString('ko-KR')}회 · 조퇴 {attendanceSummary.earlyLeave.toLocaleString('ko-KR')}회 · 결과 {attendanceSummary.result.toLocaleString('ko-KR')}회
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDetailSheet('volunteer')}
+              className="w-full rounded-[24px] bg-white p-8 text-left shadow-sm transition hover:-translate-y-0.5"
+            >
+              <p className="text-[30px] font-bold leading-tight tracking-[-0.02em] text-[#191F28]">봉사</p>
+              <p className="mt-4 text-[48px] font-bold leading-none tracking-[-0.03em] text-[#191F28]">{volunteerTotalHours.toLocaleString('ko-KR')}</p>
+              <p className="mt-2 text-base font-semibold text-[#6B7684]">총 봉사 시간</p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDetailSheet('academic')}
+              className="w-full rounded-[24px] bg-white p-8 text-left shadow-sm transition hover:-translate-y-0.5"
+            >
+              <p className="text-[30px] font-bold leading-tight tracking-[-0.02em] text-[#191F28]">교과학습</p>
+              <p className="mt-4 text-[48px] font-bold leading-none tracking-[-0.03em] text-[#191F28]">{academicNoteCount.toLocaleString('ko-KR')}</p>
+              <p className="mt-2 text-base font-semibold text-[#6B7684]">세특 항목 수</p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDetailSheet('behavior')}
+              className="w-full rounded-[24px] bg-white p-8 text-left shadow-sm transition hover:-translate-y-0.5"
+            >
+              <p className="text-[30px] font-bold leading-tight tracking-[-0.02em] text-[#191F28]">행동특성</p>
+              <p className="mt-4 text-[48px] font-bold leading-none tracking-[-0.03em] text-[#191F28]">{behaviorFilledGradeCount.toLocaleString('ko-KR')}</p>
+              <p className="mt-2 text-base font-semibold text-[#6B7684]">작성된 학년 수</p>
+            </button>
+          </div>
+        )}
       </div>
+
+      <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-[#E5E8EB] bg-white/95 backdrop-blur">
+        <div className="mx-auto w-full max-w-5xl px-4 py-4 sm:px-6">
+          <button
+            type="button"
+            onClick={() => setRegisterModalOpen(true)}
+            disabled={pdfUploading}
+            className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-[#3182F6] text-lg font-bold text-white shadow-sm transition hover:bg-[#1f6fe2] disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            PDF 파일 불러오기
+          </button>
+        </div>
+      </div>
+
+      {registerModalOpen && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-[20px] bg-white p-6 shadow-sm">
+            <p className="text-2xl font-extrabold text-[#191F28]">PDF 파일 불러오기</p>
+            <p className="mt-2 text-sm font-medium text-[#6B7684]">학교생활기록부 PDF 파일을 선택해 주세요.</p>
+            <div className="mt-4 rounded-2xl border border-[#D7E6FF] bg-[#F4F8FF] p-4">
+              <p className="text-sm font-extrabold text-[#1D4ED8]">지원 파일 안내</p>
+              <div className="mt-2 space-y-2">
+                <p className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-[#1E40AF]">지원: 정부24/카카오톡 전자문서지갑 원본 PDF</p>
+                <p className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-[#B45309]">미지원: 스캔본/사진 PDF</p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-dashed border-[#D1D6DB] bg-[#F9FAFB] p-4">
+              <input
+                ref={pdfFileInputRef}
+                type="file"
+                accept=".pdf,application/pdf"
+                className="hidden"
+                onChange={(e) => {
+                  setPdfUploadError(null)
+                  setPdfUploadMessage(null)
+                  setPdfFile(e.target.files?.[0] ?? null)
+                }}
+              />
+              <p className="text-xs font-semibold text-[#6B7684]">1. 아래 버튼을 눌러 파일을 선택하세요.</p>
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => pdfFileInputRef.current?.click()}
+                  className="inline-flex h-10 items-center justify-center rounded-lg bg-[#191F28] px-4 text-sm font-bold text-white transition hover:bg-[#111827]"
+                >
+                  파일 선택
+                </button>
+                <p className="line-clamp-1 min-w-0 flex-1 rounded-lg border border-[#E5E8EB] bg-white px-3 py-2 text-sm font-semibold text-[#4E5968]">
+                  {pdfFile ? pdfFile.name : '선택된 파일 없음'}
+                </p>
+              </div>
+              <p className="mt-2 text-xs font-medium text-[#8B95A1]">2. 파일이 보이면 아래 불러오기를 눌러 주세요.</p>
+            </div>
+            {pdfUploadError && <p className="mt-3 text-sm font-semibold text-red-600">{pdfUploadError}</p>}
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRegisterModalOpen(false)}
+                className="inline-flex h-11 items-center justify-center rounded-xl bg-gray-100 px-4 text-sm font-semibold text-[#4E5968] transition hover:bg-gray-200"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={handleFileUploadFromModal}
+                disabled={pdfUploading || !pdfFile}
+                className="inline-flex h-11 items-center justify-center rounded-xl bg-[#3182F6] px-5 text-sm font-bold text-white transition hover:bg-[#1f6fe2] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {pdfUploading ? '업로드 중...' : '불러오기'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {detailSheet && detailSheetPayload && (
+        <div className="fixed inset-0 z-40 bg-black/35" onClick={() => setDetailSheet(null)}>
+          <div
+            className="absolute inset-x-0 bottom-0 mx-auto w-full max-w-5xl rounded-t-[24px] bg-white shadow-sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-[#EEF0F3] px-5 py-4">
+              <div>
+                <p className="text-xl font-extrabold text-[#191F28]">{detailSheetPayload.title}</p>
+                <p className="mt-0.5 text-sm font-medium text-[#6B7684]">이전에 보던 상세 정보를 그대로 확인할 수 있어요.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailSheet(null)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#F2F4F6] text-[#4E5968] transition hover:bg-[#E9EDF2]"
+              >
+                <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="max-h-[72vh] overflow-y-auto px-5 py-4">
+              <div className="rounded-2xl bg-[#F9FAFB] p-4">
+                {renderStandaloneStepContent(detailSheetPayload.step)}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+
+export default SchoolRecordDeepAnalysisPage

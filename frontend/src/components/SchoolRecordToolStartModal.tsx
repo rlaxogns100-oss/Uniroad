@@ -17,6 +17,12 @@ interface SchoolRecordToolStartModalProps {
   scoreSets?: Array<{ id: string; name: string }>
   /** 성적 항목 클릭 시 (이름으로 채팅 자동완성 등) */
   onSelectScoreSet?: (item: { id: string; name: string }) => void
+  /** 합격 예측용: @내신 성적 옵션 표시 및 클릭 시 콜백 (클릭하면 해당 문구로 채팅 시작) */
+  showNaesinOption?: boolean
+  onSelectNaesin?: () => void
+  /** 연동 필요 강조 문구 표시 */
+  showLinkRequiredHighlight?: boolean
+  linkRequiredMessage?: string
 }
 
 export default function SchoolRecordToolStartModal({
@@ -33,6 +39,10 @@ export default function SchoolRecordToolStartModal({
   statusText: statusTextOverride,
   scoreSets,
   onSelectScoreSet,
+  showNaesinOption = false,
+  onSelectNaesin,
+  showLinkRequiredHighlight = false,
+  linkRequiredMessage = '내신 성적과 모의고사 성적을 연동하세요.',
 }: SchoolRecordToolStartModalProps) {
   if (!isOpen) return null
 
@@ -46,6 +56,8 @@ export default function SchoolRecordToolStartModal({
   const description = descriptionOverride ?? '연동된 생기부를 읽어 새 채팅에서 더 정확하게 답합니다.'
   const statusText = statusTextOverride ?? defaultStatusText
   const showScoreList = Array.isArray(scoreSets) && scoreSets.length > 0 && onSelectScoreSet
+  const showNaesin = showNaesinOption && onSelectNaesin
+  const showOnlyLinkRequiredHighlight = showLinkRequiredHighlight && !showScoreList && !showNaesin
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -73,9 +85,37 @@ export default function SchoolRecordToolStartModal({
             {description}
           </p>
 
-          <div className="mt-4 rounded-xl bg-gray-50 border border-gray-200 px-4 py-3 text-sm text-gray-700">
+          <div
+            className={
+              showOnlyLinkRequiredHighlight
+                ? 'mt-4 text-sm text-gray-700'
+                : 'mt-4 rounded-xl bg-gray-50 border border-gray-200 px-4 py-3 text-sm text-gray-700'
+            }
+          >
+            {showLinkRequiredHighlight && (
+              <div
+                className={
+                  showOnlyLinkRequiredHighlight
+                    ? 'rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800'
+                    : 'mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800'
+                }
+              >
+                {linkRequiredMessage}
+              </div>
+            )}
+            {showNaesin && (
+              <div className="space-y-1.5 mb-3">
+                <button
+                  type="button"
+                  onClick={onSelectNaesin}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-200/80 transition-colors font-medium text-gray-900"
+                >
+                  내신 성적
+                </button>
+              </div>
+            )}
             {showScoreList ? (
-              <div className="space-y-1.5 max-h-48 overflow-y-auto">
+              <div className={`space-y-1.5 overflow-y-auto ${showNaesin ? 'max-h-36' : 'max-h-48'}`}>
                 {scoreSets!.map((item) => (
                   <button
                     key={item.id}
@@ -87,8 +127,10 @@ export default function SchoolRecordToolStartModal({
                   </button>
                 ))}
               </div>
-            ) : (
+            ) : showOnlyLinkRequiredHighlight ? null : !showNaesin ? (
               statusText
+            ) : (
+              <p className="text-gray-600 text-xs mt-1">{statusText}</p>
             )}
           </div>
 

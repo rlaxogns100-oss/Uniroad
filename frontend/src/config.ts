@@ -2,12 +2,16 @@ import { Capacitor } from '@capacitor/core'
 
 /**
  * 앱에서 사용하는 API 베이스 URL (빌드 시 설정).
- * Capacitor(iOS/Android) 앱 빌드 시 .env에 VITE_API_BASE_URL=https://uni2road.com 로 설정하면
- * 번들된 앱이 해당 서버로 요청합니다. 미설정 시 상대 경로(웹 배포와 동일) 사용.
+ * - 로컬 개발(모바일): .env에 VITE_API_BASE_URL=http://localhost:8000, VITE_PRE_DEPLOY=true 두고 npm run build:ios:local / cap:ios:local
+ * - 실제 기기 테스트: .env을 PC IP로 (예: http://192.168.0.5:8000)
+ * - 배포용: npm run build:ios / cap:ios (VITE_PRE_DEPLOY 없음 → uni2road.com 사용)
  */
 export const API_BASE = import.meta.env.VITE_API_BASE_URL ?? ''
 
-/** 프로덕션 API 서버 (Capacitor 앱에서 env 미설정 시 폴백) */
+/** 배포 전 모드: true면 모바일도 웹과 같은 API 서버 사용 (프로덕션 폴백 비활성화) */
+export const PRE_DEPLOY = import.meta.env.VITE_PRE_DEPLOY === 'true'
+
+/** 프로덕션 API 서버 (Capacitor 앱에서 env 미설정 시 폴백, PRE_DEPLOY일 땐 사용 안 함) */
 const PRODUCTION_API_BASE = 'https://uni2road.com'
 const GALAXY_APP_SOURCE_QUERY_VALUE = 'galaxy'
 const GALAXY_APP_SOURCE_QUERY_KEY = 'app_source'
@@ -16,16 +20,23 @@ const GALAXY_APP_SESSION_KEY = 'uniroad_galaxy_app_session'
 const GALAXY_APP_SESSION_TS_KEY = 'uniroad_galaxy_app_session_ts'
 const GALAXY_APP_SESSION_TTL_MS = 1000 * 60 * 60 * 6
 
+/** 배포 전 로컬 개발 시 API 기본값 (모바일도 웹과 같은 서버 쓰기 위함) */
+const DEV_API_BASE = 'http://localhost:8000'
+
 /**
  * 실제 요청에 쓸 API 베이스 URL.
- * Capacitor 앱인데 API_BASE가 비어 있으면 프로덕션 서버 사용 (npm run build만 했을 때 대비).
+ * - PRE_DEPLOY(true): 모바일도 웹과 동일. API_BASE 있으면 사용, 없으면 DEV_API_BASE(로컬).
+ * - 배포 빌드: Capacitor에서 API_BASE 비어 있으면 프로덕션(uni2road.com) 사용.
  */
 export const getApiBaseUrl = (): string => {
   if (API_BASE) return API_BASE
+  if (PRE_DEPLOY) return DEV_API_BASE
   if (typeof window !== 'undefined') {
     try {
       if (Capacitor.isNativePlatform()) return PRODUCTION_API_BASE
     } catch (_) {}
+    const origin = (window.location?.origin || '').toLowerCase()
+    if (/^(capacitor|ionic|file):/.test(origin)) return PRODUCTION_API_BASE
   }
   return ''
 }
@@ -39,6 +50,19 @@ export const isCapacitorApp = (): boolean => {
     // Capacitor는 브라우저 환경에서만 사용 가능
     if (typeof window === 'undefined') return false
     return Capacitor.isNativePlatform()
+  } catch (e) {
+    return false
+  }
+}
+
+/**
+ * 스토어/앱 빌드에서 실행 중인지 여부 (UI: User 배지, 구독 관리 숨김용)
+ * - Capacitor 네이티브 앱 또는 Galaxy 등 앱 웹뷰
+ */
+export const isAppBuild = (): boolean => {
+  try {
+    if (typeof window === 'undefined') return false
+    return isCapacitorApp() || isGalaxyAppSession()
   } catch (e) {
     return false
   }

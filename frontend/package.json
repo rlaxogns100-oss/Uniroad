@@ -6,8 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "build:ios": "VITE_API_BASE_URL=https://uni2road.com tsc && vite build --mode capacitor",
+    "build:ios": "VITE_API_BASE_URL=https://uni2road.com VITE_PRE_DEPLOY=false tsc && VITE_API_BASE_URL=https://uni2road.com VITE_PRE_DEPLOY=false vite build --mode capacitor",
+    "build:ios:local": "tsc && vite build --mode capacitor",
     "cap:ios": "npm run build:ios && npx cap sync ios",
+    "cap:ios:local": "npm run build:ios:local && npx cap sync ios",
+    "cap:open:ios": "npx cap open ios",
     "preview": "vite preview"
   },
   "dependencies": {

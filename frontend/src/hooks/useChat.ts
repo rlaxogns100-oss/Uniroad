@@ -127,9 +127,12 @@ export function useChat() {
   }, [])
 
   // 세션 선택
-  const selectSession = useCallback(async (sessionId: string | null) => {
+  const selectSession = useCallback(async (
+    sessionId: string | null,
+    options?: { skipLoad?: boolean }
+  ) => {
     setCurrentSessionId(sessionId)
-    if (sessionId) {
+    if (sessionId && !options?.skipLoad) {
       await loadMessages(sessionId)
     } else {
       setMessages([])

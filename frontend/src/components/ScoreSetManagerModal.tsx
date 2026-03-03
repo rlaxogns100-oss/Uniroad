@@ -13,11 +13,11 @@ interface ScoreSetManagerModalProps {
   sessionId: string
   token?: string
   onUseScoreSet?: (scoreSetId: string, scoreSetName: string) => void
-  /** true면 모달이 아닌 패널 내부에 임베드되어 렌더 (오버레이 없음) */
   embedded?: boolean
 }
 
 const subjects = ['한국사', '국어', '수학', '영어', '탐구1', '탐구2', '제2외국어/한문']
+
 const electiveOptionsMap: Record<string, string[]> = {
   국어: ['미응시', '화법과작문', '언어와매체'],
   수학: ['미응시', '확률과통계', '기하', '미적분'],
@@ -27,33 +27,72 @@ const electiveOptionsMap: Record<string, string[]> = {
   '제2외국어/한문': ['미응시', '독일어1', '프랑스어1', '스페인어1', '중국어1', '일본어1', '러시아어1', '아랍어1', '베트남어1', '한문1'],
 }
 
-const normalizeTitle = (name: string) => (name || '').replace(/^@/, '').slice(0, 10)
+const DEFAULT_SCORE_SET: Record<string, any> = {
+  한국사: { 등급: 2 },
+  국어: { 선택과목: '화법과작문', 표준점수: 129, 백분위: 92, 등급: 2 },
+  수학: { 선택과목: '확률과통계', 표준점수: 121, 백분위: 83, 등급: 3 },
+  영어: { 선택과목: '영어', 등급: 2 },
+  탐구1: { 선택과목: '생활과윤리', 표준점수: 61, 백분위: 83, 등급: 3 },
+  탐구2: { 선택과목: '사회문화', 표준점수: 63, 백분위: 92, 등급: 2 },
+  '제2외국어/한문': { 선택과목: '미응시' },
+}
+
+const normalizeTitle = (name: string): string => (name || '').replace(/^@/, '').slice(0, 10)
+
+const cloneScores = (value: Record<string, any>): Record<string, any> => {
+  try {
+    return JSON.parse(JSON.stringify(value || {}))
+  } catch {
+    return {}
+  }
+}
+
 const getElectiveValue = (subject: string, row: Record<string, any>) => {
   if (subject === '한국사') return '-'
-  return row['선택과목'] ?? row['과목명'] ?? '미응시'
+  return row?.['선택과목'] ?? row?.['과목명'] ?? '미응시'
 }
 
-/** 과목별 요약 값 표시 (등급 우선, 없으면 표준점수/백분위) */
-const getSubjectDisplay = (scores: Record<string, any>, subject: string): string => {
-  const row = scores?.[subject] || {}
-  const 등급 = row['등급']
-  const 표준점수 = row['표준점수']
-  const 백분위 = row['백분위']
-  if (등급 !== null && 등급 !== undefined && 등급 !== '') return `${등급}등`
-  if (표준점수 !== null && 표준점수 !== undefined && 표준점수 !== '') return `${표준점수}`
-  if (백분위 !== null && 백분위 !== undefined && 백분위 !== '') return `${백분위}%`
-  return '-'
+const readNumber = (value: any): number | null => {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) return null
+  return parsed
 }
 
-/** 기본 성적 데이터 (@내성적2) - 성적 없을 때 보여줄 기본값 */
-const DEFAULT_SCORE_SET: Record<string, any> = {
-  '한국사': { '등급': 2 },
-  '국어': { '선택과목': '화법과작문', '표준점수': 129, '백분위': 92, '등급': 2 },
-  '수학': { '선택과목': '확률과통계', '표준점수': 121, '백분위': 83, '등급': 3 },
-  '영어': { '선택과목': '영어', '등급': 2 },
-  '탐구1': { '선택과목': '생활과윤리', '표준점수': 61, '백분위': 83, '등급': 3 },
-  '탐구2': { '선택과목': '사회문화', '표준점수': 63, '백분위': 92, '등급': 2 },
-  '제2외국어/한문': { '선택과목': '미응시' },
+const calculateAverageGrade = (scores: Record<string, any>): number | null => {
+  const grades: number[] = []
+
+  for (const subject of subjects) {
+    const row = scores?.[subject] || {}
+    const elective = getElectiveValue(subject, row)
+    const isNoExam = subject !== '한국사' && elective === '미응시'
+    if (isNoExam) continue
+
+    const grade = readNumber(row['등급'])
+    if (grade !== null && grade >= 1 && grade <= 9) {
+      grades.push(grade)
+    }
+  }
+
+  if (grades.length === 0) return null
+  const avg = grades.reduce((sum, curr) => sum + curr, 0) / grades.length
+  return Number(avg.toFixed(1))
+}
+
+const formatAverageLabel = (scores: Record<string, any>): string => {
+  const avg = calculateAverageGrade(scores)
+  if (avg === null) return '미입력'
+  return `${avg}등급`
+}
+
+const resolveNextScoreIndex = (items: ScoreSetItem[]): number => {
+  const indices = items
+    .map((item) => normalizeTitle(item.name).match(/^새성적_(\d+)$/)?.[1])
+    .map((v) => (v ? Number(v) : null))
+    .filter((v): v is number => v !== null && Number.isFinite(v))
+
+  if (indices.length === 0) return 0
+  return Math.max(...indices) + 1
 }
 
 export default function ScoreSetManagerModal({
@@ -66,27 +105,21 @@ export default function ScoreSetManagerModal({
 }: ScoreSetManagerModalProps) {
   const [items, setItems] = useState<ScoreSetItem[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [title, setTitle] = useState('내성적1')
-  const [scores, setScores] = useState<Record<string, any>>({})
+  const [title, setTitle] = useState('새성적_0')
+  const [scores, setScores] = useState<Record<string, any>>(cloneScores(DEFAULT_SCORE_SET))
+  const [view, setView] = useState<'dashboard' | 'input'>('dashboard')
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [error, setError] = useState('')
-  /** 여러 개 선택 후 일괄 삭제용 체크된 id 목록 */
-  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set())
-  /** 왼쪽 사이드바 검색/필터 */
-  const [sidebarFilter, setSidebarFilter] = useState('')
-  /** 테이블 뷰 모드 (grid | list) */
-  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid')
-  /** 새 성적 클릭 시 제목용 인덱스 (새성적_0, 새성적_1, ...) */
-  const newScoreIndexRef = useRef(0)
-  /** 사이드바 행 메뉴(⋮) 열린 id */
-  const [sidebarMenuOpenId, setSidebarMenuOpenId] = useState<string | null>(null)
-  /** 사용자가 지정한 대표 성적 id (localStorage에 저장, 세션별) */
-  const [representativeId, setRepresentativeId] = useState<string | null>(null)
-  /** 편집 후 자동 저장용 dirty 플래그 */
   const [dirty, setDirty] = useState(false)
+  const [representativeId, setRepresentativeId] = useState<string | null>(null)
+
   const titleRef = useRef(title)
   const scoresRef = useRef(scores)
+  const newScoreIndexRef = useRef(0)
+  const editorRef = useRef<HTMLDivElement>(null)
+  const blurSaveTimerRef = useRef<number | null>(null)
+
   titleRef.current = title
   scoresRef.current = scores
 
@@ -95,24 +128,25 @@ export default function ScoreSetManagerModal({
     [items, selectedId]
   )
 
-  /** 대표 성적: 사용자 지정 > 없으면 가장 먼저 만든 성적(updated_at 기준) */
-  const firstCreatedItem = useMemo(() => {
-    if (items.length === 0) return null
-    const byId = items.find((i) => i.id === representativeId)
-    if (byId) return byId
-    return [...items].sort((a, b) => new Date(a.updated_at || 0).getTime() - new Date(b.updated_at || 0).getTime())[0]
-  }, [items, representativeId])
+  const dashboardItems = useMemo(() => {
+    return [...items].sort(
+      (a, b) => new Date(b.updated_at || b.created_at || 0).getTime() - new Date(a.updated_at || a.created_at || 0).getTime()
+    )
+  }, [items])
 
-  const filteredSidebarItems = useMemo(() => {
-    let list = [...items]
-    if (sidebarFilter.trim()) {
-      const ft = sidebarFilter.toLowerCase()
-      list = list.filter((i) => i.name.toLowerCase().includes(ft))
-    }
-    // 최근 생성순 정렬
-    list.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime())
-    return list
-  }, [items, sidebarFilter])
+  const fallbackRepresentativeId = useMemo(() => {
+    if (items.length === 0) return null
+    return [...items].sort(
+      (a, b) => new Date(a.created_at || a.updated_at || 0).getTime() - new Date(b.created_at || b.updated_at || 0).getTime()
+    )[0]?.id || null
+  }, [items])
+
+  const resolvedRepresentativeId = useMemo(() => {
+    if (representativeId && items.some((item) => item.id === representativeId)) return representativeId
+    return fallbackRepresentativeId
+  }, [representativeId, fallbackRepresentativeId, items])
+
+  const selectedAverageLabel = useMemo(() => formatAverageLabel(scores), [scores])
 
   const load = async () => {
     setIsLoading(true)
@@ -120,22 +154,36 @@ export default function ScoreSetManagerModal({
     try {
       const rows = await listScoreSets(sessionId, token)
       setItems(rows)
-      setCheckedIds(new Set())
-      if (rows.length > 0) {
-        const first = rows[0]
-        setSelectedId(first.id)
-        setTitle(normalizeTitle(first.name))
-        setScores(first.scores || {})
-        newScoreIndexRef.current = 0
-      } else {
-        // 성적 없을 때 기본값 + 새성적_0
+      newScoreIndexRef.current = resolveNextScoreIndex(rows)
+
+      if (rows.length === 0) {
         setSelectedId(null)
-        setTitle('새성적_0')
-        setScores(DEFAULT_SCORE_SET)
-        newScoreIndexRef.current = 1
+        setTitle(`새성적_${newScoreIndexRef.current}`)
+        setScores(cloneScores(DEFAULT_SCORE_SET))
+        setView('dashboard')
+        return
       }
+
+      const keepId = selectedId && rows.some((item) => item.id === selectedId) ? selectedId : rows[0].id
+      const keepItem = rows.find((item) => item.id === keepId) || rows[0]
+
+      setSelectedId(keepItem.id)
+      setTitle(normalizeTitle(keepItem.name))
+      setScores(cloneScores(keepItem.scores || {}))
     } catch (e: any) {
-      setError(e?.response?.data?.detail || '성적 목록을 불러오지 못했습니다.')
+      const msg = e?.response?.data?.detail
+      const isNotFound = e?.response?.status === 404 || (typeof msg === 'string' && msg.toLowerCase().includes('not found'))
+      if (isNotFound) {
+        setItems([])
+        setError('')
+        setSelectedId(null)
+        newScoreIndexRef.current = 0
+        setTitle('새성적_0')
+        setScores(cloneScores(DEFAULT_SCORE_SET))
+        setView('dashboard')
+      } else {
+        setError(msg || '성적 목록을 불러오지 못했습니다.')
+      }
     } finally {
       setIsLoading(false)
     }
@@ -155,23 +203,33 @@ export default function ScoreSetManagerModal({
     }
   }, [sessionId])
 
-  /** 편집 시 디바운스 자동 저장 */
   useEffect(() => {
     if (!selectedId || !dirty) return
+
     const timer = setTimeout(async () => {
-      const name = `@${normalizeTitle(titleRef.current)}`.trim()
-      if (!name || name === '@') return
+      const safeTitle = normalizeTitle(titleRef.current)
+      const payloadName = `@${safeTitle}`.trim()
+      if (!payloadName || payloadName === '@') return
+
       setIsSaving(true)
       setError('')
       try {
-        await updateScoreSet(selectedId, sessionId, name, scoresRef.current, token)
+        await updateScoreSet(selectedId, sessionId, payloadName, scoresRef.current, token)
+        setItems((prev) =>
+          prev.map((item) =>
+            item.id === selectedId
+              ? { ...item, name: payloadName, scores: cloneScores(scoresRef.current) }
+              : item
+          )
+        )
         setDirty(false)
       } catch (e: any) {
         setError(e?.response?.data?.detail || '자동 저장 중 오류가 발생했습니다.')
       } finally {
         setIsSaving(false)
       }
-    }, 800)
+    }, 700)
+
     return () => clearTimeout(timer)
   }, [selectedId, dirty, sessionId, token])
 
@@ -179,40 +237,110 @@ export default function ScoreSetManagerModal({
     const key = `uniroad_representative_score_${sessionId}`
     try {
       localStorage.setItem(key, scoreSetId)
-      setRepresentativeId(scoreSetId)
     } catch {
       // ignore
     }
+    setRepresentativeId(scoreSetId)
   }
 
-  const selectItem = (item: ScoreSetItem) => {
+  const selectItemForInput = (item: ScoreSetItem) => {
     setSelectedId(item.id)
     setTitle(normalizeTitle(item.name))
-    setScores(item.scores || {})
+    setScores(cloneScores(item.scores || {}))
     setDirty(false)
     setError('')
+    setView('input')
   }
 
-  /** 새 성적 클릭 시 즉시 생성·저장 후 해당 항목 선택 */
   const createNew = async () => {
-    const newTitle = `새성적_${newScoreIndexRef.current}`
-    newScoreIndexRef.current += 1
-    const newScores = JSON.parse(JSON.stringify(DEFAULT_SCORE_SET))
-    const payloadName = `@${newTitle}`
+    if (isSaving) return
+
+    const existing = new Set(items.map((item) => normalizeTitle(item.name)))
+    let index = newScoreIndexRef.current
+    while (existing.has(`새성적_${index}`)) index += 1
+    newScoreIndexRef.current = index + 1
+
+    const newTitle = `새성적_${index}`
+    const newScores = cloneScores(DEFAULT_SCORE_SET)
+
     setIsSaving(true)
     setError('')
     try {
-      const saved = await createScoreSet(sessionId, payloadName, newScores, token)
+      const saved = await createScoreSet(sessionId, `@${newTitle}`, newScores, token)
       await load()
       setSelectedId(saved.id)
       setTitle(normalizeTitle(saved.name))
-      setScores(saved.scores || {})
+      setScores(cloneScores(saved.scores || {}))
       setDirty(false)
+      setView('input')
     } catch (e: any) {
-      setError(e?.response?.data?.detail || '성적 생성 중 오류가 발생했습니다.')
+      setError(e?.response?.data?.detail || '새 성적 추가 중 오류가 발생했습니다.')
     } finally {
       setIsSaving(false)
     }
+  }
+
+  const deleteById = async (id: string) => {
+    if (!confirm('이 성적을 삭제할까요?')) return
+
+    setIsSaving(true)
+    setError('')
+    try {
+      await deleteScoreSet(id, sessionId, token)
+      if (selectedId === id) {
+        setView('dashboard')
+        setSelectedId(null)
+      }
+      await load()
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || '성적 삭제 중 오류가 발생했습니다.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const saveNow = async () => {
+    if (!selectedId) return
+    if (!dirty) return
+
+    const safeTitle = normalizeTitle(title)
+    if (!safeTitle) {
+      setError('성적 이름을 입력해 주세요.')
+      return
+    }
+
+    setIsSaving(true)
+    setError('')
+    try {
+      const payloadName = `@${safeTitle}`
+      await updateScoreSet(selectedId, sessionId, payloadName, scores, token)
+      setItems((prev) =>
+        prev.map((item) =>
+          item.id === selectedId
+            ? { ...item, name: payloadName, scores: cloneScores(scores) }
+            : item
+        )
+      )
+      setDirty(false)
+    } catch (e: any) {
+      setError(e?.response?.data?.detail || '성적 저장 중 오류가 발생했습니다.')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const scheduleSaveOnBlur = () => {
+    if (!selectedId || !dirty) return
+    if (blurSaveTimerRef.current) {
+      window.clearTimeout(blurSaveTimerRef.current)
+    }
+    blurSaveTimerRef.current = window.setTimeout(() => {
+      const activeEl = document.activeElement as HTMLElement | null
+      if (editorRef.current && activeEl && editorRef.current.contains(activeEl)) {
+        return
+      }
+      void saveNow()
+    }, 80)
   }
 
   const setVal = (subject: string, key: string, value: any) => {
@@ -223,260 +351,187 @@ export default function ScoreSetManagerModal({
     }))
   }
 
-  const hasAnyScore = Object.values(scores || {}).some((row: any) => {
-    if (!row || typeof row !== 'object') return false
-    return row['표준점수'] !== null && row['표준점수'] !== undefined && row['표준점수'] !== '' ||
-      row['백분위'] !== null && row['백분위'] !== undefined && row['백분위'] !== '' ||
-      row['등급'] !== null && row['등급'] !== undefined && row['등급'] !== ''
-  })
-
-  const onSave = async () => {
-    const safeTitle = normalizeTitle(title)
-    if (!safeTitle) {
-      setError('성적 이름을 입력해 주세요.')
-      return
+  useEffect(() => {
+    return () => {
+      if (blurSaveTimerRef.current) {
+        window.clearTimeout(blurSaveTimerRef.current)
+      }
     }
-    if (!hasAnyScore) {
-      setError('최소 1개 과목 점수를 입력해 주세요.')
-      return
-    }
-
-    setIsSaving(true)
-    setError('')
-    try {
-      const payloadName = `@${safeTitle}`
-      const saved = selectedId
-        ? await updateScoreSet(selectedId, sessionId, payloadName, scores, token)
-        : await createScoreSet(sessionId, payloadName, scores, token)
-      await load()
-      setSelectedId(saved.id)
-      setTitle(normalizeTitle(saved.name))
-      setScores(saved.scores || {})
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || '성적 저장 중 오류가 발생했습니다.')
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  const onDelete = async () => {
-    if (!selectedId) return
-    if (!confirm('선택한 성적을 삭제할까요?')) return
-    setIsSaving(true)
-    setError('')
-    try {
-      await deleteScoreSet(selectedId, sessionId, token)
-      await load()
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || '성적 삭제 중 오류가 발생했습니다.')
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  const toggleChecked = (id: string) => {
-    setCheckedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  const onDeleteChecked = async () => {
-    if (checkedIds.size === 0) return
-    if (!confirm(`선택한 ${checkedIds.size}개 성적을 삭제할까요?`)) return
-    setIsSaving(true)
-    setError('')
-    try {
-      await Promise.all(
-        Array.from(checkedIds).map((id) => deleteScoreSet(id, sessionId, token))
-      )
-      setCheckedIds(new Set())
-      await load()
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || '성적 삭제 중 오류가 발생했습니다.')
-    } finally {
-      setIsSaving(false)
-    }
-  }
-
-  /** 사이드바에서 해당 성적 한 건 삭제 */
-  const deleteItemById = async (id: string) => {
-    setSidebarMenuOpenId(null)
-    if (!confirm('이 성적을 삭제할까요?')) return
-    setIsSaving(true)
-    setError('')
-    try {
-      await deleteScoreSet(id, sessionId, token)
-      await load()
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || '성적 삭제 중 오류가 발생했습니다.')
-    } finally {
-      setIsSaving(false)
-    }
-  }
+  }, [])
 
   if (!isOpen && !embedded) return null
 
   return (
     <div
-      className={embedded ? 'bg-white w-full h-full flex flex-col min-h-0 rounded-xl overflow-hidden' : 'fixed inset-0 z-[80] bg-black/40 flex items-center justify-center p-4'}
+      className={embedded ? 'w-full h-full min-h-0 flex flex-col bg-[#F5F6F8]' : 'fixed inset-0 z-[80] bg-black/30 flex items-center justify-center p-4'}
       onClick={embedded ? undefined : onClose}
     >
       <div
-        className={embedded ? 'bg-white w-full h-full flex flex-col min-h-0 rounded-xl overflow-hidden' : 'bg-white w-full max-w-6xl rounded-xl shadow-xl max-h-[90vh] overflow-hidden flex flex-col'}
+        className={embedded ? 'w-full h-full min-h-0 flex flex-col bg-[#F5F6F8]' : 'w-full max-w-6xl h-[88vh] rounded-3xl overflow-hidden bg-[#F5F6F8] shadow-2xl flex flex-col'}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="px-4 py-3 border-b flex items-center justify-between bg-white shrink-0">
-          <h3 className="text-lg font-bold text-gray-900">모의고사 성적 관리</h3>
-          <button className="text-gray-500 hover:text-gray-700 text-2xl leading-none" onClick={onClose}>×</button>
+        <div className="px-4 sm:px-7 py-3.5 sm:py-5 bg-[#F5F6F8] border-b border-[#E9EBEF] shrink-0 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="text-base sm:text-[20px] font-bold text-gray-900">모의고사 성적 관리</h3>
+            <p className="text-xs sm:text-sm text-gray-500 mt-0.5 truncate">필요한 성적만 간단하게 저장하고 바로 활용하세요</p>
+          </div>
+          <button
+            type="button"
+            className="shrink-0 w-10 h-10 min-h-[44px] min-w-[44px] rounded-full bg-white text-gray-500 hover:text-gray-700 active:bg-gray-100 transition-colors flex items-center justify-center touch-manipulation"
+            onClick={onClose}
+            aria-label="닫기"
+          >
+            ×
+          </button>
         </div>
 
-        {/* Main 2-Panel Layout */}
-        <div className="flex flex-1 overflow-hidden">
-          {/* Left Sidebar - Table List (Supabase style) */}
-          <div className="w-64 border-r bg-gray-50 flex flex-col">
-            {/* 새 성적 버튼 (성적 검색 상단) */}
-            <div className="px-3 pt-3 pb-1 bg-white">
-              <button
-                type="button"
-                onClick={createNew}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded-md bg-emerald-600 text-white text-sm hover:bg-emerald-700 font-medium"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
-                새 성적
-              </button>
-            </div>
-            {/* Sidebar Search */}
-            <div className="px-3 pt-1 pb-3 bg-white">
-              <div className="relative">
-                <input
-                  type="text"
-                  placeholder="성적 검색..."
-                  value={sidebarFilter}
-                  onChange={(e) => setSidebarFilter(e.target.value)}
-                  className="w-full px-3 py-2 pl-9 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-                <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
+        {error && (
+          <div className="mx-5 sm:mx-7 mt-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-600">
+            {error}
+          </div>
+        )}
+
+        {view === 'dashboard' ? (
+          <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-7 py-5 sm:py-6">
+            <div className="mb-4 sm:mb-5 flex items-end justify-between">
+              <div>
+                <p className="text-[20px] sm:text-[24px] font-bold text-gray-900">내 점수로 어디 갈 수 있을까?</p>
+                <p className="text-sm text-gray-500 mt-1">성적 카드를 눌러서 수정하거나 바로 대학 추천을 받아보세요.</p>
               </div>
+              {isSaving && <span className="text-xs text-[#0050FF] font-medium">저장 중...</span>}
             </div>
 
-            {/* Table List */}
-            <div className="flex-1 overflow-y-auto">
-              <div className="px-3 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                성적 목록
+            {isLoading ? (
+              <div className="rounded-3xl bg-white px-5 py-10 text-sm text-gray-500">성적 목록을 불러오는 중이에요...</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
+                <button
+                  type="button"
+                  onClick={createNew}
+                  disabled={isSaving}
+                  className="group min-h-[180px] rounded-3xl border-2 border-dashed border-[#C9D7FF] bg-white transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_28px_rgba(0,80,255,0.12)]"
+                >
+                  <div className="h-full flex flex-col items-center justify-center">
+                    <div className="w-12 h-12 rounded-full bg-[#EAF1FF] text-[#0050FF] text-3xl leading-none flex items-center justify-center group-hover:scale-105 transition-transform">+</div>
+                    <p className="mt-3 text-[15px] font-semibold text-gray-900">새 성적 추가</p>
+                    <p className="text-xs text-gray-500 mt-1">기본값으로 빠르게 시작해요</p>
+                  </div>
+                </button>
+
+                {dashboardItems.map((item) => {
+                  const avgLabel = formatAverageLabel(item.scores || {})
+                  const isRepresentative = resolvedRepresentativeId === item.id
+                  const isSelected = selectedId === item.id
+
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => selectItemForInput(item)}
+                      className={`min-h-[180px] rounded-3xl bg-white p-4 sm:p-5 cursor-pointer transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_10px_28px_rgba(17,24,39,0.08)] ${
+                        isSelected ? 'ring-2 ring-[#0050FF]/40 shadow-[0_8px_24px_rgba(0,80,255,0.16)]' : ''
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="text-[15px] font-semibold text-gray-900 truncate">{item.name}</p>
+                          <p className="text-xs text-gray-500 mt-1">최근 업데이트 {new Date(item.updated_at || item.created_at || Date.now()).toLocaleDateString('ko-KR')}</p>
+                        </div>
+                        {isRepresentative && (
+                          <span className="shrink-0 rounded-full bg-[#EAF1FF] px-2.5 py-1 text-[11px] font-semibold text-[#0050FF]">대표</span>
+                        )}
+                      </div>
+
+                      <div className="mt-5">
+                        <p className="text-xs text-gray-500">평균 등급</p>
+                        <p className="text-[32px] leading-[1.1] font-bold text-gray-900 mt-1">{avgLabel}</p>
+                      </div>
+
+                      <div className="mt-5 grid grid-cols-2 gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            setRepresentativeScore(item.id)
+                          }}
+                          className={`h-10 rounded-xl text-sm font-semibold transition-colors ${
+                            isRepresentative
+                              ? 'bg-[#EAF1FF] text-[#0050FF]'
+                              : 'bg-[#F5F6F8] text-gray-700 hover:bg-[#EDEFF3]'
+                          }`}
+                        >
+                          {isRepresentative ? '대표 성적' : '대표로 설정'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onUseScoreSet?.(item.id, item.name)
+                          }}
+                          className="h-10 rounded-xl bg-[#0050FF] text-white text-sm font-semibold hover:bg-[#0043D6] transition-colors"
+                        >
+                          대학 보기
+                        </button>
+                      </div>
+
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            void deleteById(item.id)
+                          }}
+                          className="text-xs text-gray-400 hover:text-red-500 transition-colors"
+                        >
+                          삭제
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
-              {isLoading ? (
-                <div className="px-3 py-2 text-sm text-gray-500">불러오는 중...</div>
-              ) : filteredSidebarItems.length === 0 ? (
-                <div className="px-3 py-2">
-                  {sidebarFilter ? (
-                    <div className="text-sm text-gray-500">검색 결과 없음</div>
-                  ) : (
-                    <div className="text-sm text-gray-400">저장된 성적 없음</div>
+            )}
+          </div>
+        ) : (
+          <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-7 py-5 sm:py-6">
+            <div className="rounded-3xl bg-white p-4 sm:p-5 mb-4 sm:mb-5 transition-all duration-200">
+              <div className="flex items-center justify-between gap-3">
+                <button
+                  type="button"
+                  onClick={() => setView('dashboard')}
+                  className="h-9 px-3 rounded-full bg-[#F5F6F8] text-sm font-semibold text-gray-700 hover:bg-[#ECEFF4] transition-colors"
+                >
+                  ← 목록으로
+                </button>
+                <div className="flex items-center gap-2">
+                  {selectedId && (
+                    <button
+                      type="button"
+                      onClick={() => setRepresentativeScore(selectedId)}
+                      className={`h-9 px-3 rounded-full text-sm font-semibold transition-colors ${
+                        resolvedRepresentativeId === selectedId
+                          ? 'bg-[#EAF1FF] text-[#0050FF]'
+                          : 'bg-[#F5F6F8] text-gray-700 hover:bg-[#ECEFF4]'
+                      }`}
+                    >
+                      {resolvedRepresentativeId === selectedId ? '대표 성적' : '대표로 설정'}
+                    </button>
+                  )}
+                  {selectedItem && onUseScoreSet && (
+                    <button
+                      type="button"
+                      onClick={() => onUseScoreSet(selectedItem.id, selectedItem.name)}
+                      className="h-9 px-4 rounded-full bg-[#0050FF] text-white text-sm font-semibold hover:bg-[#0043D6] transition-colors"
+                    >
+                      대학 보기
+                    </button>
                   )}
                 </div>
-              ) : (
-                <div className="space-y-0.5 px-2 pb-2">
-                  {filteredSidebarItems.map((item) => {
-                    const isSelected = selectedId === item.id
-                    const isMenuOpen = sidebarMenuOpenId === item.id
-                    return (
-                      <div
-                        key={item.id}
-                        className={`group flex items-center gap-2 px-3 py-2 rounded-md transition-colors ${
-                          isSelected
-                            ? 'bg-emerald-100 text-emerald-900'
-                            : 'hover:bg-gray-100 text-gray-700'
-                        }`}
-                      >
-                        <div
-                          onClick={() => selectItem(item)}
-                          className="flex-1 min-w-0 truncate text-sm font-medium cursor-pointer"
-                        >
-                          {item.name}
-                        </div>
-                        <div className="relative shrink-0">
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              setSidebarMenuOpenId(isMenuOpen ? null : item.id)
-                            }}
-                            className="p-1 rounded hover:bg-gray-200/80 text-gray-600 flex items-center justify-center"
-                            aria-label="메뉴"
-                          >
-                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-                              <circle cx="12" cy="5" r="1.5" />
-                              <circle cx="12" cy="12" r="1.5" />
-                              <circle cx="12" cy="19" r="1.5" />
-                            </svg>
-                          </button>
-                          {isMenuOpen && (
-                            <>
-                              <div
-                                className="fixed inset-0 z-10"
-                                aria-hidden
-                                onClick={() => setSidebarMenuOpenId(null)}
-                              />
-                              <div className="absolute right-0 top-full mt-1 py-1 bg-white border border-gray-200 rounded-lg shadow-lg z-20 min-w-[120px]">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setRepresentativeScore(item.id)
-                                    setSidebarMenuOpenId(null)
-                                  }}
-                                  className="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100"
-                                >
-                                  대표 성적 설정
-                                </button>
-                                {onUseScoreSet && (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      onUseScoreSet(item.id, item.name)
-                                      setSidebarMenuOpenId(null)
-                                    }}
-                                    className="w-full px-3 py-1.5 text-left text-sm text-gray-700 hover:bg-gray-100"
-                                  >
-                                    이 성적 사용
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => deleteItemById(item.id)}
-                                  className="w-full px-3 py-1.5 text-left text-sm text-red-600 hover:bg-red-50"
-                                >
-                                  삭제
-                                </button>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
+              </div>
 
-          {/* Right Panel - Data View */}
-          <div className="flex-1 flex flex-col bg-white overflow-hidden">
-            {/* Table Header / Tabs */}
-            <div className="border-b bg-white flex items-center gap-1 px-4 py-2">
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-gray-100 rounded-md text-sm font-medium text-gray-700 min-w-0">
-                <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M3 14h18m-9-4v8m-7-4h14M4 6h16a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2z" />
-                </svg>
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span className="text-gray-500 shrink-0">@</span>
+              <div className="mt-4">
+                <p className="text-xs text-gray-500">성적 이름</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="text-[20px] font-semibold text-[#0050FF]">@</span>
                   <input
                     type="text"
                     value={title}
@@ -484,183 +539,154 @@ export default function ScoreSetManagerModal({
                       setDirty(true)
                       setTitle(e.target.value.replace(/^@/, '').slice(0, 10))
                     }}
-                    className="bg-transparent border-none outline-none text-gray-700 font-medium min-w-[4rem] w-28 max-w-[8rem] focus:ring-0 p-0 placeholder:text-gray-400"
-                    placeholder="성적이름"
+                    className="w-full text-[20px] font-semibold text-gray-900 bg-transparent outline-none placeholder:text-gray-300"
+                    placeholder="성적 이름"
                   />
                 </div>
-                {selectedId && firstCreatedItem?.id === selectedId && (
-                  <span className="text-[10px] px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded ml-1 shrink-0">대표 성적</span>
-                )}
               </div>
-              <div className="flex-1" />
-              {selectedItem && onUseScoreSet && (
-                <button
-                  type="button"
-                  onClick={() => onUseScoreSet(selectedItem.id, selectedItem.name)}
-                  className="px-3 py-1.5 rounded-md bg-indigo-600 text-white text-sm hover:bg-indigo-700 font-medium"
-                >
-                  이 성적 사용
-                </button>
-              )}
-              {!selectedId && (
-                <button
-                  type="button"
-                  disabled
-                  className="px-3 py-1.5 rounded-md bg-gray-300 text-white text-sm font-medium cursor-not-allowed"
-                  title="저장 후 사용 가능합니다"
-                >
-                  저장 후 사용
-                </button>
-              )}
-            </div>
 
-            {/* Toolbar */}
-            <div className="px-4 py-2 border-b bg-gray-50 flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <button className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-200 rounded-md flex items-center gap-1">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                  </svg>
-                  필터
-                </button>
-                <button className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-200 rounded-md flex items-center gap-1">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                  </svg>
-                  정렬
-                </button>
-              </div>
-              <div className="flex-1" />
-              <div className="flex items-center gap-1 bg-gray-200 rounded-md p-0.5">
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className={`px-2 py-1 rounded text-sm ${viewMode === 'grid' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'}`}
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => setViewMode('list')}
-                  className={`px-2 py-1 rounded text-sm ${viewMode === 'list' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-600'}`}
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                  </svg>
-                </button>
+              <div className="mt-4 rounded-2xl bg-[#F5F6F8] px-4 py-3">
+                <p className="text-xs text-gray-500">현재 평균 등급</p>
+                <p className="mt-1 text-[28px] leading-none font-bold text-gray-900">{selectedAverageLabel}</p>
               </div>
             </div>
 
-            {/* Data Table */}
-            <div className="flex-1 overflow-auto">
-              {/* 성적이 없을 때는 기본 데이터(@내성적2)를 편집 가능하게 보여줌 */}
-              <table className="w-full text-sm">
-                <thead className="bg-gray-100 sticky top-0">
-                  <tr>
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">과목</th>
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">선택과목</th>
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">표준점수</th>
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">백분위</th>
-                    <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">등급</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-200">
-                  {subjects.map((subject) => {
-                    const row = scores?.[subject] || {}
-                    const electiveValue = getElectiveValue(subject, row)
-                    const isKoreanHistory = subject === '한국사'
-                    const isNoExam = !isKoreanHistory && electiveValue === '미응시'
-                    return (
-                      <tr key={subject} className="hover:bg-gray-50">
-                        <td className="px-4 py-3 font-medium text-gray-900">{subject}</td>
-                        <td className="px-4 py-3">
-                          {subject === '한국사' ? (
-                            <span className="text-gray-400">-</span>
-                          ) : (
-                            <select
-                              className="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                              value={electiveValue}
-                              onChange={(e) => {
-                                const nextValue = e.target.value
-                                setVal(subject, '선택과목', nextValue)
-                                if (nextValue === '미응시') {
-                                  setVal(subject, '표준점수', null)
-                                  setVal(subject, '백분위', null)
-                                  setVal(subject, '등급', null)
-                                }
-                              }}
-                            >
-                              {(electiveOptionsMap[subject] || ['미응시']).map((option) => (
-                                <option key={option} value={option}>{option}</option>
-                              ))}
-                            </select>
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          {isKoreanHistory || isNoExam ? (
-                            <span className="text-gray-400">-</span>
-                          ) : (
-                            <input
-                              type="number"
-                              min={0}
-                              max={200}
-                              className="w-24 px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                              value={row['표준점수'] ?? ''}
-                              onChange={(e) => setVal(subject, '표준점수', e.target.value === '' ? null : Number(e.target.value))}
-                            />
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          {isKoreanHistory || isNoExam ? (
-                            <span className="text-gray-400">-</span>
-                          ) : (
-                            <input
-                              type="number"
-                              min={0}
-                              max={100}
-                              className="w-24 px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                              value={row['백분위'] ?? ''}
-                              onChange={(e) => setVal(subject, '백분위', e.target.value === '' ? null : Number(e.target.value))}
-                            />
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          {isNoExam ? (
-                            <span className="text-gray-400">-</span>
-                          ) : (
-                            <input
-                              type="number"
-                              min={1}
-                              max={9}
-                              className="w-20 px-2 py-1.5 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                              value={row['등급'] ?? ''}
-                              onChange={(e) => setVal(subject, '등급', e.target.value === '' ? null : Number(e.target.value))}
-                            />
-                          )}
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Footer: 자동 저장 안내 및 에러만 표시 */}
-            <div className="px-4 py-3 border-t bg-gray-50 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {selectedId && (
-                  <span className="text-sm text-gray-500">
-                    수정 시 자동 저장됩니다
-                  </span>
-                )}
-                {!!error && <span className="text-sm text-red-600">{error}</span>}
+            <div ref={editorRef} className="rounded-3xl bg-[#FFFFFF] p-4 sm:p-5 transition-all duration-200">
+              <div className="mb-4">
+                <p className="text-[16px] font-bold text-[#000000]">과목별 성적을 한 번에 입력해 주세요</p>
+                <p className="text-sm text-[#6B7684] mt-1">셀을 클릭해 바로 수정하고, 포커스를 벗어나면 자동 저장돼요.</p>
               </div>
-              {isSaving && (
-                <span className="text-sm text-emerald-600">저장 중...</span>
-              )}
+
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] border-separate [border-spacing:0_10px]">
+                  <thead>
+                    <tr>
+                      <th className="px-4 pb-1 text-left text-xs font-semibold text-[#6B7684]">과목</th>
+                      <th className="px-3 pb-1 text-left text-xs font-semibold text-[#6B7684]">선택과목</th>
+                      <th className="px-3 pb-1 text-left text-xs font-semibold text-[#6B7684]">표준점수</th>
+                      <th className="px-3 pb-1 text-left text-xs font-semibold text-[#6B7684]">백분위</th>
+                      <th className="px-3 pb-1 text-left text-xs font-semibold text-[#6B7684]">등급</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {subjects.map((subject) => {
+                      const row = scores?.[subject] || {}
+                      const electiveValue = getElectiveValue(subject, row)
+                      const isHistory = subject === '한국사'
+                      const isNoExamRow = !isHistory && electiveValue === '미응시'
+
+                      return (
+                        <tr key={subject} className="bg-[#F8FAFD]">
+                          <td className="px-4 py-3 rounded-l-2xl">
+                            <p className="text-[14px] font-semibold text-[#000000]">{subject}</p>
+                          </td>
+                          <td className="px-3 py-3">
+                            {isHistory ? (
+                              <span className="text-sm text-[#6B7684]">-</span>
+                            ) : (
+                              <select
+                                value={electiveValue}
+                                onChange={(e) => {
+                                  const nextValue = e.target.value
+                                  setVal(subject, '선택과목', nextValue)
+                                  if (nextValue === '미응시') {
+                                    setVal(subject, '표준점수', null)
+                                    setVal(subject, '백분위', null)
+                                    setVal(subject, '등급', null)
+                                  }
+                                }}
+                                onBlur={scheduleSaveOnBlur}
+                                className="h-11 w-full rounded-xl border border-transparent bg-[#FFFFFF] px-3 text-[14px] font-medium text-[#000000] focus:outline-none focus:border-[#0050FF] focus:ring-2 focus:ring-[#0050FF]/15"
+                              >
+                                {(electiveOptionsMap[subject] || ['미응시']).map((option) => (
+                                  <option key={option} value={option}>
+                                    {option}
+                                  </option>
+                                ))}
+                              </select>
+                            )}
+                          </td>
+                          <td className="px-3 py-3">
+                            {isHistory || isNoExamRow ? (
+                              <span className="text-sm text-[#6B7684]">-</span>
+                            ) : (
+                              <input
+                                type="number"
+                                min={0}
+                                max={200}
+                                value={row['표준점수'] ?? ''}
+                                onChange={(e) => setVal(subject, '표준점수', e.target.value === '' ? null : Number(e.target.value))}
+                                onBlur={scheduleSaveOnBlur}
+                                className="h-11 w-full rounded-xl border border-transparent bg-[#FFFFFF] px-3 text-[14px] font-semibold text-[#000000] focus:outline-none focus:border-[#0050FF] focus:ring-2 focus:ring-[#0050FF]/15"
+                                placeholder="-"
+                              />
+                            )}
+                          </td>
+                          <td className="px-3 py-3">
+                            {isHistory || isNoExamRow ? (
+                              <span className="text-sm text-[#6B7684]">-</span>
+                            ) : (
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={row['백분위'] ?? ''}
+                                onChange={(e) => setVal(subject, '백분위', e.target.value === '' ? null : Number(e.target.value))}
+                                onBlur={scheduleSaveOnBlur}
+                                className="h-11 w-full rounded-xl border border-transparent bg-[#FFFFFF] px-3 text-[14px] font-semibold text-[#000000] focus:outline-none focus:border-[#0050FF] focus:ring-2 focus:ring-[#0050FF]/15"
+                                placeholder="-"
+                              />
+                            )}
+                          </td>
+                          <td className="px-3 py-3 rounded-r-2xl">
+                            {isNoExamRow ? (
+                              <span className="text-sm text-[#6B7684]">-</span>
+                            ) : (
+                              <input
+                                type="number"
+                                min={1}
+                                max={9}
+                                value={row['등급'] ?? ''}
+                                onChange={(e) => setVal(subject, '등급', e.target.value === '' ? null : Number(e.target.value))}
+                                onBlur={scheduleSaveOnBlur}
+                                className="h-11 w-full rounded-xl border border-transparent bg-[#FFFFFF] px-3 text-[14px] font-semibold text-[#000000] focus:outline-none focus:border-[#0050FF] focus:ring-2 focus:ring-[#0050FF]/15"
+                                placeholder="-"
+                              />
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="mt-4 flex items-center justify-between gap-2">
+                <p className="text-xs text-[#6B7684]">
+                  {dirty ? '변경사항이 있어요. 포커스를 벗어나면 자동 저장됩니다.' : '최신 상태로 저장되어 있어요.'}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void saveNow()}
+                    className="h-9 px-3 rounded-full bg-white border border-[#E6E8EC] text-sm font-semibold text-[#000000] hover:bg-[#F8FAFC]"
+                  >
+                    지금 저장
+                  </button>
+                  {selectedId && (
+                    <button
+                      type="button"
+                      onClick={() => void deleteById(selectedId)}
+                      className="h-9 px-3 rounded-full bg-white border border-red-100 text-sm font-semibold text-red-500 hover:bg-red-50"
+                    >
+                      삭제
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   )

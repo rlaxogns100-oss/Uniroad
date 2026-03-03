@@ -1,10 +1,13 @@
-import { useState, useRef, useEffect } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import {
   sendMessageStream,
   sendMessageStreamWithImage,
+  sendContinueAfterNaesin,
+  sendContinueAfterScoreConfirm,
   ChatResponse,
   ScoreReviewRequiredEvent,
+  SchoolGradeSavedEvent,
   ScoreSetSuggestItem,
   approveScoreReview,
   suggestScoreSets,
@@ -13,11 +16,14 @@ import {
   resetSession,
   migrateMessages,
   listScoreSets,
+  getMySchoolGradeInput,
   getProfile,
+  getSchoolRecordStatus,
   uploadProfileAvatar,
+  uploadProfileBanner,
   updateProfile,
 } from '../api/client'
-import ChatMessage from '../components/ChatMessage'
+import ChatMessage, { type NaesinEditedData } from '../components/ChatMessage'
 import ThinkingProcess from '../components/ThinkingProcess'
 import AgentPanel from '../components/AgentPanel'
 import AuthModal from '../components/AuthModal'
@@ -28,16 +34,20 @@ import ScoreSetManagerModal from '../components/ScoreSetManagerModal'
 import SchoolRecordToolStartModal from '../components/SchoolRecordToolStartModal'
 import SchoolGradeInputModal from '../components/SchoolGradeInputModal'
 import SchoolRecordResearchProgress from '../components/SchoolRecordResearchProgress'
-import SchoolRecordDeepAnalysisPage from './SchoolRecordDeepAnalysisPage'
+import SchoolRecordDeepAnalysisPageBase from './SchoolRecordDeepAnalysisPage'
+import type { SchoolRecordDeepAnalysisPageProps } from './SchoolRecordDeepAnalysisPage'
+
+const SchoolRecordDeepAnalysisPage = SchoolRecordDeepAnalysisPageBase as React.ComponentType<SchoolRecordDeepAnalysisPageProps>
 import { redirectToGumroadCheckout } from '../utils/gumroad'
 import { useAuth } from '../contexts/AuthContext'
+import { useLayoutMode } from '../contexts/LayoutModeContext'
 import { useChat } from '../hooks/useChat'
 import { getSessionId, trackUserAction } from '../utils/tracking'
 import { FrontendTimingLogger } from '../utils/timingLogger'
-import { API_BASE, isCapacitorApp, isGalaxyAppSession } from '../config'
+import { API_BASE, getApiBaseUrl, isAppBuild, isGalaxyAppSession } from '../config'
 import { addLog } from '../utils/adminLogger'
 import { QUICK_EXAMPLE_RESPONSES } from '../data/quickExampleResponses'
-import { Menu, Search, Plus, FolderOpen, PenLine, Calculator, X, Trash2, GraduationCap, Sparkles, Heart, Copy, ArrowUpRight, Crown, User, Gem, Settings, Calendar } from 'lucide-react'
+import { Menu, Search, Plus, FolderOpen, PenLine, Calculator, X, Trash2, GraduationCap, Sparkles, Heart, Copy, ArrowUpRight, Crown, User, Gem, Upload, MessageSquare, BookOpen, Monitor, Smartphone } from 'lucide-react'
 
 interface UsedChunk {
   id: string
@@ -57,6 +67,12 @@ interface Message {
     pendingId: string
     titleAuto: string
     scores: Record<string, any>
+    useExistingScoreId?: boolean
+  }
+  schoolGradeSaved?: {
+    overallAverage: number
+    coreAverage: number
+    semesterAverages?: Record<string, { overall: string; core: string }>
   }
   sources?: string[]
   source_urls?: string[]
@@ -73,6 +89,28 @@ interface Message {
     logs: string[]
   } | null
 }
+
+const NAESIN_SEMESTER_KEYS = ['1-1', '1-2', '2-1', '2-2', '3-1', '3-2'] as const
+type NaesinSemesterKey = (typeof NAESIN_SEMESTER_KEYS)[number]
+
+const NAESIN_SEMESTER_LABELS: Record<NaesinSemesterKey, string> = {
+  '1-1': '1학년 1학기',
+  '1-2': '1학년 2학기',
+  '2-1': '2학년 1학기',
+  '2-2': '2학년 2학기',
+  '3-1': '3학년 1학기',
+  '3-2': '3학년 2학기',
+}
+
+interface NaesinPreviewGradeSummary {
+  overallAverage: string
+  coreAverage: string
+  semesterAverages: Record<NaesinSemesterKey, { overall: string; core: string }>
+}
+
+type ScorePreviewState =
+  | { kind: 'score_set'; name: string; scores: Record<string, any> }
+  | { kind: 'naesin'; name: string; gradeSummary: NaesinPreviewGradeSummary }
 
 interface AgentData {
   routerOutput: any           // Router Agent 출력 (function_calls, raw_response)
@@ -140,9 +178,16 @@ const formatLogMessage = (log: string): string => {
   return log
 }
 
+const MENTION_TOKEN_REGEX = /@내신\s*성적|@[가-힣a-zA-Z0-9_]{1,20}/g
+const MENTION_TOKEN_SPLIT_REGEX = /(@내신\s*성적|@[가-힣a-zA-Z0-9_]{1,20})/g
+const MENTION_TOKEN_FULL_REGEX = /^(@내신\s*성적|@[가-힣a-zA-Z0-9_]{1,20})$/
+
 const extractScoreMentions = (text: string): string[] => {
-  const mentions = text.match(/@[가-힣a-zA-Z0-9_]{1,10}/g) || []
-  return Array.from(new Set(mentions))
+  const mentions = text.match(/@[가-힣a-zA-Z0-9_]{1,20}/g) || []
+  const normalized = mentions
+    .map((m) => m.replace(/(으로|로|은|는|이|가|을|를|와|과)$/u, ''))
+    .filter((m) => m.length > 1)
+  return Array.from(new Set(normalized))
 }
 
 const getMentionContext = (
@@ -155,6 +200,54 @@ const getMentionContext = (
   const atIndex = left.lastIndexOf('@')
   if (atIndex < 0) return null
   return { start: atIndex, end: caretPos, query: match[2] || '' }
+}
+
+const normalizeNaesinGradeSummary = (schoolGradeInput: unknown): NaesinPreviewGradeSummary | null => {
+  if (!schoolGradeInput || typeof schoolGradeInput !== 'object') return null
+
+  const root = schoolGradeInput as Record<string, any>
+  const summaryRaw =
+    root.gradeSummary && typeof root.gradeSummary === 'object'
+      ? (root.gradeSummary as Record<string, any>)
+      : root
+
+  const semesterRaw =
+    summaryRaw.semesterAverages && typeof summaryRaw.semesterAverages === 'object'
+      ? (summaryRaw.semesterAverages as Record<string, any>)
+      : summaryRaw.semester_averages && typeof summaryRaw.semester_averages === 'object'
+        ? (summaryRaw.semester_averages as Record<string, any>)
+        : {}
+
+  const readText = (value: unknown): string => String(value ?? '').trim()
+  const overallAverage = readText(summaryRaw.overallAverage ?? summaryRaw.overall_average)
+  const coreAverage = readText(summaryRaw.coreAverage ?? summaryRaw.core_average)
+  let hasValue = overallAverage !== '' || coreAverage !== ''
+
+  const semesterAverages = NAESIN_SEMESTER_KEYS.reduce<Record<NaesinSemesterKey, { overall: string; core: string }>>(
+    (acc, key) => {
+      const row = semesterRaw[key]
+      const overall = readText(row?.overall)
+      const core = readText(row?.core)
+      if (overall !== '' || core !== '') hasValue = true
+      acc[key] = { overall, core }
+      return acc
+    },
+    {
+      '1-1': { overall: '', core: '' },
+      '1-2': { overall: '', core: '' },
+      '2-1': { overall: '', core: '' },
+      '2-2': { overall: '', core: '' },
+      '3-1': { overall: '', core: '' },
+      '3-2': { overall: '', core: '' },
+    }
+  )
+
+  if (!hasValue) return null
+  return { overallAverage, coreAverage, semesterAverages }
+}
+
+const hasLinkedNaesinData = (schoolGradeInput: Record<string, any> | null | undefined): boolean => {
+  return normalizeNaesinGradeSummary(schoolGradeInput) !== null
 }
 
 const getQuickExampleResponse = (question: string): string | undefined => {
@@ -176,8 +269,10 @@ const SCHOOL_RECORD_MODE_PARAM = 'mode=school-record'
 
 export default function ChatPage() {
   const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const isSchoolRecordModeUrl = searchParams.get('mode') === 'school-record'
+  const initialQuestionFromState = (location.state as { initialQuestion?: string } | null)?.initialQuestion
   const { user, signOut, isAuthenticated, accessToken } = useAuth()
   const {
     sessions,
@@ -196,10 +291,8 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false)
   // 트래킹(events)과 동일한 user_session 사용 → 로그인/비로그인 모두 동일 세션으로 연동
   const [sessionId, setSessionId] = useState(() => getSessionId())
-  const [isSideNavOpen, setIsSideNavOpen] = useState(() => {
-    // 데스크톱에서는 기본적으로 열림, 모바일에서는 닫힘
-    return window.innerWidth >= 640
-  })
+  const { isDesktopLayout, layoutMode, setLayoutMode } = useLayoutMode()
+  const [isSideNavOpen, setIsSideNavOpen] = useState(() => isDesktopLayout)
   const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false)
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
   const [isPreregisterModalOpen, setIsPreregisterModalOpen] = useState(false)
@@ -235,7 +328,7 @@ export default function ChatPage() {
   const [scoreSuggestIndex, setScoreSuggestIndex] = useState(0)
   const [isScoreSuggestOpen, setIsScoreSuggestOpen] = useState(false)
   const [inputCaretPos, setInputCaretPos] = useState(0)
-  const [scorePreview, setScorePreview] = useState<{ name: string; scores: Record<string, any> } | null>(null)
+  const [scorePreview, setScorePreview] = useState<ScorePreviewState | null>(null)
   const [announcements, setAnnouncements] = useState<Announcement[]>([])
   const [selectedAnnouncement, setSelectedAnnouncement] = useState<Announcement | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -255,22 +348,37 @@ export default function ChatPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null) // 카테고리 선택 상태
   const [exampleFaqModalIndex, setExampleFaqModalIndex] = useState<number | null>(null) // 예시 질문 모달 (0~12)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
+  const [isLayoutMenuOpen, setIsLayoutMenuOpen] = useState(false)
   const userMenuRef = useRef<HTMLDivElement>(null)
   const userMenuRefMobile = useRef<HTMLDivElement>(null)
+  const layoutMenuRef = useRef<HTMLDivElement>(null)
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null)
+  const [profileBannerUrl, setProfileBannerUrl] = useState<string | null>(null)
   const [profileDisplayName, setProfileDisplayName] = useState<string | null>(null)
   const [profileBio, setProfileBio] = useState<string | null>(null)
   const [profileDescription, setProfileDescription] = useState<string | null>(null)
-  const [isEditProfileModalOpen, setIsEditProfileModalOpen] = useState(false)
+  const [profileCreatedAt, setProfileCreatedAt] = useState<string | null>(null)
+  const [isProfileEditMode, setIsProfileEditMode] = useState(false)
   const [editProfileUploading, setEditProfileUploading] = useState(false)
+  const [editBannerUploading, setEditBannerUploading] = useState(false)
   const [editDisplayName, setEditDisplayName] = useState('')
   const [editBio, setEditBio] = useState('')
-  const [editDescription, setEditDescription] = useState('')
   const [editProfileSaving, setEditProfileSaving] = useState(false)
   const editProfileInputRef = useRef<HTMLInputElement>(null)
+  const editBannerInputRef = useRef<HTMLInputElement>(null)
   const [schoolRecordMenuTab, setSchoolRecordMenuTab] = useState<'school_record' | 'grade' | 'mock_exam'>('school_record')
-  const DEFAULT_BIO = '유니로드와 함께 입시를 준비해 보세요.'
   const DEFAULT_DESCRIPTION = '생활기록부, 내신 성적, 모의고사 성적을 연동하면 개인 기록 기반으로 더 정밀한 답변을 받을 수 있어요.'
+  const profileDisplayNameText = (profileDisplayName ?? user?.name ?? '회원').trim() || '회원'
+  const profileHandleText = (user?.email || 'uniroad').split('@')[0]
+  const profileDefaultBioText = `${profileDisplayNameText}님의 입시 비서를 시작할게요.`
+  const profileBioText = profileBio?.trim() ? profileBio : profileDefaultBioText
+  const profileJoinedAtText = useMemo(() => {
+    const fallback = `${new Date().getFullYear()}년 ${new Date().getMonth() + 1}월 가입`
+    if (!profileCreatedAt) return fallback
+    const joinedAt = new Date(profileCreatedAt)
+    if (Number.isNaN(joinedAt.getTime())) return fallback
+    return `${joinedAt.getFullYear()}년 ${joinedAt.getMonth() + 1}월 가입`
+  }, [profileCreatedAt])
 
   // 4개 카테고리 모달에 있는 질문 전부 + 하드코딩 답변 (합격예측 3, 생활기록부 3, 모집요강 4, 대학정보 3)
   const exampleFaqItems: { question: string; answer: string }[] = [
@@ -366,6 +474,7 @@ export default function ChatPage() {
   const schoolRecordModeRef = useRef(false)
   const [isSchoolRecordToolModalOpen, setIsSchoolRecordToolModalOpen] = useState(false)
   const [isSchoolGradeInputModalOpen, setIsSchoolGradeInputModalOpen] = useState(false)
+  const [autoOpenSavedGradeReport, setAutoOpenSavedGradeReport] = useState(false)
   /** 오른쪽 패널 전환: 채팅 | 성적입력 | 입시기록 메뉴 | 생기부 연동 (사이드 네비 유지) */
   const [rightPanelView, setRightPanelView] = useState<'chat' | 'grade_input' | 'school_record_menu' | 'school_record_link' | 'mock_exam_input'>('chat')
   const [schoolRecordLinked, setSchoolRecordLinked] = useState<boolean | null>(null)
@@ -373,6 +482,7 @@ export default function ChatPage() {
   const [savedSchoolRecordReports, setSavedSchoolRecordReports] = useState<SavedSchoolRecordReport[]>([])
   const [savedSchoolRecordReportsLoading, setSavedSchoolRecordReportsLoading] = useState(false)
   const [showAllReports, setShowAllReports] = useState(false)
+  const [reportPage, setReportPage] = useState(0)
   const [pendingReportMessageId, setPendingReportMessageId] = useState<string | null>(null)
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null)
   const [skipSchoolRecordToolConfirm, setSkipSchoolRecordToolConfirm] = useState<boolean>(() => {
@@ -382,6 +492,7 @@ export default function ChatPage() {
       return false
     }
   })
+  const [skipNaesinCardThisSession, setSkipNaesinCardThisSession] = useState(false)
   const SCORE_PREDICTION_SKIP_KEY = 'uniroad_skip_score_prediction_confirm'
   const [skipScorePredictionConfirm, setSkipScorePredictionConfirmState] = useState<boolean>(() => {
     try {
@@ -393,15 +504,17 @@ export default function ChatPage() {
   const [isScorePredictionStartModalOpen, setIsScorePredictionStartModalOpen] = useState(false)
   const [scorePredictionScoreSets, setScorePredictionScoreSets] = useState<Array<{ id: string; name: string }>>([])
   const [scorePredictionScoreSetsLoading, setScorePredictionScoreSetsLoading] = useState(false)
+  const [scorePredictionNaesinLinked, setScorePredictionNaesinLinked] = useState(false)
   /** 내 점수로 어디 갈 수 있을까 전용 채팅일 때 true (RollingPlaceholder·최근 컨텐츠 숨김) */
   const [scorePredictionMode, setScorePredictionMode] = useState(false)
   const isGalaxySession = isGalaxyAppSession()
-  const hasProAccess = !!user?.is_premium || isGalaxySession
+  const hasProAccess = !!user?.is_premium || isAppBuild()
   const isInputLocked = sessionLockedByMasking && !isAuthenticated
   const getRequestToken = (): string | undefined => {
     if (accessToken) return accessToken
     return localStorage.getItem('access_token') || undefined
   }
+  const runtimeApiBase = getApiBaseUrl() || import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
   const openThinkingModeModal = (e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -420,9 +533,8 @@ export default function ChatPage() {
     if (!isAuthenticated) return false
     const token = getRequestToken()
     if (!token) return false
-    const baseUrl = API_BASE || import.meta.env.VITE_API_URL || 'http://localhost:8000'
     try {
-      const res = await fetch(`${baseUrl}/api/school-record/status`, {
+      const res = await fetch(`${runtimeApiBase}/api/school-record/status`, {
         headers: { Authorization: `Bearer ${token}` },
       })
       if (!res.ok) return false
@@ -453,22 +565,49 @@ export default function ChatPage() {
 
   const handleConfirmScorePredictionStart = async () => {
     setIsScorePredictionStartModalOpen(false)
-    // 모의고사 성적이 연동되어 있으면 새 채팅, 없으면 성적 연동(모의고사 성적 관리 모달)으로 이동
-    const hasScoreSets = scorePredictionScoreSets.length > 0
-    if (hasScoreSets) {
+    // 성적이 연동되어 있으면 새 채팅, 없으면 내 프로필(입시 기록) 화면으로 이동
+    const hasAnyLinkedScore = scorePredictionScoreSets.length > 0 || scorePredictionNaesinLinked
+    if (hasAnyLinkedScore) {
       await startNewChat()
     } else {
-      setIsScoreSetManagerOpen(true)
+      setRightPanelView('school_record_menu')
+      setSchoolRecordMenuTab('school_record')
     }
   }
 
   useEffect(() => {
     if (!isScorePredictionStartModalOpen || !sessionId) return
+    const token = getRequestToken()
+    if (!token) {
+      setScorePredictionScoreSets([])
+      setScorePredictionNaesinLinked(false)
+      return
+    }
+
+    let disposed = false
     setScorePredictionScoreSetsLoading(true)
-    listScoreSets(sessionId, getRequestToken())
-      .then((items) => setScorePredictionScoreSets(items.map((i) => ({ id: i.id, name: i.name }))))
-      .catch(() => setScorePredictionScoreSets([]))
-      .finally(() => setScorePredictionScoreSetsLoading(false))
+    Promise.all([
+      listScoreSets(sessionId, token).catch(() => []),
+      getMySchoolGradeInput(token).catch(() => ({ school_grade_input: {} as Record<string, any> })),
+    ])
+      .then(([items, schoolGradeInput]) => {
+        if (disposed) return
+        setScorePredictionScoreSets(items.map((i) => ({ id: i.id, name: i.name })))
+        setScorePredictionNaesinLinked(hasLinkedNaesinData(schoolGradeInput?.school_grade_input))
+      })
+      .catch(() => {
+        if (disposed) return
+        setScorePredictionScoreSets([])
+        setScorePredictionNaesinLinked(false)
+      })
+      .finally(() => {
+        if (disposed) return
+        setScorePredictionScoreSetsLoading(false)
+      })
+
+    return () => {
+      disposed = true
+    }
   }, [isScorePredictionStartModalOpen, sessionId])
 
   // URL /chat?mode=school-record → 생기부 채팅 전용 모드
@@ -479,10 +618,22 @@ export default function ChatPage() {
     }
   }, [isSchoolRecordModeUrl])
 
-  const handleSelectScoreSetForPrediction = (item: { id: string; name: string }) => {
+  // 생기부 카드에서 넘어온 질문: 생기부 모드로 전환 후 자동 전송
+  useEffect(() => {
+    if (!initialQuestionFromState || !isSchoolRecordModeUrl) return
+    const question = initialQuestionFromState
+    navigate(location.pathname + '?' + location.search, { replace: true, state: {} })
+    const t = setTimeout(() => {
+      handleSend(question)
+    }, 100)
+    return () => clearTimeout(t)
+  }, [initialQuestionFromState, isSchoolRecordModeUrl])
+
+  const handleSelectScoreSetForPrediction = async (item: { id: string; name: string }) => {
     setIsScorePredictionStartModalOpen(false)
     const nameForQuery = item.name.startsWith('@') ? item.name : `@${item.name}`
-    startNewChat()
+    await startNewChat()
+    setActiveScoreId(item.id)
     // 점수 예측만 보이게 — 생기부 분석 끄기
     setSchoolRecordToolEnabled(false)
     schoolRecordModeRef.current = false
@@ -491,17 +642,39 @@ export default function ChatPage() {
     if (isSchoolRecordModeUrl) navigate('/chat', { replace: true })
   }
 
-  const activateSchoolRecordTool = async () => {
-    setSchoolRecordStatusLoading(true)
-    const linked = await fetchSchoolRecordLinkedStatus()
-    setSchoolRecordLinked(linked)
-    setSchoolRecordStatusLoading(false)
+  /** 합격 예측 모달에서 내신 성적 클릭 시: 새 채팅 시작 후 입력창에만 해당 문구 넣기 (전송은 사용자가 직접) */
+  const handleSelectNaesinForPrediction = () => {
+    setIsScorePredictionStartModalOpen(false)
+    startNewChat()
+    setActiveScoreId(undefined)
+    setSchoolRecordToolEnabled(false)
+    schoolRecordModeRef.current = false
+    setScorePredictionMode(true)
+    setInput('@내신 성적으로 갈 수 있는 학교 알려줘')
+    if (isSchoolRecordModeUrl) navigate('/chat', { replace: true })
+  }
+
+  /**
+   * 생기부 분석 전용 새 채팅으로 전환.
+   * @param confirmedLinked - 모달에서 이미 연동 여부를 확인한 경우: true면 연동됨(생기부 새 채팅), false면 미연동(연동 페이지로), undefined면 재조회 후 결정
+   */
+  const activateSchoolRecordTool = async (confirmedLinked?: boolean) => {
+    let linked: boolean
+    if (confirmedLinked === undefined) {
+      setSchoolRecordStatusLoading(true)
+      linked = await fetchSchoolRecordLinkedStatus()
+      setSchoolRecordLinked(linked)
+      setSchoolRecordStatusLoading(false)
+    } else {
+      linked = confirmedLinked
+    }
 
     if (!linked) {
       navigate('/school-record-deep?tab=link')
       return
     }
 
+    setRightPanelView('chat')
     await startNewChat()
     // 생기부만 보이게 — 점수 예측 모드 끄기
     setScorePredictionMode(false)
@@ -513,22 +686,25 @@ export default function ChatPage() {
 
   const handleConfirmSchoolRecordToolStart = async () => {
     setIsSchoolRecordToolModalOpen(false)
-    await activateSchoolRecordTool()
+    // 모달에서 "새 채팅"이 보인 경우 이미 연동된 상태이므로, 재조회 없이 반드시 생기부 새 채팅으로 이동
+    await activateSchoolRecordTool(schoolRecordLinked === true ? true : schoolRecordLinked === false ? false : undefined)
   }
 
   const handleSchoolRecordShortcut = () => {
     if (!hasProAccess) {
       openProModal()
-      if (window.innerWidth < 640) setIsSideNavOpen(false)
+      if (!isDesktopLayout) setIsSideNavOpen(false)
       return
     }
 
     if (!isAuthenticated) {
       setIsAuthModalOpen(true)
-      if (window.innerWidth < 640) setIsSideNavOpen(false)
+      if (!isDesktopLayout) setIsSideNavOpen(false)
       return
     }
 
+    // 생기부 분석 진입: 연동 여부 확인 후 분석 전용 채팅으로 이동
+    setRightPanelView('chat')
     if (skipSchoolRecordToolConfirm) {
       void activateSchoolRecordTool()
     } else {
@@ -539,8 +715,7 @@ export default function ChatPage() {
         .then((linked) => setSchoolRecordLinked(linked))
         .finally(() => setSchoolRecordStatusLoading(false))
     }
-
-    if (window.innerWidth < 640) setIsSideNavOpen(false)
+    if (!isDesktopLayout) setIsSideNavOpen(false)
   }
   const goToGumroadCheckout = () => {
     if (!isAuthenticated || !user?.id) {
@@ -623,11 +798,13 @@ export default function ChatPage() {
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null)
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const chatScrollContainerRef = useRef<HTMLDivElement>(null)
   const sendingRef = useRef(false) // 중복 전송 방지
   const abortControllerRef = useRef<AbortController | null>(null) // 스트리밍 취소용
   const searchContainerRef = useRef<HTMLDivElement>(null) // 검색창 외부 클릭 감지용
   const imageInputRef = useRef<HTMLInputElement>(null) // 이미지 파일 input ref
   const inputTextareaRef = useRef<HTMLTextAreaElement>(null)
+  const inputOverlayRef = useRef<HTMLDivElement>(null)
 
   // 모바일 뒤로가기 버튼 처리
   useEffect(() => {
@@ -702,7 +879,19 @@ export default function ChatPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [isUserMenuOpen])
 
-  // 입시 기록 연동 패널 열릴 때 프로필 조회
+  // 보기 모드 메뉴: 바깥 클릭 시 닫기
+  useEffect(() => {
+    if (!isLayoutMenuOpen) return
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as Node
+      if (layoutMenuRef.current?.contains(target)) return
+      setIsLayoutMenuOpen(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [isLayoutMenuOpen])
+
+  // 입시 기록 연동 패널 열릴 때 프로필 + 생기부 연동 상태 조회
   useEffect(() => {
     if (rightPanelView !== 'school_record_menu' || !isAuthenticated) return
     const token = getRequestToken()
@@ -710,16 +899,23 @@ export default function ChatPage() {
     getProfile(token)
       .then((p) => {
         setProfileImageUrl(p.image_url ?? null)
+        setProfileBannerUrl(p.banner_image_url ?? null)
         setProfileDisplayName(p.display_name ?? null)
         setProfileBio(p.bio ?? null)
         setProfileDescription(p.description ?? null)
+        setProfileCreatedAt(p.created_at ?? null)
       })
       .catch(() => {
         setProfileImageUrl(null)
+        setProfileBannerUrl(null)
         setProfileDisplayName(null)
         setProfileBio(null)
         setProfileDescription(null)
+        setProfileCreatedAt(null)
       })
+    getSchoolRecordStatus(token)
+      .then((res) => setSchoolRecordLinked(res.linked))
+      .catch(() => setSchoolRecordLinked(false))
   }, [rightPanelView, isAuthenticated])
 
   // 모바일 화면 복귀 시 채팅 상태 유지 (sessionStorage 활용)
@@ -730,6 +926,11 @@ export default function ChatPage() {
       sessionStorage.setItem('uniroad_chat_session_id', sessionId)
     }
   }, [messages, sessionId])
+
+  // 세션이 바뀌면 내신 카드 "다시 묻지 않기" 플래그 초기화
+  useEffect(() => {
+    setSkipNaesinCardThisSession(false)
+  }, [sessionId])
 
   // 초기 로드 시 sessionStorage에서 메시지 복구 (비로그인 또는 새로고침 시)
   // API 호출용 세션은 항상 getSessionId()로 통일해 events와 session_chat_messages 연동 유지
@@ -887,12 +1088,10 @@ export default function ChatPage() {
     setIsAnnouncementModalOpen(true)
   }
 
-  // 초기 화면 크기에 따라 사이드바 상태 설정 (한 번만)
+  // 보기 모드(데스크톱/모바일)에 따라 사이드바 열림 상태 동기화
   useEffect(() => {
-    if (window.innerWidth >= 640) {
-      setIsSideNavOpen(true)
-    }
-  }, [])
+    setIsSideNavOpen(isDesktopLayout)
+  }, [isDesktopLayout])
 
   // 검색창 외부 클릭 감지
   useEffect(() => {
@@ -927,8 +1126,8 @@ export default function ChatPage() {
       }
     }
     
-    // 생활기록부 분석 모드 유지 여부 확인
-    const shouldKeepSchoolRecordMode = keepSchoolRecordMode || schoolRecordModeRef.current
+    // 생활기록부 분석 모드 유지 여부 (명시적으로 false면 일반 채팅으로 전환)
+    const shouldKeepSchoolRecordMode = keepSchoolRecordMode === undefined ? schoolRecordModeRef.current : keepSchoolRecordMode
     
     // 모든 상태 초기화
     setMessages([])
@@ -956,6 +1155,7 @@ export default function ChatPage() {
     } else {
       setSchoolRecordToolEnabled(false)
       schoolRecordModeRef.current = false
+      if (isSchoolRecordModeUrl) navigate('/chat', { replace: true })
     }
     setScorePredictionMode(false)
     
@@ -1007,25 +1207,38 @@ export default function ChatPage() {
   useEffect(() => {
     const mentionCtx = getMentionContext(input, inputCaretPos)
     if (!mentionCtx) {
-      setIsScoreSuggestOpen(false)
-      setScoreSuggestItems([])
+      setIsScoreSuggestOpen((prev) => (prev ? false : prev))
+      setScoreSuggestItems((prev) => (prev.length > 0 ? [] : prev))
       return
     }
 
-    const debounce = setTimeout(async () => {
+    const query = (mentionCtx.query || '').trim().toLowerCase()
+    const naesinLabel = '내신 성적'
+    const showNaesin = !query || naesinLabel.startsWith(query) || '내신'.startsWith(query)
+    const initialList = showNaesin ? [{ id: 'naesin', name: naesinLabel }] : []
+
+    // 골뱅이 누르면 바로 드롭다운 표시 (Cursor처럼)
+    setScoreSuggestItems(initialList)
+    setScoreSuggestIndex(0)
+    setIsScoreSuggestOpen(initialList.length > 0)
+
+    const timeout = setTimeout(async () => {
       try {
         const token = getRequestToken()
         const items = await suggestScoreSets(mentionCtx.query, sessionId, token || undefined)
-        setScoreSuggestItems(items || [])
-        setScoreSuggestIndex(0)
-        setIsScoreSuggestOpen((items || []).length > 0)
+        const list = showNaesin
+          ? [{ id: 'naesin', name: naesinLabel }, ...(items || [])]
+          : (items || [])
+        setScoreSuggestItems(list)
+        setScoreSuggestIndex((prev) => (prev >= list.length ? Math.max(0, list.length - 1) : prev))
+        setIsScoreSuggestOpen(list.length > 0)
       } catch {
-        setIsScoreSuggestOpen(false)
-        setScoreSuggestItems([])
+        setScoreSuggestItems(initialList)
+        setIsScoreSuggestOpen(initialList.length > 0)
       }
-    }, 120)
+    }, 0)
 
-    return () => clearTimeout(debounce)
+    return () => clearTimeout(timeout)
   }, [input, inputCaretPos, sessionId])
 
   const applyScoreSuggestion = (item: ScoreSetSuggestItem) => {
@@ -1035,6 +1248,7 @@ export default function ChatPage() {
     if (!mentionCtx) return
 
     const safeName = item.name.startsWith('@') ? item.name.slice(1) : item.name
+    // 멘션 뒤 기본 공백은 1칸만 유지해 입력 시작 위치가 밀리지 않게 함
     const replacement = `@${safeName} `
     const nextInput = `${input.slice(0, mentionCtx.start)}${replacement}${input.slice(mentionCtx.end)}`
     const nextCaret = mentionCtx.start + replacement.length
@@ -1043,7 +1257,7 @@ export default function ChatPage() {
     setInputCaretPos(nextCaret)
     setIsScoreSuggestOpen(false)
     setScoreSuggestItems([])
-    setActiveScoreId(item.id)
+    setActiveScoreId(item.id === 'naesin' ? undefined : item.id)
 
     requestAnimationFrame(() => {
       if (!textarea) return
@@ -1057,18 +1271,30 @@ export default function ChatPage() {
     setInputCaretPos(caretPos)
   }
 
+  // 입력 후 React 리렌더 시 커서가 맨 앞으로 밀리는 현상 방지: 저장한 위치로 복원
+  useLayoutEffect(() => {
+    const ta = inputTextareaRef.current
+    if (!ta || document.activeElement !== ta) return
+    const pos = Math.min(Math.max(0, inputCaretPos), input.length)
+    if (ta.selectionStart === pos && ta.selectionEnd === pos) return
+    ta.setSelectionRange(pos, pos)
+  }, [input, inputCaretPos])
+
   const renderInputOverlay = (text: string) => {
     if (!text) return <>{'\u00A0'}</>
-    const mentionRegex = /(@[가-힣a-zA-Z0-9_]{1,10})/g
-    const parts = text.split(mentionRegex)
+    const parts = text.split(MENTION_TOKEN_SPLIT_REGEX)
     if (parts.length <= 1) return <>{text}</>
     return (
       <>
         {parts.map((part, idx) => {
-          if (mentionRegex.test(part)) {
-            mentionRegex.lastIndex = 0
+          if (MENTION_TOKEN_FULL_REGEX.test(part)) {
             return (
-              <span key={idx} style={{ backgroundColor: '#eef2ff', color: '#4338ca', borderRadius: '9999px', boxShadow: '-4px 0 0 #eef2ff, 4px 0 0 #eef2ff, 0 0 0 1px #e0e7ff' }}>{part}</span>
+              <span
+                key={idx}
+                className="rounded-md bg-[#eaf2ff] text-[#2563eb] text-[0.9em] leading-[1.15] [box-shadow:-0.14ch_0_0_#eaf2ff,0.14ch_0_0_#eaf2ff]"
+              >
+                {part}
+              </span>
             )
           }
           return <span key={idx}>{part}</span>
@@ -1100,29 +1326,87 @@ export default function ChatPage() {
       }
     }
 
+    const mentionRegex = MENTION_TOKEN_REGEX
+    const MAX_TRAILING_SPACES = 10
+    const extendWithTrailingSpaces = (start: number, end: number): number => {
+      let extended = end
+      while (extended < input.length && extended - end < MAX_TRAILING_SPACES && input[extended] === ' ') extended++
+      return extended
+    }
+    const findChipAt = (cursorPos: number): { start: number; end: number } | null => {
+      mentionRegex.lastIndex = 0
+      let match: RegExpExecArray | null
+      while ((match = mentionRegex.exec(input)) !== null) {
+        const start = match.index
+        const mentionEnd = start + match[0].length
+        const end = extendWithTrailingSpaces(start, mentionEnd)
+        if (cursorPos >= start && cursorPos <= end) return { start, end }
+      }
+      return null
+    }
+    const findChipRightAfter = (cursorPos: number): { start: number; end: number } | null => {
+      mentionRegex.lastIndex = 0
+      let match: RegExpExecArray | null
+      while ((match = mentionRegex.exec(input)) !== null) {
+        const start = match.index
+        const mentionEnd = start + match[0].length
+        const end = extendWithTrailingSpaces(start, mentionEnd)
+        if (cursorPos > mentionEnd && cursorPos <= end) return { start, end }
+      }
+      return null
+    }
+    const findMentionRightBefore = (cursorPos: number): { start: number; end: number } | null => {
+      mentionRegex.lastIndex = 0
+      let match: RegExpExecArray | null
+      while ((match = mentionRegex.exec(input)) !== null) {
+        const start = match.index
+        const mentionEnd = start + match[0].length
+        const end = extendWithTrailingSpaces(start, mentionEnd)
+        if (cursorPos === start) return { start, end }
+      }
+      return null
+    }
+
     if (e.key === 'Backspace') {
       const ta = e.currentTarget
       const pos = ta.selectionStart
       const selEnd = ta.selectionEnd
       if (pos === selEnd && pos > 0) {
-        const mentionRegex = /@[가-힣a-zA-Z0-9_]{1,10}/g
-        let match: RegExpExecArray | null
-        while ((match = mentionRegex.exec(input)) !== null) {
-          const start = match.index
-          const end = start + match[0].length
-          if (pos > start && pos <= end) {
-            e.preventDefault()
-            const newVal = input.slice(0, start) + input.slice(end)
-            setInput(newVal)
-            setInputCaretPos(start)
-            requestAnimationFrame(() => {
-              if (inputTextareaRef.current) {
-                inputTextareaRef.current.selectionStart = start
-                inputTextareaRef.current.selectionEnd = start
-              }
-            })
-            return
-          }
+        const mention = findChipAt(pos) ?? findChipRightAfter(pos)
+        if (mention) {
+          e.preventDefault()
+          const newVal = input.slice(0, mention.start) + input.slice(mention.end)
+          setInput(newVal)
+          setInputCaretPos(mention.start)
+          requestAnimationFrame(() => {
+            if (inputTextareaRef.current) {
+              inputTextareaRef.current.selectionStart = mention.start
+              inputTextareaRef.current.selectionEnd = mention.start
+            }
+          })
+          return
+        }
+      }
+    }
+
+    if (e.key === 'Delete') {
+      const ta = e.currentTarget
+      const pos = ta.selectionStart
+      const selEnd = ta.selectionEnd
+      if (pos === selEnd && pos < input.length) {
+        const mention = findChipAt(pos) ?? findMentionRightBefore(pos)
+        if (mention) {
+          e.preventDefault()
+          const newVal = input.slice(0, mention.start) + input.slice(mention.end)
+          setInput(newVal)
+          setInputCaretPos(mention.start)
+          requestAnimationFrame(() => {
+            if (inputTextareaRef.current) {
+              inputTextareaRef.current.selectionStart = mention.start
+              inputTextareaRef.current.selectionEnd = mention.start
+            }
+          })
+          return
         }
       }
     }
@@ -1138,6 +1422,7 @@ export default function ChatPage() {
     if (currentSessionId !== prevSessionIdRef.current) {
       prevSessionIdRef.current = currentSessionId
       setActiveScoreId(undefined)
+      setSkipNaesinCardThisSession(false)
 
       if (currentSessionId && isAuthenticated) {
         // API 호출용 sessionId 업데이트
@@ -1165,9 +1450,22 @@ export default function ChatPage() {
     }
   }, [savedMessages, currentSessionId])
 
+  // 메시지가 있을 때만 아래로 스크롤 (빈 채팅/새 채팅 진입 시에는 맨 위 유지)
   useEffect(() => {
-    scrollToBottom()
-  }, [messages, currentLog]) // currentLog 변경시에도 스크롤
+    if (messages.length > 0 || currentLog) {
+      scrollToBottom()
+    }
+  }, [messages, currentLog])
+
+  // 채팅 진입·새 채팅 시 상단이 보이도록 스크롤을 맨 위로
+  useEffect(() => {
+    chatScrollContainerRef.current?.scrollTo({ top: 0, behavior: 'instant' })
+  }, [currentSessionId])
+  useEffect(() => {
+    if (messages.length === 0) {
+      chatScrollContainerRef.current?.scrollTo({ top: 0, behavior: 'instant' })
+    }
+  }, [messages.length])
 
   // 재생성 함수: 이전 질문/답변 제거 후 다시 질문
   const handleRegenerate = (aiMessageId: string, userQuery: string) => {
@@ -1232,7 +1530,8 @@ export default function ChatPage() {
 
       sendingRef.current = true
       isStreamingRef.current = true
-      setInput('')
+      const quickMentions = extractScoreMentions(userInput)
+      setInput(quickMentions.length > 0 ? `${quickMentions.join(' ')} ` : '')
       setIsLoading(true)
       setCurrentLog('⚡ 빠른 답변을 준비하는 중...')
 
@@ -1277,7 +1576,8 @@ export default function ChatPage() {
     const timingLogger = new FrontendTimingLogger(currentSessionId || 'new', messageToSend)
     
     const userInput = messageToSend
-    setInput('')
+    const keptMentions = extractScoreMentions(userInput)
+    setInput(keptMentions.length > 0 ? `${keptMentions.join(' ')} ` : '')
     setIsLoading(true)
 
     // 세션 처리: 새 채팅인 경우 세션 생성
@@ -1289,8 +1589,8 @@ export default function ChatPage() {
       if (newSessionId) {
         currentSessionIdToUse = newSessionId
         setSessionId(newSessionId)
-        // currentSessionId 업데이트 (중복 세션 생성 방지)
-        selectSession(newSessionId)
+        // 메시지 전송 직전에는 loadMessages(빈 배열 응답)로 로컬 임시 메시지를 덮어쓰지 않도록 세션 포인터만 갱신
+        selectSession(newSessionId, { skipLoad: true })
       }
     }
 
@@ -1356,6 +1656,14 @@ export default function ChatPage() {
     try {
       let firstLogReceived = false
       let firstChunkReceived = false
+      const normalizedUserInput = userInput.replace(/＠/g, '@')
+      const hasLinkedNaesinMention = /@내신(?:\s*성적)?/.test(normalizedUserInput)
+      // 연동 내신 사용 자체는 항상 전달하되,
+      // 점수예측 모드에서는 카드 없이 바로 답변하도록 review만 생략한다.
+      const useLinkedNaesinForRequest = hasLinkedNaesinMention
+      const skipReviewForLinkedNaesin = hasLinkedNaesinMention && scorePredictionMode
+      const hasCompactNaesinDigits = /(?:^|[^0-9])(?:[1-9](?:[\s,./|-]*[1-9]){4,5})(?:[^0-9]|$)/.test(normalizedUserInput)
+      const forceShowNaesinCard = (hasLinkedNaesinMention && !skipReviewForLinkedNaesin) || hasCompactNaesinDigits
       
       // 공통 콜백 함수들 정의
       const onLogCallback = (log: string) => {
@@ -1559,6 +1867,7 @@ export default function ChatPage() {
                     pendingId: payload.pending_id,
                     titleAuto: payload.title_auto,
                     scores: payload.scores || {},
+                    useExistingScoreId: payload.use_existing_score_id,
                   },
                 }
               : msg
@@ -1568,8 +1877,111 @@ export default function ChatPage() {
           setIsLoading(false)
         }
 
-      const hasScoreMention = /@[가-힣a-zA-Z0-9_]{1,10}/.test(userInput)
-      const scoreIdForRequest = hasScoreMention ? activeScoreId : undefined
+      let autoContinueAfterNaesinPromise: Promise<void> | null = null
+      const onSchoolGradeSavedCallback = (payload: SchoolGradeSavedEvent) => {
+          if (abortController.signal.aborted) return
+
+          console.log('🟢 school_grade_saved 수신:', payload)
+
+          if (skipNaesinCardThisSession && !forceShowNaesinCard) {
+            const semesterKeys = ['1-1', '1-2', '2-1', '2-2', '3-1', '3-2'] as const
+            const edited = {
+              overallAverage: String(payload.overall_average ?? ''),
+              coreAverage: String(payload.core_average ?? ''),
+              semesterAverages: semesterKeys.reduce<Record<string, { overall: string; core: string }>>((acc, key) => {
+                const row = payload.semester_averages?.[key]
+                acc[key] = {
+                  overall: String(row?.overall ?? payload.overall_average ?? ''),
+                  core: String(row?.core ?? payload.core_average ?? ''),
+                }
+                return acc
+              }, {}),
+            }
+
+            setMessages((prev) => prev.map(msg =>
+              msg.id === streamingBotMessageId
+                ? { ...msg, schoolGradeSaved: undefined, text: '', isStreaming: true }
+                : msg
+            ))
+            setCurrentLog('답변을 생성하는 중...')
+
+            autoContinueAfterNaesinPromise = new Promise<void>((resolve) => {
+              let firstChunk = true
+              void sendContinueAfterNaesin(
+                currentSessionIdToUse || sessionId,
+                (log) => setCurrentLog(log),
+                (result) => {
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === streamingBotMessageId
+                        ? {
+                            ...m,
+                            text: result.response,
+                            sources: result.sources,
+                            source_urls: result.source_urls,
+                            used_chunks: result.used_chunks,
+                            isStreaming: false,
+                          }
+                        : m
+                    )
+                  )
+                  setIsLoading(false)
+                  setCurrentLog('')
+                  scrollToBottom()
+                  resolve()
+                },
+                (error) => {
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === streamingBotMessageId
+                        ? { ...m, text: error || '답변 생성에 실패했습니다.', isStreaming: false }
+                        : m
+                    )
+                  )
+                  setIsLoading(false)
+                  setCurrentLog('')
+                  resolve()
+                },
+                abortController.signal,
+                (chunk) => {
+                  if (firstChunk) {
+                    firstChunk = false
+                    setCurrentLog('')
+                    setIsLoading(false)
+                  }
+                  setMessages((prev) =>
+                    prev.map((m) =>
+                      m.id === streamingBotMessageId ? { ...m, text: m.text + chunk } : m
+                    )
+                  )
+                  scrollToBottom()
+                },
+                undefined,
+                requestToken,
+                edited,
+              )
+            })
+            return
+          }
+
+          setMessages((prev) => prev.map(msg =>
+            msg.id === streamingBotMessageId
+              ? {
+                  ...msg,
+                  schoolGradeSaved: {
+                    overallAverage: payload.overall_average,
+                    coreAverage: payload.core_average,
+                    semesterAverages: payload.semester_averages,
+                  },
+                }
+              : msg
+          ))
+        }
+
+      const hasScoreMention = extractScoreMentions(userInput).length > 0
+      const scoreIdForRequest = hasScoreMention && !hasLinkedNaesinMention ? activeScoreId : undefined
+
+      console.log('[내신 카드 디버그] userInput=', JSON.stringify(userInput?.slice(0, 80)), 'hasLinkedNaesinMention=', hasLinkedNaesinMention)
 
       // 이미지가 있으면 이미지와 함께 전송, 없으면 일반 전송
       const requestToken = getRequestToken()
@@ -1583,10 +1995,13 @@ export default function ChatPage() {
           onErrorCallback,
           abortController.signal,
           onChunkCallback,
-          requestToken,  // 인증 토큰 전달
+          requestToken,
           onScoreReviewRequiredCallback,
           scoreIdForRequest,
-          schoolRecordToolEnabled
+          schoolRecordToolEnabled,
+          onSchoolGradeSavedCallback,
+          useLinkedNaesinForRequest,
+          skipReviewForLinkedNaesin,
         )
       } else {
         await sendMessageStream(
@@ -1597,12 +2012,19 @@ export default function ChatPage() {
           onErrorCallback,
           abortController.signal,
           onChunkCallback,
-          requestToken,  // 인증 토큰 전달
-          thinkingMode,  // Thinking 모드 전달
+          requestToken,
+          thinkingMode,
           onScoreReviewRequiredCallback,
           scoreIdForRequest,
-          schoolRecordToolEnabled
+          schoolRecordToolEnabled,
+          onSchoolGradeSavedCallback,
+          useLinkedNaesinForRequest,
+          skipReviewForLinkedNaesin,
         )
+      }
+
+      if (autoContinueAfterNaesinPromise) {
+        await autoContinueAfterNaesinPromise
       }
     } catch (error: any) {
       // AbortError는 무시 (사용자가 새 채팅을 시작한 경우)
@@ -1703,9 +2125,13 @@ export default function ChatPage() {
     const text = String(content || '')
     return (
       text.includes('# 0. 평가기준 설명') ||
+      text.includes('0. 평가기준 설명') ||
       text.includes('# 0. 학교별 평가기준 설명') ||
+      text.includes('0. 학교별 평가기준 설명') ||
       text.includes('# 1. 기준별 적용 평가') ||
+      text.includes('1. 기준별 적용 평가') ||
       text.includes('# 1. 대학별 기준 적용 평가') ||
+      text.includes('1. 대학별 기준 적용 평가') ||
       text.includes('부록 A. 학년별 과목 세특 확장 평가') ||
       text.includes('## 답변 후 꼬리 질문')
     )
@@ -1735,8 +2161,8 @@ export default function ChatPage() {
 
   const openSavedSchoolRecordReport = async (report: SavedSchoolRecordReport) => {
     setSelectedCategory(null)
-    setPendingReportMessageId(String(report.messageId || ''))
     await selectSession(report.sessionId)
+    setPendingReportMessageId(String(report.messageId || ''))
   }
 
   useEffect(() => {
@@ -1766,7 +2192,6 @@ export default function ChatPage() {
     }
 
     let cancelled = false
-    const baseUrl = API_BASE || import.meta.env.VITE_API_URL || 'http://localhost:8000'
     const token = getRequestToken()
 
     const loadSavedReports = async () => {
@@ -1786,7 +2211,7 @@ export default function ChatPage() {
         const perSessionReports = await Promise.all(
           targetSessions.map(async (session) => {
             try {
-              const res = await fetch(`${baseUrl}/api/sessions/${session.id}/messages`, {
+              const res = await fetch(`${runtimeApiBase}/api/sessions/${session.id}/messages`, {
                 headers: { Authorization: `Bearer ${token}` },
               })
               if (!res.ok) return [] as SavedSchoolRecordReport[]
@@ -1842,13 +2267,35 @@ export default function ChatPage() {
     }
   }, [isAuthenticated, schoolRecordToolEnabled, sessions, messages.length])
 
-  const schoolRecordResearchSuggestions = [
-    '내 생기부 기준으로 학생부종합전형 유리한 대학/학과 10개를 근거와 함께 정리해줘',
-    '교과/비교과를 함께 보고 내 강점과 약점을 평가해줘',
-    '면접에서 물어볼 가능성이 높은 질문 15개를 만들어줘',
-    '지원 전략을 상향·적정·안정 3단계로 나눠서 제안해줘',
+  /** 생기부 분석 상단 4개 기능 카드 */
+  const schoolRecordQuickActions = [
+    {
+      id: 'university-fit',
+      title: '생기부 기반 대학 적합성 평가',
+      description: '서울대학교 공과계열 학과에 지원하고 싶은데, 내 생기부가 적합한지 판단해줘',
+      question: '서울대학교 공과계열 학과에 지원하고 싶은데, 내 생기부가 적합한지 판단해줘',
+    },
+    {
+      id: 'interview-questions',
+      title: '면접 예상 질문',
+      description: '경희대학교 빅데이터응용학과에 지원할 예정인데, 생기부 기반으로 면접 질문 추출해줘',
+      question: '경희대학교 빅데이터응용학과에 지원할 예정인데, 생기부 기반으로 면접 질문 추출해줘',
+    },
+    {
+      id: 'seteuk-eval',
+      title: '생기부 세특 평가',
+      description: '내 생기부 앞으로 3학년 세특은 어떤식으로 보완해가는게 좋을까?',
+      question: '내 생기부 앞으로 3학년 세특은 어떤식으로 보완해가는게 좋을까?',
+    },
+    {
+      id: 'application-strategy',
+      title: '지원 전략 수립',
+      description: '내 생기부를 분석해서 나에게 적합한 학교를 추천해줘',
+      question: '내 생기부를 분석해서 나에게 적합한 학교를 추천해줘',
+    },
   ]
 
+  /** 리포트 기본 데이터 (저장된 리포트가 없을 때 표시) */
   const schoolRecordResearchReports = [
     {
       title: '학생부종합 지원 전략 리포트',
@@ -1865,7 +2312,31 @@ export default function ChatPage() {
       description: '1~3학년 흐름을 분석해 자기소개서/면접에서 활용 가능한 스토리 라인을 정리합니다.',
       question: '1학년부터 3학년까지의 성장 흐름을 스토리로 정리하고, 자기소개에 활용할 핵심 문장을 만들어줘.',
     },
+    {
+      title: '세부능력 및 특기사항 분석 리포트',
+      description: '세특 내용의 강점과 약점을 짚어 개선 방향과 강조 포인트를 제시합니다.',
+      question: '세부능력 및 특기사항을 분석하고 강점과 약점을 짚어줘.',
+    },
   ]
+
+  /** 표시할 리포트 목록 (저장된 리포트 우선, 없으면 기본 리포트) */
+  const displayReports = useMemo(() => {
+    if (savedSchoolRecordReports.length > 0) {
+      return savedSchoolRecordReports.map(r => ({
+        id: r.id,
+        sessionId: r.sessionId,
+        messageId: r.messageId,
+        title: r.title,
+        description: r.description,
+      }))
+    }
+    return schoolRecordResearchReports.map(r => ({
+      id: null,
+      title: r.title,
+      description: r.description,
+      question: r.question,
+    })) as Array<{ id?: string | null; sessionId?: string; messageId?: string; title: string; description: string; question?: string }>
+  }, [savedSchoolRecordReports])
 
   const startSchoolRecordResearch = (question: string) => {
     setSelectedCategory(null)
@@ -1904,13 +2375,13 @@ export default function ChatPage() {
       }`}>
         {/* 사이드 네비게이션 */}
         <div
-          className={`fixed top-0 left-0 h-full w-56 z-50 transform transition-transform duration-300 ease-in-out ${
+          className={`fixed top-0 left-0 h-full w-64 z-50 transform transition-transform duration-300 ease-in-out border-r border-gray-200 ${
             isSideNavOpen ? 'translate-x-0' : '-translate-x-full'
-          } sm:fixed sm:z-40 bg-gray-50`}
+          } sm:fixed sm:z-40 bg-white`}
         >
         <div className="h-full flex flex-col">
           {/* 상단: 로고 + UNIROAD(왼쪽) + 사이드바 닫기(오른쪽) */}
-          <div className="flex items-center justify-between px-4 py-4 border-b border-gray-200 bg-gray-50">
+          <div className="flex items-center justify-between px-4 py-4 bg-white">
             <div className="flex items-center gap-2.5">
               <div className="flex items-center justify-center w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 shadow-md shrink-0">
                 <GraduationCap className="w-3.5 h-3.5 text-white" strokeWidth={2} />
@@ -1930,8 +2401,9 @@ export default function ChatPage() {
           <nav className="px-4 pt-5 pb-4">
             <button
               onClick={() => {
+                setRightPanelView('chat')
                 handleNewChat()
-                if (window.innerWidth < 640) setIsSideNavOpen(false)
+                if (!isDesktopLayout) setIsSideNavOpen(false)
               }}
               className="w-full flex items-center gap-3 px-2 py-3 rounded-lg transition-colors text-left text-gray-800 hover:bg-gray-100/80"
             >
@@ -1954,9 +2426,9 @@ export default function ChatPage() {
               className="w-full flex items-center gap-3 px-2 py-3 rounded-lg transition-colors text-left text-gray-800 hover:bg-gray-100/80"
             >
               <span className="flex items-center justify-center w-5 h-5 shrink-0 text-gray-800">
-                <FolderOpen className="w-5 h-5" />
+                <User className="w-5 h-5" />
               </span>
-              <span className="text-sm font-semibold text-black">내 입시 기록 연동하기</span>
+              <span className="text-sm font-semibold text-black">내 입시기록 연동하기</span>
             </button>
           </nav>
 
@@ -1986,6 +2458,7 @@ export default function ChatPage() {
                 if (skipScorePredictionConfirm) {
                   setRightPanelView('grade_input')
                 } else {
+                  setRightPanelView('chat')
                   setIsScorePredictionStartModalOpen(true)
                 }
               }}
@@ -2064,9 +2537,10 @@ export default function ChatPage() {
                     >
                       <button
                         onClick={() => {
+                          setRightPanelView('chat')
                           selectSession(session.id)
-                          // 모바일에서는 사이드바 자동 닫기
-                          if (window.innerWidth < 640) {
+                          // 모바일 레이아웃에서는 사이드바 자동 닫기
+                          if (!isDesktopLayout) {
                             setIsSideNavOpen(false)
                           }
                         }}
@@ -2105,32 +2579,17 @@ export default function ChatPage() {
 
           {/* 하단 섹션 */}
           <div className="p-4 sm:p-6 pt-3 sm:pt-4">
-            {isAuthenticated ? (
-              <div>
-                {/* 요금제 표시 */}
-                <div className="flex items-center justify-center gap-2 mb-3 px-3 py-2 bg-gray-100 rounded-lg">
-                  {isGalaxySession ? (
-                    <span className="text-xs font-semibold text-gray-900">앱</span>
-                  ) : user?.is_premium ? (
-                    <span className="text-xs font-semibold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">PRO</span>
-                  ) : (
-                    <span className="text-xs font-semibold text-gray-900">Basic</span>
-                  )}
-                </div>
-              </div>
-            ) : (
-              <div>
-                <button
-                  onClick={() => {
-                    trackUserAction('login_modal_open', 'sidebar_login_button')
-                    sessionStorage.setItem('uniroad_login_modal_source', 'sidebar_login_button')
-                    setIsAuthModalOpen(true)
-                  }}
-                  className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 active:bg-blue-700 transition-colors font-medium text-xs"
-                >
-                  회원가입 또는 로그인
-                </button>
-              </div>
+            {!isAuthenticated && (
+              <button
+                onClick={() => {
+                  trackUserAction('login_modal_open', 'sidebar_login_button')
+                  sessionStorage.setItem('uniroad_login_modal_source', 'sidebar_login_button')
+                  setIsAuthModalOpen(true)
+                }}
+                className="w-full px-3 sm:px-4 py-2.5 sm:py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 active:bg-blue-700 transition-colors font-medium text-xs"
+              >
+                회원가입 또는 로그인
+              </button>
             )}
           </div>
         </div>
@@ -2139,14 +2598,14 @@ export default function ChatPage() {
       {/* 모바일 오버레이 - 사이드바 바깥 클릭 시 닫기 */}
       {isSideNavOpen && (
         <div
-          className="fixed inset-0 bg-black/30 z-40 sm:hidden"
+          className="layout-overlay fixed inset-0 bg-black/30 z-40 sm:hidden"
           onClick={() => setIsSideNavOpen(false)}
         />
       )}
 
       {/* 메인 채팅 영역 */}
       <div className={`flex flex-col flex-1 min-w-0 transition-all duration-300 ${
-        isSideNavOpen ? 'sm:ml-56' : 'sm:ml-0'
+        isSideNavOpen ? 'sm:ml-64' : 'sm:ml-0'
       }`}>
         {rightPanelView === 'chat' ? (
           <>
@@ -2168,19 +2627,47 @@ export default function ChatPage() {
             </div>
             
             <div className="flex items-center gap-2">
+              {/* 보기 모드: 자동 / 데스크톱 / 모바일 */}
+              <div className="relative sm:hidden" ref={layoutMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsLayoutMenuOpen((v) => !v)}
+                  className="inline-flex h-9 w-9 min-w-[36px] min-h-[36px] items-center justify-center rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300 transition-colors touch-manipulation"
+                  title="보기 모드"
+                  aria-expanded={isLayoutMenuOpen}
+                >
+                  {layoutMode === 'mobile' ? <Smartphone className="w-4 h-4" /> : <Monitor className="w-4 h-4" />}
+                </button>
+                {isLayoutMenuOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-44 rounded-xl border border-gray-200 bg-white shadow-xl py-1.5 z-50">
+                    {(['auto', 'desktop', 'mobile'] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => { setLayoutMode(mode); setIsLayoutMenuOpen(false) }}
+                        className={`w-full px-4 py-2.5 text-left text-sm flex items-center gap-2 ${layoutMode === mode ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
+                      >
+                        {mode === 'auto' && '자동 (화면 따라감)'}
+                        {mode === 'desktop' && '데스크톱 보기'}
+                        {mode === 'mobile' && '모바일 보기'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               {isAuthenticated ? (
                 <div className="relative sm:hidden" ref={userMenuRefMobile}>
                   <button
                     type="button"
                     onClick={() => setIsUserMenuOpen((v) => !v)}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50/90 text-gray-800 hover:bg-amber-100/90 transition-colors"
+                    className="inline-flex h-9 w-9 min-w-[36px] min-h-[36px] items-center justify-center rounded-lg bg-gray-100 text-gray-800 hover:bg-gray-200 active:bg-gray-300 transition-colors touch-manipulation"
                     aria-expanded={isUserMenuOpen}
                     aria-haspopup="true"
                   >
                     <User className="w-4 h-4" strokeWidth={2} />
                   </button>
                   {isUserMenuOpen && (
-                    <div className="absolute right-0 top-full mt-2 w-72 rounded-xl border border-gray-200 bg-white shadow-xl py-2 z-50">
+                    <div className="absolute right-0 top-full mt-2 w-[min(288px,calc(100vw-24px))] max-w-[calc(100vw-24px)] rounded-xl border border-gray-200 bg-white shadow-xl py-2 z-50">
                       <div className="px-4 pt-3 pb-3 flex items-center gap-3">
                         <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-700">
                           <User className="w-5 h-5" strokeWidth={2} />
@@ -2193,7 +2680,7 @@ export default function ChatPage() {
                       <div className="h-px bg-gray-100 mx-2" />
                       <div className="px-4 py-2 flex items-center gap-2">
                         <Gem className="w-4 h-4 text-blue-500 shrink-0" />
-                        <span className="text-sm font-bold text-black">{hasProAccess ? 'Pro' : 'Basic'}</span>
+                        <span className="text-sm font-bold text-black">{isAppBuild() ? 'User' : (hasProAccess ? 'Pro' : 'Basic')}</span>
                       </div>
                       <button
                         type="button"
@@ -2206,6 +2693,7 @@ export default function ChatPage() {
                       >
                         프로필
                       </button>
+                      {!isAppBuild() && (
                       <button
                         type="button"
                         onClick={() => {
@@ -2216,6 +2704,7 @@ export default function ChatPage() {
                       >
                         구독 관리
                       </button>
+                      )}
                       <div className="h-px bg-gray-100 mx-2" />
                       <button
                         type="button"
@@ -2280,6 +2769,34 @@ export default function ChatPage() {
             </div>
             
             <div className="flex items-center gap-3">
+              {/* 보기 모드: 자동 / 데스크톱 / 모바일 */}
+              <div className="relative" ref={layoutMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setIsLayoutMenuOpen((v) => !v)}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
+                  title="보기 모드"
+                  aria-expanded={isLayoutMenuOpen}
+                >
+                  {layoutMode === 'mobile' ? <Smartphone className="w-4 h-4" /> : <Monitor className="w-4 h-4" />}
+                </button>
+                {isLayoutMenuOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-44 rounded-xl border border-gray-200 bg-white shadow-xl py-1.5 z-50">
+                    {(['auto', 'desktop', 'mobile'] as const).map((mode) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        onClick={() => { setLayoutMode(mode); setIsLayoutMenuOpen(false) }}
+                        className={`w-full px-4 py-2.5 text-left text-sm flex items-center gap-2 ${layoutMode === mode ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
+                      >
+                        {mode === 'auto' && '자동 (화면 따라감)'}
+                        {mode === 'desktop' && '데스크톱 보기'}
+                        {mode === 'mobile' && '모바일 보기'}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               {user?.name === '김도균' && (
                 <>
                   {/* 테스트 설정 */}
@@ -2367,7 +2884,7 @@ export default function ChatPage() {
                   <button
                     type="button"
                     onClick={() => setIsUserMenuOpen((v) => !v)}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-amber-50/90 text-gray-800 hover:bg-amber-100/90 transition-colors"
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 text-gray-800 hover:bg-gray-200 transition-colors"
                     aria-expanded={isUserMenuOpen}
                     aria-haspopup="true"
                   >
@@ -2387,7 +2904,7 @@ export default function ChatPage() {
                       <div className="h-px bg-gray-100 mx-2" />
                       <div className="px-4 py-2 flex items-center gap-2">
                         <Gem className="w-4 h-4 text-blue-500 shrink-0" />
-                        <span className="text-sm font-bold text-black">{hasProAccess ? 'Pro' : 'Basic'}</span>
+                        <span className="text-sm font-bold text-black">{isAppBuild() ? 'User' : (hasProAccess ? 'Pro' : 'Basic')}</span>
                       </div>
                       <button
                         type="button"
@@ -2400,6 +2917,7 @@ export default function ChatPage() {
                       >
                         프로필
                       </button>
+                      {!isAppBuild() && (
                       <button
                         type="button"
                         onClick={() => {
@@ -2410,6 +2928,7 @@ export default function ChatPage() {
                       >
                         구독 관리
                       </button>
+                      )}
                       <div className="h-px bg-gray-100 mx-2" />
                       <button
                         type="button"
@@ -2458,55 +2977,125 @@ export default function ChatPage() {
         </header>
 
         {/* 채팅 영역 */}
-        <div className={`flex-1 min-h-0 py-4 flex flex-col ${messages.length === 0 ? 'overflow-y-auto px-2 sm:px-4' : 'overflow-y-auto px-[17px] sm:px-6'}`}>
-          <div className={`mx-auto w-full ${messages.length === 0 ? 'max-w-6xl' : 'max-w-[600px]'}`}>
+        <div
+          ref={chatScrollContainerRef}
+          className={`flex-1 min-h-0 py-4 flex flex-col ${messages.length === 0 ? 'overflow-y-auto px-2 sm:px-4' : 'overflow-y-auto px-[17px] sm:px-6'}`}
+        >
+          <div className={`mx-auto w-full ${messages.length === 0 ? 'max-w-6xl' : 'max-w-[760px]'}`}>
             {messages.length === 0 ? (
               <>
               <div className="flex flex-col items-center w-full pt-12 sm:pt-16 pb-2 mx-auto">
-                <div className="w-full max-w-[640px] px-1 sm:px-2">
+                <div className="w-full max-w-[760px] px-1 sm:px-2">
                   {/* 레이아웃: 제목 → 입력창 → 바로 아래 4개 카드 (이미지 참고) */}
                   <h2 className="text-2xl sm:text-3xl font-bold text-gray-900 text-center mb-1">
-                    입시 상담의 모든 것
+                    {schoolRecordToolEnabled ? '국내 최고의 생기부 분석' : '역대 최고의 입시 상담'}
                   </h2>
                   <p className="text-xs sm:text-sm text-gray-500 text-center mb-6 sm:mb-8">
-                    출처 기반의 정확한 입시 정보를 전달해드립니다
+                    {schoolRecordToolEnabled
+                      ? '합격자 생기부와 공식 요강을 바탕으로 하는 최고 전문가 수준의 컨설팅'
+                      : '32,352개의 공식 문서에 기반한 최고 전문가 수준의 컨설팅'}
                   </p>
                   {/* 입력창 */}
                   <div className="w-full mx-auto mb-4 mt-2">
                     <div className="bg-white rounded-2xl shadow-[0_2px_12px_rgba(0,0,0,0.08)] focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.12)] px-4 py-2 transition-shadow duration-200">
-                      <textarea
-                        ref={inputTextareaRef}
-                        value={input}
-                        onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
-                        onKeyDown={handleInputKeyDown}
-                        placeholder="입시에 대한 궁금한 점을 물어보세요"
-                        disabled={isLoading || isInputLocked}
-                        rows={1}
-                        className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
-                        style={{ height: 'auto' }}
-                        onInput={(e) => {
-                          const target = e.target as HTMLTextAreaElement
-                          target.style.height = 'auto'
-                          target.style.height = Math.min(target.scrollHeight, 200) + 'px'
-                        }}
-                      />
-                      {isScoreSuggestOpen && scoreSuggestItems.length > 0 && (
-                        <div className="mt-2 bg-white border border-gray-200 rounded-xl shadow-lg py-1 max-h-48 overflow-y-auto w-48">
-                          {scoreSuggestItems.map((item, idx) => (
-                            <button
-                              key={`${item.id}-${item.name}`}
-                              type="button"
-                              onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => applyScoreSuggestion(item)}
-                              className={`w-full text-left px-3 py-2 text-sm transition-colors ${
-                                idx === scoreSuggestIndex ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50 text-gray-700'
-                              }`}
-                            >
-                              {item.name.startsWith('@') ? item.name : `@${item.name}`}
-                            </button>
-                          ))}
+                      <div className="relative">
+                        {/* 멘션 배지 오버레이 (텍스트와 동기화되어 같은 위치에 표시) */}
+                        <div
+                          ref={inputOverlayRef}
+                          className="absolute inset-0 overflow-y-auto overflow-x-hidden pointer-events-none text-base min-h-[28px] max-h-[200px] py-0 px-0 whitespace-pre-wrap break-words"
+                          aria-hidden
+                        >
+                          <span className="text-gray-900 font-[ui-rounded]">
+                            {input ? renderInputOverlay(input) : '\u00A0'}
+                          </span>
                         </div>
-                      )}
+                        <textarea
+                          ref={inputTextareaRef}
+                          value={input}
+                          onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
+                          onKeyDown={handleInputKeyDown}
+                          onScroll={(e) => {
+                            const el = e.target as HTMLTextAreaElement
+                            if (inputOverlayRef.current) {
+                              inputOverlayRef.current.scrollTop = el.scrollTop
+                              inputOverlayRef.current.scrollLeft = el.scrollLeft
+                            }
+                          }}
+                          placeholder="입시에 대한 궁금한 점을 물어보세요"
+                          disabled={isLoading || isInputLocked}
+                          rows={1}
+                          className="relative z-10 w-full text-base font-[ui-rounded] bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400 text-transparent caret-gray-900 selection:bg-blue-200 selection:text-transparent"
+                          style={{ height: 'auto' }}
+                          onInput={(e) => {
+                            const target = e.target as HTMLTextAreaElement
+                            target.style.height = 'auto'
+                            target.style.height = Math.min(target.scrollHeight, 200) + 'px'
+                          }}
+                        />
+                        {isScoreSuggestOpen && scoreSuggestItems.length > 0 && (
+                          <div className="absolute left-0 top-full mt-2 z-50 w-[280px] sm:w-[320px] max-w-[calc(100vw-24px)] bg-white border border-gray-200 rounded-xl shadow-[0_8px_30px_rgba(0,0,0,0.12)] py-2 overflow-hidden">
+                            {/* 섹션 헤더 */}
+                            <div className="px-3 py-1 text-[11px] font-semibold text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 20l4-16m2 8l4-8M6 9h14M4 15h14" />
+                              </svg>
+                              성적 선택
+                            </div>
+                            <div className="max-h-[min(260px,45vh)] overflow-y-auto overscroll-contain pr-1">
+                            {scoreSuggestItems.map((item, idx) => {
+                              const isNaesin = item.id === 'naesin'
+                              const isSelected = idx === scoreSuggestIndex
+                              return (
+                                <button
+                                  key={`${item.id}-${item.name}`}
+                                  type="button"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => applyScoreSuggestion(item)}
+                                  onMouseEnter={() => setScoreSuggestIndex(idx)}
+                                  className={`w-full text-left px-3 py-2 text-[13px] min-h-[44px] transition-all mx-1 rounded-lg flex items-center gap-2.5 ${
+                                    isSelected
+                                      ? 'bg-blue-50 text-blue-700'
+                                      : 'hover:bg-gray-50 text-gray-700'
+                                  }`}
+                                >
+                                  {/* 아이콘 */}
+                                  <div className={`flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center ${
+                                    isNaesin
+                                      ? (isSelected ? 'bg-blue-100 text-blue-600' : 'bg-indigo-50 text-indigo-500')
+                                      : (isSelected ? 'bg-blue-100 text-blue-600' : 'bg-emerald-50 text-emerald-500')
+                                  }`}>
+                                    {isNaesin ? (
+                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                                      </svg>
+                                    ) : (
+                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                      </svg>
+                                    )}
+                                  </div>
+                                  {/* 텍스트 */}
+                                  <div className="flex-1 min-w-0">
+                                    <div className={`font-medium truncate leading-tight ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
+                                      {isNaesin ? item.name : item.name}
+                                    </div>
+                                    <div className="text-[11px] text-gray-400 truncate">
+                                      {isNaesin ? '연동된 내신 성적' : '모의고사 성적'}
+                                    </div>
+                                  </div>
+                                  {/* 선택 표시 */}
+                                  {isSelected && (
+                                    <svg className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  )}
+                                </button>
+                              )
+                            })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                       <div className="flex items-center justify-between mt-2">
                         <div className="flex items-center gap-2">
                           {schoolRecordToolEnabled && (
@@ -2548,7 +3137,7 @@ export default function ChatPage() {
                           <button
                             onClick={() => handleSend()}
                             disabled={isLoading || isInputLocked || (!input.trim() && !selectedImage)}
-                            className="w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                            className="min-w-[44px] min-h-[44px] w-10 h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                           >
                             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -2597,18 +3186,28 @@ export default function ChatPage() {
                         const item = exampleFaqItems[realIdx]
                         const category = getExampleFaqCategory(realIdx)
                         const isPremium = category === '생활기록부'
-                        const badgeLabel = isPremium ? 'Premium' : 'Basic'
+                        const badgeLabel = isAppBuild() ? 'content' : (isPremium ? 'Premium' : 'Basic')
                         const duplicateCount = realIdx % 3 === 0 ? 1 : 2
                         return (
                           <button
                             key={realIdx}
                             type="button"
-                            onClick={() => handleSend(item.question)}
+                            onClick={() => {
+                              if (category === '생활기록부') {
+                                if (schoolRecordToolEnabled) {
+                                  handleSend(item.question)
+                                } else {
+                                  navigate(`/chat?${SCHOOL_RECORD_MODE_PARAM}`, { replace: true, state: { initialQuestion: item.question } })
+                                }
+                              } else {
+                                handleSend(item.question)
+                              }
+                            }}
                             className="text-left rounded-2xl border border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm transition-all w-full p-4 min-h-[220px] flex flex-col"
                           >
                             <div className="flex items-start justify-between gap-3 mb-3">
-                              <span className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-xs font-semibold shrink-0 ${isPremium ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-800'}`}>
-                                {isPremium ? <Crown className="w-3.5 h-3.5 text-amber-500" /> : <Sparkles className="w-3.5 h-3.5 text-blue-500" />}
+                              <span className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-xs font-semibold shrink-0 ${isAppBuild() ? 'bg-gray-100 text-gray-800' : (isPremium ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-800')}`}>
+                                {isAppBuild() ? <Sparkles className="w-3.5 h-3.5 text-blue-500" /> : (isPremium ? <Crown className="w-3.5 h-3.5 text-amber-500" /> : <Sparkles className="w-3.5 h-3.5 text-blue-500" />)}
                                 {badgeLabel}
                               </span>
                               <div className="inline-flex items-center gap-3 text-xs text-gray-700 shrink-0">
@@ -2629,7 +3228,7 @@ export default function ChatPage() {
                             <div className="mt-auto flex items-center justify-between text-sm">
                               <span className="text-gray-500">@{category.replace(/\s/g, '').toLowerCase()}</span>
                               <span className="inline-flex items-center gap-1 font-medium">
-                                {isPremium ? <span className="text-amber-600">Premium</span> : <span className="text-gray-700">Free</span>}
+                                {isAppBuild() ? <span className="text-gray-700">chat</span> : (isPremium ? <span className="text-amber-600">Premium</span> : <span className="text-gray-700">Free</span>)}
                                 <ArrowUpRight className="w-3.5 h-3.5 text-gray-700" />
                               </span>
                             </div>
@@ -2642,90 +3241,79 @@ export default function ChatPage() {
 
                   {schoolRecordToolEnabled && (
                     <div className="w-full mb-6 sm:mb-10 max-w-3xl mx-auto px-2 sm:px-4">
-                      <div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4 sm:p-5">
-                        <div className="flex items-center gap-2 mb-3">
-                          <span className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-blue-100 text-blue-700">📘</span>
-                          <h3 className="text-sm sm:text-base font-semibold text-gray-900">생기부 심층 분석 빠른 시작</h3>
-                        </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {schoolRecordResearchSuggestions.map((item) => (
+                      {/* 상단 4개 기능 카드 */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+                        {schoolRecordQuickActions.map((action) => (
+                          <button
+                            key={action.id}
+                            type="button"
+                            onClick={() => {
+                              setInput(action.question)
+                              requestAnimationFrame(() => inputTextareaRef.current?.focus())
+                            }}
+                            className="flex items-start gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/30 transition-all text-left group"
+                          >
+                            <span className="inline-flex items-center justify-center w-5 h-5 mt-0.5 text-gray-400 group-hover:text-blue-500 transition-colors">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 17L17 7M17 7H7M17 7V17" />
+                              </svg>
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-sm font-semibold text-gray-900 mb-1">{action.title}</h4>
+                              <p className="text-xs text-gray-500 line-clamp-2">{action.description}</p>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* 리포트 섹션 */}
+                      <div>
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="text-lg font-bold text-gray-900">리포트</h3>
+                          <div className="flex items-center gap-1">
                             <button
-                              key={item}
                               type="button"
-                              onClick={() => startSchoolRecordResearch(item)}
-                              className="text-left rounded-xl border border-white bg-white px-3 py-2 text-sm text-gray-700 hover:border-blue-200 hover:bg-blue-50 transition-colors"
+                              onClick={() => setReportPage((p) => Math.max(0, p - 1))}
+                              disabled={reportPage === 0}
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
                             >
-                              {item}
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setReportPage((p) => p + 1)}
+                              disabled={(reportPage + 1) * 2 >= displayReports.length}
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 리포트 카드 그리드 */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {displayReports.slice(reportPage * 2, reportPage * 2 + 2).map((report) => (
+                            <button
+                              key={report.id || report.title}
+                              type="button"
+                              onClick={() => {
+                                if ('id' in report && report.id) {
+                                  void openSavedSchoolRecordReport(report as SavedSchoolRecordReport)
+                                } else {
+                                  startSchoolRecordResearch((report as { question?: string }).question!)
+                                }
+                              }}
+                              className="text-left rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 hover:border-blue-300 hover:shadow-sm transition-all"
+                            >
+                              <h4 className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2">{report.title}</h4>
+                              <p className="text-xs text-gray-500 line-clamp-4 leading-relaxed">{report.description}</p>
                             </button>
                           ))}
                         </div>
-                      </div>
-
-                      <div className="mt-4 rounded-2xl border border-gray-200 bg-white p-4 sm:p-5">
-                        <div className="flex items-center justify-between mb-3">
-                          <h3 className="text-sm sm:text-base font-semibold text-gray-900">최근 생기부 분석 리포트</h3>
-                          {savedSchoolRecordReports.length > 3 && (
-                            <button
-                              type="button"
-                              onClick={() => setShowAllReports((v) => !v)}
-                              className="text-xs text-blue-600 hover:text-blue-700"
-                            >
-                              {showAllReports ? '접기' : '모두 보기'}
-                            </button>
-                          )}
-                        </div>
-
-                        {savedSchoolRecordReportsLoading ? (
-                          <p className="text-sm text-gray-500">생성된 리포트를 불러오는 중...</p>
-                        ) : savedSchoolRecordReports.length > 0 ? (
-                          <div className="space-y-2">
-                            {(showAllReports ? savedSchoolRecordReports : savedSchoolRecordReports.slice(0, 3)).map((report) => (
-                              <button
-                                key={report.id}
-                                type="button"
-                                onClick={() => void openSavedSchoolRecordReport(report)}
-                                className="w-full text-left rounded-xl border border-gray-100 px-3 py-2 hover:bg-gray-50 transition-colors"
-                              >
-                                <p className="text-sm font-medium text-gray-900">{report.title}</p>
-                                <p className="text-xs text-gray-500 mt-1 line-clamp-2">{report.description}</p>
-                                <div className="mt-2 flex items-center justify-between">
-                                  <p className="text-[11px] text-gray-400">
-                                    {report.createdAt ? new Date(report.createdAt).toLocaleDateString('ko-KR') : ''}
-                                  </p>
-                                  <p className="text-[11px] font-medium text-blue-600">리포트 열기</p>
-                                </div>
-                              </button>
-                            ))}
-                          </div>
-                        ) : (
-                          <div>
-                            <div className="space-y-2">
-                              {(showAllReports ? schoolRecordResearchReports : schoolRecordResearchReports.slice(0, 3)).map((report) => (
-                                <button
-                                  key={report.title}
-                                  type="button"
-                                  onClick={() => startSchoolRecordResearch(report.question)}
-                                  className="w-full text-left rounded-xl border border-gray-100 px-3 py-2 hover:bg-gray-50 transition-colors"
-                                >
-                                  <p className="text-sm font-medium text-gray-900">{report.title}</p>
-                                  <p className="text-xs text-gray-500 mt-1 line-clamp-2">{report.description}</p>
-                                  <p className="mt-2 text-[11px] font-medium text-blue-600">지금 바로 작성하기</p>
-                                </button>
-                              ))}
-                            </div>
-                            {schoolRecordResearchReports.length > 3 && (
-                              <div className="mt-2 flex justify-end">
-                                <button
-                                  type="button"
-                                  onClick={() => setShowAllReports((v) => !v)}
-                                  className="text-xs text-blue-600 hover:text-blue-700"
-                                >
-                                  {showAllReports ? '접기' : '모두 보기'}
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        )}
                       </div>
                     </div>
                   )}
@@ -2780,6 +3368,75 @@ export default function ChatPage() {
                   isUser={msg.isUser}
                   scoreMentions={msg.scoreMentions}
                   scoreReview={msg.scoreReview}
+                  schoolGradeSaved={msg.schoolGradeSaved}
+                  onOpenSchoolGradeInput={() => setRightPanelView('grade_input')}
+                  onNaesinConfirm={(edited) => {
+                    const messageId = msg.id
+                    setMessages((prev) =>
+                      prev.map((m) =>
+                        m.id === messageId
+                          ? { ...m, schoolGradeSaved: undefined, isStreaming: true, text: '' }
+                          : m
+                      )
+                    )
+                    setIsLoading(true)
+                    setCurrentLog('답변을 생성하는 중...')
+                    const controller = new AbortController()
+                    let firstChunk = true
+                    sendContinueAfterNaesin(
+                      sessionId,
+                      (log) => setCurrentLog(log),
+                      (result) => {
+                        setMessages((prev) =>
+                          prev.map((m) =>
+                            m.id === messageId
+                              ? {
+                                  ...m,
+                                  text: result.response,
+                                  sources: result.sources,
+                                  source_urls: result.source_urls,
+                                  used_chunks: result.used_chunks,
+                                  isStreaming: false,
+                                }
+                              : m
+                          )
+                        )
+                        setIsLoading(false)
+                        setCurrentLog('')
+                        scrollToBottom()
+                      },
+                      (error) => {
+                        setMessages((prev) =>
+                          prev.map((m) =>
+                            m.id === messageId
+                              ? { ...m, text: error || '답변 생성에 실패했습니다.', isStreaming: false }
+                              : m
+                          )
+                        )
+                        setIsLoading(false)
+                        setCurrentLog('')
+                      },
+                      controller.signal,
+                      (chunk) => {
+                        if (firstChunk) {
+                          firstChunk = false
+                          setCurrentLog('')
+                          setIsLoading(false)
+                        }
+                        setMessages((prev) =>
+                          prev.map((m) =>
+                            m.id === messageId ? { ...m, text: m.text + chunk } : m
+                          )
+                        )
+                        scrollToBottom()
+                      },
+                      undefined,
+                      getRequestToken(),
+                      edited ?? undefined
+                    )
+                  }}
+                  onNaesinDontAskAgain={() => setSkipNaesinCardThisSession(true)}
+                  hideNaesinCard={skipNaesinCardThisSession}
                   sources={msg.sources}
                   source_urls={msg.source_urls}
                   usedChunks={msg.used_chunks}
@@ -2802,9 +3459,76 @@ export default function ChatPage() {
                     }
                   }}
                   onFollowUpClick={(question) => handleSend(question)}
-                  onScoreReviewApprove={async (pendingId, title, scores) => {
+                  onScoreReviewApprove={async (pendingId, title, scores, useExistingScoreId) => {
                     try {
                       const requestToken = getRequestToken()
+                      const botMsgId = msg.id
+
+                      if (useExistingScoreId) {
+                        setActiveScoreId(pendingId)
+                        setMessages((prev) => prev.map((m) =>
+                          m.id === msg.id
+                            ? { ...m, text: '', scoreReview: undefined, isStreaming: true }
+                            : m
+                        ))
+                        setIsLoading(true)
+                        const controller = new AbortController()
+                        abortControllerRef.current = controller
+                        let firstChunk = true
+                        await sendContinueAfterScoreConfirm(
+                          sessionId,
+                          pendingId,
+                          (log) => setCurrentLog(log),
+                          (response) => {
+                            setMessages((prev) => prev.map((m) =>
+                              m.id === botMsgId
+                                ? {
+                                    ...m,
+                                    text: response.response || '',
+                                    sources: response.sources,
+                                    source_urls: response.source_urls,
+                                    used_chunks: response.used_chunks,
+                                    isStreaming: false,
+                                    agentData: {
+                                      routerOutput: response.router_output || null,
+                                      functionResults: response.function_results || null,
+                                      mainAgentOutput: response.response || '',
+                                      rawAnswer: response.raw_answer || null,
+                                      logs: [],
+                                    },
+                                  }
+                                : m
+                            ))
+                            setIsLoading(false)
+                            setCurrentLog('')
+                            scrollToBottom()
+                          },
+                          (error) => {
+                            setMessages((prev) => prev.map((m) =>
+                              m.id === botMsgId
+                                ? { ...m, text: error || '답변 생성에 실패했습니다.', isStreaming: false }
+                                : m
+                            ))
+                            setIsLoading(false)
+                            setCurrentLog('')
+                          },
+                          controller.signal,
+                          (chunk) => {
+                            if (firstChunk) {
+                              firstChunk = false
+                              setCurrentLog('')
+                              setIsLoading(false)
+                            }
+                            setMessages((prev) => prev.map((m) =>
+                              m.id === botMsgId ? { ...m, text: m.text + chunk } : m
+                            ))
+                            scrollToBottom()
+                          },
+                          requestToken
+                        )
+                        return
+                      }
+
                       const approved = await approveScoreReview(
                         pendingId,
                         sessionId,
@@ -2814,14 +3538,6 @@ export default function ChatPage() {
                       )
                       const approvedScoreId = approved.score_id
 
-                      let originalQuestion = ''
-                      for (let i = index - 1; i >= 0; i--) {
-                        if (messages[i].isUser) {
-                          originalQuestion = messages[i].text
-                          break
-                        }
-                      }
-
                       setActiveScoreId(approvedScoreId)
                       setMessages((prev) => prev.map((m) =>
                         m.id === msg.id
@@ -2829,63 +3545,61 @@ export default function ChatPage() {
                           : m
                       ))
                       setIsLoading(true)
+                      const abortController = new AbortController()
+                      abortControllerRef.current = abortController
+                      let firstChunk = true
 
-                      if (originalQuestion) {
-                        const abortController = new AbortController()
-                        abortControllerRef.current = abortController
-                        const botMsgId = msg.id
-
-                        await sendMessageStream(
-                          originalQuestion,
-                          sessionId,
-                          (log) => setCurrentLog(log),
-                          (response) => {
-                            const finalText = response.response || ''
-                            setMessages((prev) => prev.map((m) =>
-                              m.id === botMsgId
-                                ? {
-                                    ...m,
-                                    text: finalText,
-                                    isStreaming: false,
-                                    sources: response.sources,
-                                    source_urls: response.source_urls,
-                                    agentData: {
-                                      routerOutput: response.router_output || null,
-                                      functionResults: response.function_results || null,
-                                      mainAgentOutput: finalText,
-                                      rawAnswer: response.raw_answer || null,
-                                      logs: [],
-                                    },
-                                  }
-                                : m
-                            ))
-                            setIsLoading(false)
+                      await sendContinueAfterScoreConfirm(
+                        sessionId,
+                        approvedScoreId,
+                        (log) => setCurrentLog(log),
+                        (response) => {
+                          setMessages((prev) => prev.map((m) =>
+                            m.id === botMsgId
+                              ? {
+                                  ...m,
+                                  text: response.response || '',
+                                  sources: response.sources,
+                                  source_urls: response.source_urls,
+                                  used_chunks: response.used_chunks,
+                                  isStreaming: false,
+                                  agentData: {
+                                    routerOutput: response.router_output || null,
+                                    functionResults: response.function_results || null,
+                                    mainAgentOutput: response.response || '',
+                                    rawAnswer: response.raw_answer || null,
+                                    logs: [],
+                                  },
+                                }
+                              : m
+                          ))
+                          setIsLoading(false)
+                          setCurrentLog('')
+                          scrollToBottom()
+                        },
+                        (error) => {
+                          setMessages((prev) => prev.map((m) =>
+                            m.id === botMsgId
+                              ? { ...m, text: error || '답변 생성에 실패했습니다.', isStreaming: false }
+                              : m
+                          ))
+                          setIsLoading(false)
+                          setCurrentLog('')
+                        },
+                        abortController.signal,
+                        (chunk) => {
+                          if (firstChunk) {
+                            firstChunk = false
                             setCurrentLog('')
-                          },
-                          (error) => {
-                            setMessages((prev) => prev.map((m) =>
-                              m.id === botMsgId
-                                ? { ...m, text: error, isStreaming: false }
-                                : m
-                            ))
                             setIsLoading(false)
-                            setCurrentLog('')
-                          },
-                          abortController.signal,
-                          (chunk) => {
-                            setMessages((prev) => prev.map((m) =>
-                              m.id === botMsgId
-                                ? { ...m, text: m.text + chunk }
-                                : m
-                            ))
-                            scrollToBottom()
-                          },
-                          requestToken,
-                          thinkingMode,
-                          undefined,
-                          approvedScoreId,
-                        )
-                      }
+                          }
+                          setMessages((prev) => prev.map((m) =>
+                            m.id === botMsgId ? { ...m, text: m.text + chunk } : m
+                          ))
+                          scrollToBottom()
+                        },
+                        requestToken
+                      )
                     } catch (e) {
                       console.error('성적 검토 승인 실패:', e)
                       setMessages((prev) => prev.map((m) =>
@@ -2919,12 +3633,57 @@ export default function ChatPage() {
                     }
                   }}
                   onScoreTagClick={async (name) => {
+                    const normalized = (name || '').replace(/\s+/g, ' ').trim()
+                    if (/^@내신\s*성적$/.test(normalized)) {
+                      let summary: NaesinPreviewGradeSummary | null = null
+
+                      try {
+                        const requestToken = getRequestToken()
+                        if (requestToken) {
+                          const payload = await getMySchoolGradeInput(requestToken)
+                          summary = normalizeNaesinGradeSummary(payload?.school_grade_input)
+                        }
+                      } catch (e) {
+                        console.error('연동 내신 성적 조회 실패:', e)
+                      }
+
+                      if (!summary) {
+                        const latestSaved = [...messages]
+                          .reverse()
+                          .find((m) => m.schoolGradeSaved)?.schoolGradeSaved
+                        summary = normalizeNaesinGradeSummary(latestSaved)
+                      }
+
+                      if (!summary) {
+                        try {
+                          const localRaw = localStorage.getItem('uniroad_school_grade_input_v3')
+                          if (localRaw) {
+                            summary = normalizeNaesinGradeSummary(JSON.parse(localRaw))
+                          }
+                        } catch {
+                          // ignore local parse errors
+                        }
+                      }
+
+                      if (!summary) {
+                        alert('저장된 내신 성적이 없어요. 먼저 내신 성적을 입력해 주세요.')
+                        return
+                      }
+
+                      setScorePreview({
+                        kind: 'naesin',
+                        name: '@내신 성적',
+                        gradeSummary: summary,
+                      })
+                      return
+                    }
                     try {
                       const requestToken = getRequestToken()
                       const data = await getScoreSetByName(name, sessionId, requestToken)
                       setActiveScoreId(data.id)
                       const normalizedName = data.name.startsWith('@') ? data.name : `@${data.name}`
                       setScorePreview({
+                        kind: 'score_set',
                         name: normalizedName,
                         scores: data.scores || {},
                       })
@@ -2954,11 +3713,11 @@ export default function ChatPage() {
 
         {/* 입력 영역 - 고정 (메시지가 있을 때만 표시) */}
         {messages.length > 0 && (
-          <div className="bg-white sticky bottom-0 sm:bottom-[40px]">
+          <div className="bg-white sticky bottom-0 sm:bottom-[40px] safe-area-bottom">
             {/* 이미지 미리보기 */}
             {imagePreviewUrl && (
               <div className="px-4 sm:px-6 pb-2">
-                <div className="max-w-[600px] mx-auto">
+                <div className="max-w-[760px] mx-auto">
                   <div className="inline-flex items-center gap-2 bg-gray-100 rounded-lg p-2">
                     <img 
                       src={imagePreviewUrl} 
@@ -2980,7 +3739,7 @@ export default function ChatPage() {
             )}
             
             <div className="px-4 sm:px-6 py-2">
-              <div className="max-w-[600px] mx-auto">
+              <div className="max-w-[760px] mx-auto">
                 <div className="bg-gray-50 rounded-3xl focus-within:ring-2 focus-within:ring-blue-500 px-3 sm:px-4 py-2 sm:py-3">
                   {isInputLocked && lockReason === 'guest_masked' && (
                     <div className="mb-2 rounded-lg bg-amber-50 px-3 py-2 text-xs sm:text-sm text-amber-700">
@@ -2988,15 +3747,33 @@ export default function ChatPage() {
                     </div>
                   )}
                   {/* 텍스트 입력 영역 */}
+                  <div className="relative">
+                  {/* 멘션 배지 오버레이 */}
+                  <div
+                    ref={inputOverlayRef}
+                    className="absolute inset-0 overflow-y-auto overflow-x-hidden pointer-events-none text-base min-h-[28px] sm:min-h-[32px] max-h-[200px] py-0 px-0 whitespace-pre-wrap break-words"
+                    aria-hidden
+                  >
+                    <span className="text-gray-900 font-[ui-rounded]">
+                      {input ? renderInputOverlay(input) : '\u00A0'}
+                    </span>
+                  </div>
                   <textarea
                     ref={inputTextareaRef}
                     value={input}
                     onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
                     onKeyDown={handleInputKeyDown}
+                    onScroll={(e) => {
+                      const el = e.target as HTMLTextAreaElement
+                      if (inputOverlayRef.current) {
+                        inputOverlayRef.current.scrollTop = el.scrollTop
+                        inputOverlayRef.current.scrollLeft = el.scrollLeft
+                      }
+                    }}
                     placeholder="입시에 대한 궁금한 점을 물어보세요"
                     disabled={isLoading || isInputLocked}
                     rows={1}
-                    className="w-full text-base bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] sm:min-h-[32px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400"
+                    className="relative z-10 w-full text-base font-[ui-rounded] bg-transparent focus:outline-none disabled:bg-gray-100 min-h-[28px] sm:min-h-[32px] max-h-[200px] resize-none overflow-y-auto placeholder:text-gray-400 text-transparent caret-gray-900 selection:bg-blue-200 selection:text-transparent"
                     style={{ height: 'auto' }}
                     onInput={(e) => {
                       const target = e.target as HTMLTextAreaElement
@@ -3005,22 +3782,69 @@ export default function ChatPage() {
                     }}
                   />
                   {isScoreSuggestOpen && scoreSuggestItems.length > 0 && (
-                    <div className="mt-2 bg-white border border-gray-200 rounded-xl shadow-lg py-1 max-h-48 overflow-y-auto w-48">
-                      {scoreSuggestItems.map((item, idx) => (
-                        <button
-                          key={`${item.id}-${item.name}`}
-                          type="button"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => applyScoreSuggestion(item)}
-                          className={`w-full text-left px-3 py-2 text-sm transition-colors ${
-                            idx === scoreSuggestIndex ? 'bg-blue-50 text-blue-700' : 'hover:bg-gray-50 text-gray-700'
-                          }`}
-                        >
-                          {item.name.startsWith('@') ? item.name : `@${item.name}`}
-                        </button>
-                      ))}
+                    <div className="absolute left-0 bottom-full mb-2 z-50 w-[280px] sm:w-[320px] max-w-[calc(100vw-24px)] bg-white border border-gray-200 rounded-xl shadow-[0_-8px_30px_rgba(0,0,0,0.12)] py-2 overflow-hidden">
+                      {/* 섹션 헤더 */}
+                      <div className="px-3 py-1 text-[11px] font-semibold text-gray-400 uppercase tracking-wide flex items-center gap-1.5">
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 20l4-16m2 8l4-8M6 9h14M4 15h14" />
+                        </svg>
+                        성적 선택
+                      </div>
+                      <div className="max-h-[min(260px,45vh)] overflow-y-auto overscroll-contain pr-1">
+                      {scoreSuggestItems.map((item, idx) => {
+                        const isNaesin = item.id === 'naesin'
+                        const isSelected = idx === scoreSuggestIndex
+                        return (
+                          <button
+                            key={`${item.id}-${item.name}`}
+                            type="button"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => applyScoreSuggestion(item)}
+                            onMouseEnter={() => setScoreSuggestIndex(idx)}
+                            className={`w-full text-left px-3 py-2 text-[13px] min-h-[44px] transition-all mx-1 rounded-lg flex items-center gap-2.5 ${
+                              isSelected
+                                ? 'bg-blue-50 text-blue-700'
+                                : 'hover:bg-gray-50 text-gray-700'
+                            }`}
+                          >
+                            {/* 아이콘 */}
+                            <div className={`flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center ${
+                              isNaesin
+                                ? (isSelected ? 'bg-blue-100 text-blue-600' : 'bg-indigo-50 text-indigo-500')
+                                : (isSelected ? 'bg-blue-100 text-blue-600' : 'bg-emerald-50 text-emerald-500')
+                            }`}>
+                              {isNaesin ? (
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                                </svg>
+                              ) : (
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                </svg>
+                              )}
+                            </div>
+                            {/* 텍스트 */}
+                            <div className="flex-1 min-w-0">
+                              <div className={`font-medium truncate leading-tight ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
+                                {item.name}
+                              </div>
+                              <div className="text-[11px] text-gray-400 truncate">
+                                {isNaesin ? '연동된 내신 성적' : '모의고사 성적'}
+                              </div>
+                            </div>
+                            {/* 선택 표시 */}
+                            {isSelected && (
+                              <svg className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </button>
+                        )
+                      })}
+                      </div>
                     </div>
                   )}
+                  </div>
                   
                   {/* 하단 영역: 버튼들 + 전송 버튼 */}
                   <div className="flex items-center justify-between mt-2">
@@ -3048,7 +3872,7 @@ export default function ChatPage() {
                       <button
                         onClick={() => handleSend()}
                         disabled={isLoading || isInputLocked || (!input.trim() && !selectedImage)}
-                        className="w-9 h-9 sm:w-10 sm:h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                        className="min-w-[44px] min-h-[44px] w-9 h-9 sm:w-10 sm:h-10 bg-blue-600 text-white rounded-full flex items-center justify-center hover:bg-blue-700 active:bg-blue-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
                       >
                         <svg className="w-4 h-4 sm:w-5 sm:h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -3064,34 +3888,65 @@ export default function ChatPage() {
           </>
         ) : (
           <>
-            <div className="bg-white safe-area-top sticky top-0 z-10 border-b border-gray-200 px-4 py-3 flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                if (rightPanelView === 'school_record_link' || rightPanelView === 'mock_exam_input') setRightPanelView('school_record_menu')
-                else setRightPanelView('chat')
-              }}
-                className="p-2 -ml-1 rounded-lg hover:bg-gray-100 transition-colors flex items-center gap-2 text-gray-700"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                </svg>
-                <span className="text-sm font-medium">
-                  {rightPanelView === 'school_record_link' || rightPanelView === 'mock_exam_input' ? '입시 기록 메뉴로' : '채팅으로 돌아가기'}
-                </span>
-              </button>
-            </div>
-            <div className="flex-1 overflow-auto min-h-0">
+            <div className={`flex-1 overflow-auto min-h-0 flex flex-col ${['school_record_menu', 'school_record_link', 'grade_input', 'mock_exam_input'].includes(rightPanelView) ? 'bg-gray-50 min-h-full' : ''}`}>
+              {/* 노션 스타일: 입시 기록 영역 상단 브레드크럼 (같은 섹션 안에서 전환되는 느낌) */}
+              {['school_record_menu', 'school_record_link', 'grade_input', 'mock_exam_input'].includes(rightPanelView) && (
+                <div className="flex-shrink-0 sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-4 sm:px-6 py-3.5 min-h-[48px] flex items-center gap-2 safe-area-top">
+                  {/* 모바일 전용: 프로필 화면에서도 사이드 네비 열기 버튼 (회색 배경에서 잘 보이도록) */}
+                  <button
+                    type="button"
+                    onClick={() => setIsSideNavOpen(true)}
+                    className="sm:hidden -ml-1 shrink-0 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-gray-700 transition-colors hover:bg-gray-100 active:bg-gray-200 touch-manipulation"
+                    aria-label="메뉴 열기"
+                  >
+                    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
+                    </svg>
+                  </button>
+                  <nav className="text-sm text-gray-600 flex items-center gap-1.5 truncate min-w-0 flex-1" aria-label="입시 기록 메뉴">
+                    <button
+                      type="button"
+                      onClick={() => setRightPanelView('school_record_menu')}
+                      className="font-medium text-gray-900 hover:text-blue-600 focus:text-blue-600 focus:outline-none active:opacity-80 py-1 -my-1 px-1 -mx-1 rounded min-h-[44px] min-w-[44px] flex items-center touch-manipulation"
+                    >
+                      내 프로필
+                    </button>
+                    {rightPanelView !== 'school_record_menu' && (
+                      <>
+                        <span className="text-gray-300 pointer-events-none">/</span>
+                        <span className="text-gray-700">
+                          {rightPanelView === 'school_record_link' && '생활기록부'}
+                          {rightPanelView === 'grade_input' && '내신 성적'}
+                          {rightPanelView === 'mock_exam_input' && '모의고사'}
+                        </span>
+                      </>
+                    )}
+                  </nav>
+                </div>
+              )}
+              {/* 탭 전환 시 부드러운 페이드 (노션처럼 같은 페이지 내 전환 느낌) */}
               {rightPanelView === 'grade_input' && (
+                <div key="grade_input" className="animate-panel-fadeIn flex-1 min-h-0 flex flex-col">
                 <SchoolGradeInputModal
                   embedded
                   isOpen
-                  onClose={() => setRightPanelView('chat')}
-                  onRequireSchoolRecordLink={() => setRightPanelView('school_record_menu')}
+                  autoOpenSavedGradeReport={autoOpenSavedGradeReport}
+                  onAutoOpenSavedGradeReportHandled={() => setAutoOpenSavedGradeReport(false)}
+                  onClose={() => setRightPanelView('school_record_menu')}
+                  onRequireSchoolRecordLink={() => {
+                    setSchoolRecordMenuTab('school_record')
+                    setRightPanelView('school_record_link')
+                  }}
+                  onUseNaesinSuggestion={(mention) => {
+                    setInput((prev) => (prev.trim() ? `${prev} ${mention} ` : `${mention} `))
+                    setRightPanelView('chat')
+                  }}
                   onOpenMockExamInput={() => setRightPanelView('mock_exam_input')}
                 />
+                </div>
               )}
               {rightPanelView === 'mock_exam_input' && (
+                <div key="mock_exam_input" className="animate-panel-fadeIn flex-1 min-h-0 flex flex-col">
                 <ScoreSetManagerModal
                   embedded
                   isOpen
@@ -3104,264 +3959,326 @@ export default function ChatPage() {
                     setRightPanelView('chat')
                   }}
                 />
+                </div>
               )}
               {rightPanelView === 'school_record_menu' && (
-                <div className="max-w-2xl mx-auto overflow-x-hidden px-6 pb-6">
-                  {/* 커버 배너 - 화면 전체 너비 */}
-                  <div className="h-32 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 relative left-1/2 ml-[calc(-50vw+50%)] w-screen max-w-none rounded-t-2xl" />
-                  {/* 프로필 카드 */}
-                  <div className="rounded-b-2xl border-0 bg-white mb-6 shadow-none -mt-px">
-                    <div className="px-5 sm:px-6 pb-0 relative">
-                      <div className="flex items-end justify-between -mt-14 mb-3">
-                        <span className="inline-flex h-24 w-24 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-500 border-4 border-white shadow-lg overflow-hidden">
-                          {profileImageUrl ? (
-                            <img src={profileImageUrl} alt="프로필" className="h-full w-full object-cover" />
+                <div key="school_record_menu" className="animate-panel-fadeIn w-full flex-1 min-h-full flex flex-col bg-gray-50">
+                  <div className="w-full flex-1 px-3 pt-6 pb-8-safe overflow-x-hidden sm:mx-auto sm:max-w-4xl sm:px-4 sm:pt-10">
+                  <input
+                    ref={editProfileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      const token = getRequestToken()
+                      if (!token) return
+                      setEditProfileUploading(true)
+                      uploadProfileAvatar(token, file)
+                        .then((p) => { setProfileImageUrl(p.image_url ?? null) })
+                        .catch(() => {})
+                        .finally(() => {
+                          setEditProfileUploading(false)
+                          e.target.value = ''
+                        })
+                    }}
+                  />
+
+                  <div className="space-y-4 sm:space-y-5">
+                    <section className="rounded-2xl sm:rounded-[28px] md:rounded-[36px] border border-gray-100 bg-[#F9FAFB] p-4 font-sans tracking-[0.01em] sm:p-6 md:p-8">
+                      <div className="relative flex flex-col gap-5 sm:gap-6">
+                        <div className="flex justify-end sm:absolute sm:right-0 sm:top-0">
+                          {isProfileEditMode ? (
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setIsProfileEditMode(false)}
+                                className="h-9 rounded-full bg-white px-4 text-xs font-medium text-gray-500 ring-1 ring-gray-200 transition hover:bg-gray-50"
+                              >
+                                취소
+                              </button>
+                              <button
+                                type="button"
+                                disabled={editProfileSaving}
+                                onClick={() => {
+                                  const token = getRequestToken()
+                                  if (!token) return
+                                  setEditProfileSaving(true)
+                                  updateProfile(token, { display_name: editDisplayName, bio: editBio })
+                                    .then((p) => {
+                                      setProfileDisplayName(p.display_name ?? null)
+                                      setProfileBio(p.bio ?? null)
+                                      setProfileCreatedAt((prev) => p.created_at ?? prev)
+                                      setIsProfileEditMode(false)
+                                    })
+                                    .catch(() => {})
+                                    .finally(() => setEditProfileSaving(false))
+                                }}
+                                className="h-9 rounded-full bg-[#3182F6] px-4 text-xs font-medium text-white transition hover:bg-[#2D76DE] disabled:opacity-60"
+                              >
+                                {editProfileSaving ? '저장 중…' : '저장'}
+                              </button>
+                            </div>
                           ) : (
-                            <User className="w-12 h-12" strokeWidth={2} />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditDisplayName(profileDisplayNameText)
+                                setEditBio(profileBioText)
+                                setIsProfileEditMode(true)
+                              }}
+                              className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-gray-100 text-gray-500 transition hover:bg-gray-200 hover:text-gray-700"
+                              title="프로필 편집"
+                              aria-label="프로필 편집"
+                            >
+                              <PenLine className="h-4 w-4" />
+                            </button>
                           )}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditDisplayName(profileDisplayName ?? user?.name ?? '')
-                            setEditBio(profileBio ?? DEFAULT_BIO)
-                            setEditDescription(profileDescription ?? DEFAULT_DESCRIPTION)
-                            setIsEditProfileModalOpen(true)
-                          }}
-                          className="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
-                        >
-                          <Settings className="w-4 h-4 text-gray-500" />
-                          프로필 수정
-                        </button>
-                      </div>
-                      <p className="text-2xl font-bold text-gray-900">{profileDisplayName ?? user?.name ?? '회원'}</p>
-                      <p className="text-sm text-gray-500 mt-0.5">@{(user?.email || 'uniroad').split('@')[0]}</p>
-                      <p className="mt-2 text-sm text-gray-800">{profileBio ?? DEFAULT_BIO}</p>
-                      <div className="mt-2 flex items-center gap-1.5 text-sm text-gray-500">
-                        <Calendar className="w-4 h-4 shrink-0" />
-                        <span>가입일</span>
-                      </div>
-                      <div className="mt-3 flex items-center gap-4 text-sm flex-wrap">
-                        <span className="font-semibold text-gray-900">0</span>
-                        <span className="text-gray-500">연동 완료</span>
-                        <span className="font-semibold text-gray-900">—</span>
-                        <span className="text-gray-500">입력 완료</span>
-                        <span className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-0.5">
-                          <Gem className="w-3.5 h-3.5 text-blue-500" />
-                          <span className="text-xs font-semibold text-gray-800">{hasProAccess ? 'Pro' : 'Basic'}</span>
-                        </span>
-                      </div>
-                      {/* 탭 네비게이션 */}
-                      <nav className="mt-4 flex gap-6" aria-label="입시 기록 탭">
-                        <button
-                          type="button"
-                          onClick={() => setSchoolRecordMenuTab('school_record')}
-                          className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-                            schoolRecordMenuTab === 'school_record'
-                              ? 'border-blue-600 text-blue-600'
-                              : 'border-transparent text-gray-500 hover:text-gray-700'
-                          }`}
-                        >
-                          생활기록부
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSchoolRecordMenuTab('grade')}
-                          className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-                            schoolRecordMenuTab === 'grade'
-                              ? 'border-blue-600 text-blue-600'
-                              : 'border-transparent text-gray-500 hover:text-gray-700'
-                          }`}
-                        >
-                          내신 성적
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setSchoolRecordMenuTab('mock_exam')}
-                          className={`pb-3 text-sm font-medium border-b-2 transition-colors ${
-                            schoolRecordMenuTab === 'mock_exam'
-                              ? 'border-blue-600 text-blue-600'
-                              : 'border-transparent text-gray-500 hover:text-gray-700'
-                          }`}
-                        >
-                          모의고사
-                        </button>
-                      </nav>
-                    </div>
-                  </div>
-                  {/* 탭별 콘텐츠 */}
-                  <div className="rounded-2xl border-0 bg-white overflow-hidden shadow-none">
-                    {schoolRecordMenuTab === 'school_record' && (
-                      <div className="p-5 sm:p-6">
-                        <p className="text-sm text-gray-600 mb-4">{profileDescription ?? DEFAULT_DESCRIPTION}</p>
-                        <div className="relative group">
-                          <button
-                            type="button"
-                            onClick={() => setRightPanelView('school_record_link')}
-                            className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 bg-white hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left"
-                          >
-                            <span className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600">
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                            </span>
-                            <span className="font-medium text-gray-900">생활기록부 연동하기</span>
-                          </button>
-                          <div className="absolute top-full left-0 right-0 mt-2 px-4 py-3 rounded-xl border border-blue-200 bg-white shadow-md text-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-opacity z-10 pointer-events-none">
-                            <p className="font-medium text-gray-900">생활기록부를 연동하고 더 많은 기능을 즐겨보세요</p>
-                            <p className="text-xs text-gray-600 mt-1">연동하는 법을 할 줄 몰라도 좋아요 차근차근 알려줄게요</p>
+                        </div>
+
+                        <div className="flex flex-col items-center gap-4 sm:gap-5 text-center sm:flex-row sm:items-center sm:gap-6 sm:pr-36 sm:text-left">
+                          {isProfileEditMode ? (
+                            <button
+                              type="button"
+                              disabled={editProfileUploading}
+                              onClick={() => editProfileInputRef.current?.click()}
+                              className="relative h-32 w-32 shrink-0 overflow-hidden rounded-full bg-white ring-1 ring-gray-200 transition hover:ring-2 hover:ring-[#3182F6]/30"
+                            >
+                              {profileImageUrl ? (
+                                <img src={profileImageUrl} alt="프로필" className="h-full w-full object-cover" />
+                              ) : (
+                                <span className="flex h-full w-full items-center justify-center text-4xl" aria-hidden>👤</span>
+                              )}
+                              <span className="absolute inset-0 flex items-center justify-center bg-black/35 text-xs font-medium text-white">
+                                <Upload className="mr-1 h-3.5 w-3.5" /> 사진 변경
+                              </span>
+                            </button>
+                          ) : (
+                            <div className="h-32 w-32 shrink-0 overflow-hidden rounded-full bg-white ring-1 ring-gray-200">
+                              {profileImageUrl ? (
+                                <img src={profileImageUrl} alt="프로필" className="h-full w-full object-cover" />
+                              ) : (
+                                <span className="flex h-full w-full items-center justify-center text-4xl" aria-hidden>👤</span>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="min-w-0 flex-1">
+                            {isProfileEditMode ? (
+                              <input
+                                type="text"
+                                value={editDisplayName}
+                                onChange={(e) => setEditDisplayName(e.target.value)}
+                                placeholder="이름을 입력해 주세요"
+                                className="h-12 w-full rounded-2xl border border-gray-200 bg-white px-4 text-2xl font-bold tracking-[0.01em] text-gray-900 outline-none transition focus:border-[#3182F6] focus:ring-2 focus:ring-[#3182F6]/15"
+                              />
+                            ) : (
+                              <h1 className="text-2xl font-bold leading-tight tracking-[0.01em] text-[#191F28] sm:text-[1.9rem]">{profileDisplayNameText}</h1>
+                            )}
+                            <p className="mt-2 text-sm leading-7 tracking-[0.01em] text-gray-400">
+                              @{profileHandleText} · {profileJoinedAtText}
+                            </p>
+
+                            {isProfileEditMode ? (
+                              <textarea
+                                value={editBio}
+                                onChange={(e) => setEditBio(e.target.value)}
+                                placeholder={profileDefaultBioText}
+                                rows={3}
+                                className="mt-4 w-full resize-none rounded-2xl border border-gray-200 bg-white px-4 py-3 text-sm leading-7 tracking-[0.01em] text-gray-700 placeholder-gray-400 outline-none transition focus:border-[#3182F6] focus:ring-2 focus:ring-[#3182F6]/15"
+                              />
+                            ) : (
+                              <p className="mt-4 text-[15px] leading-8 tracking-[0.01em] text-gray-500">{profileBioText}</p>
+                            )}
                           </div>
                         </div>
                       </div>
-                    )}
-                    {schoolRecordMenuTab === 'grade' && (
-                      <div className="p-5 sm:p-6">
-                        <p className="text-sm text-gray-600 mb-4">고등학교 내신을 입력하고 더 많은 기능을 즐겨보세요. 생활기록부를 연동하면 자동으로 입력돼요.</p>
-                        <div className="relative group">
+                    </section>
+
+                    {!isProfileEditMode && (
+                      <section className="rounded-2xl sm:rounded-[28px] border border-gray-100 bg-white p-4 shadow-sm sm:p-6 sm:p-7">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <h3 className="text-base sm:text-lg font-bold text-gray-900">내 입시 기록</h3>
+                            <p className="mt-0.5 sm:mt-1 text-xs sm:text-sm text-gray-500">연동된 기록을 확인하고 관리하세요</p>
+                          </div>
+                          <div className="shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-600">
+                            {schoolRecordLinked ? '연동됨' : '미연동'}
+                          </div>
+                        </div>
+
+                        <div className="mt-4 sm:mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-3">
+                          {/* 생활기록부 카드 */}
                           <button
                             type="button"
-                            onClick={() => setRightPanelView('grade_input')}
-                            className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 bg-white hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left"
-                          >
-                            <span className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600">
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                            </span>
-                            <span className="font-medium text-gray-900">내신 성적 입력하기</span>
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    {schoolRecordMenuTab === 'mock_exam' && (
-                      <div className="p-5 sm:p-6">
-                        <p className="text-sm text-gray-600 mb-4">모의고사 성적을 입력하고 더 많은 기능을 즐겨보세요. 몇 개만 알려주어도 AI가 자동으로 채워서 분석해드려요.</p>
-                        <div className="relative group">
-                          <button
-                            type="button"
-                            onClick={() => setRightPanelView('mock_exam_input')}
-                            className="w-full flex items-center gap-3 p-4 rounded-xl border-2 border-dashed border-blue-200 bg-white hover:border-blue-300 hover:bg-blue-50/50 transition-colors text-left"
-                          >
-                            <span className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100 text-blue-600">
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                            </span>
-                            <span className="font-medium text-gray-900">모의고사 성적 입력하기</span>
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              )}
-              {isEditProfileModalOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50" onClick={() => setIsEditProfileModalOpen(false)}>
-                  <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-                    <h2 className="text-lg font-bold text-gray-900 mb-4">프로필 수정</h2>
-                    <div className="flex flex-col gap-4">
-                      <div className="flex flex-col items-center gap-2">
-                        <span className="inline-flex h-20 w-20 items-center justify-center rounded-full bg-gray-100 text-gray-500 overflow-hidden">
-                          {profileImageUrl ? (
-                            <img src={profileImageUrl} alt="프로필" className="h-full w-full object-cover" />
-                          ) : (
-                            <User className="w-10 h-10" strokeWidth={2} />
-                          )}
-                        </span>
-                        <input
-                          ref={editProfileInputRef}
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => {
-                            const file = e.target.files?.[0]
-                            if (!file) return
-                            const token = getRequestToken()
-                            if (!token) return
-                            setEditProfileUploading(true)
-                            uploadProfileAvatar(token, file)
-                              .then((p) => {
-                                setProfileImageUrl(p.image_url ?? null)
-                              })
-                              .catch(() => {})
-                              .finally(() => {
-                                setEditProfileUploading(false)
-                                e.target.value = ''
-                              })
+                            onClick={() => {
+                              setSchoolRecordMenuTab('school_record')
+                              setRightPanelView('school_record_link')
                             }}
-                        />
-                        <button
-                          type="button"
-                          disabled={editProfileUploading}
-                          onClick={() => editProfileInputRef.current?.click()}
-                          className="rounded-xl border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                        >
-                          {editProfileUploading ? '업로드 중…' : '프로필 사진 변경'}
-                        </button>
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">이름</label>
-                        <input
-                          type="text"
-                          value={editDisplayName}
-                          onChange={(e) => setEditDisplayName(e.target.value)}
-                          placeholder="이름"
-                          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">자기소개</label>
-                        <textarea
-                          value={editBio}
-                          onChange={(e) => setEditBio(e.target.value)}
-                          placeholder="유니로드와 함께 입시를 준비해 보세요."
-                          rows={2}
-                          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-1">설명</label>
-                        <textarea
-                          value={editDescription}
-                          onChange={(e) => setEditDescription(e.target.value)}
-                          placeholder="생활기록부, 내신 성적, 모의고사 성적을 연동하면..."
-                          rows={3}
-                          className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none"
-                        />
-                      </div>
-                    </div>
-                    <div className="mt-5 flex justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setIsEditProfileModalOpen(false)}
-                        className="rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                      >
-                        닫기
-                      </button>
-                      <button
-                        type="button"
-                        disabled={editProfileSaving}
-                        onClick={() => {
-                          const token = getRequestToken()
-                          if (!token) return
-                          setEditProfileSaving(true)
-                          updateProfile(token, {
-                            display_name: editDisplayName,
-                            bio: editBio,
-                            description: editDescription,
-                          })
-                            .then((p) => {
-                              setProfileDisplayName(p.display_name ?? null)
-                              setProfileBio(p.bio ?? null)
-                              setProfileDescription(p.description ?? null)
-                              setIsEditProfileModalOpen(false)
-                            })
-                            .catch(() => {})
-                            .finally(() => setEditProfileSaving(false))
-                        }}
-                        className="rounded-xl bg-blue-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
-                      >
-                        {editProfileSaving ? '저장 중…' : '저장'}
-                      </button>
-                    </div>
+                            className={`group relative rounded-2xl p-4 sm:p-4 text-left transition-all duration-200 active:scale-[0.98] touch-manipulation min-h-[72px] sm:min-h-0 ${
+                              schoolRecordLinked
+                                ? 'bg-emerald-50/80 ring-1 ring-emerald-200 hover:bg-emerald-50'
+                                : 'bg-gray-50 ring-1 ring-gray-200 hover:bg-gray-100'
+                            }`}
+                          >
+                            <div className={`inline-flex h-10 w-10 items-center justify-center rounded-xl ${
+                              schoolRecordLinked ? 'bg-emerald-100 text-emerald-600' : 'bg-gray-200 text-gray-500'
+                            }`}>
+                              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                              </svg>
+                            </div>
+                            <p className="mt-3 text-sm font-semibold text-gray-900">생활기록부</p>
+                            <p className="mt-1 text-xs text-gray-500">
+                              {schoolRecordLinked ? '연동 완료' : '연동하기'}
+                            </p>
+                            {schoolRecordLinked && (
+                              <span className="absolute right-3 top-3 flex h-2 w-2">
+                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
+                                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
+                              </span>
+                            )}
+                          </button>
+
+                          {/* 내신 성적 카드 */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSchoolRecordMenuTab('grade')
+                              setRightPanelView('grade_input')
+                            }}
+                            className="group relative rounded-2xl bg-gray-50 p-4 text-left ring-1 ring-gray-200 transition-all duration-200 hover:bg-gray-100 active:scale-[0.98] touch-manipulation min-h-[72px] sm:min-h-0"
+                          >
+                            <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-600">
+                              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                              </svg>
+                            </div>
+                            <p className="mt-3 text-sm font-semibold text-gray-900">내신 성적</p>
+                            <p className="mt-1 text-xs text-gray-500">입력하기</p>
+                          </button>
+
+                          {/* 모의고사 카드 */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSchoolRecordMenuTab('mock_exam')
+                              setRightPanelView('mock_exam_input')
+                            }}
+                            className="group relative rounded-2xl bg-gray-50 p-4 text-left ring-1 ring-gray-200 transition-all duration-200 hover:bg-gray-100 active:scale-[0.98] touch-manipulation min-h-[72px] sm:min-h-0"
+                          >
+                            <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-purple-100 text-purple-600">
+                              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
+                              </svg>
+                            </div>
+                            <p className="mt-3 text-sm font-semibold text-gray-900">모의고사</p>
+                            <p className="mt-1 text-xs text-gray-500">점수 관리</p>
+                          </button>
+                        </div>
+
+                        {/* 다음 행동 안내 */}
+                        {schoolRecordLinked && (
+                          <div className="mt-4 rounded-xl bg-blue-50/50 p-3 sm:p-4">
+                            <p className="text-xs sm:text-sm text-blue-800 leading-relaxed">
+                              <span className="font-semibold">💡 팁:</span> 채팅에서{' '}
+                              <span className="rounded bg-blue-100 px-1.5 py-0.5 font-medium">@내신 성적</span> 또는{' '}
+                              <span className="rounded bg-blue-100 px-1.5 py-0.5 font-medium">@모의고사</span>를
+                              입력하면 연동된 기록을 기반으로 학교 추천을 받을 수 있어요!
+                            </p>
+                          </div>
+                        )}
+                      </section>
+                    )}
+
+                    {!isProfileEditMode && (
+                      <section className="rounded-2xl sm:rounded-[28px] border border-gray-100 bg-white p-4 shadow-sm sm:p-6 sm:p-7">
+                        <h3 className="text-base sm:text-lg font-bold text-gray-900">바로가기</h3>
+                        <p className="mt-0.5 sm:mt-1 text-xs sm:text-sm text-gray-500">자주 사용하는 기능을 빠르게 접근하세요</p>
+
+                        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-3">
+                          {/* 생활기록부 분석 */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRightPanelView('chat')
+                              if (skipSchoolRecordToolConfirm) {
+                                void activateSchoolRecordTool()
+                              } else {
+                                setSchoolRecordLinked(null)
+                                setIsSchoolRecordToolModalOpen(true)
+                                setSchoolRecordStatusLoading(true)
+                                void fetchSchoolRecordLinkedStatus()
+                                  .then((linked) => setSchoolRecordLinked(linked))
+                                  .finally(() => setSchoolRecordStatusLoading(false))
+                              }
+                            }}
+                            className="group flex flex-col items-center justify-center gap-2 rounded-2xl bg-gray-50 p-4 sm:p-4 text-center ring-1 ring-gray-200 transition-all duration-200 hover:bg-gray-100 active:scale-[0.98] touch-manipulation min-h-[88px] sm:min-h-0"
+                          >
+                            <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-100 to-emerald-50 text-emerald-600">
+                              <Sparkles className="h-5 w-5" />
+                            </div>
+                            <span className="text-xs font-medium text-gray-700">생기부 분석</span>
+                          </button>
+
+                          {/* 합격 예측 */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (skipScorePredictionConfirm) {
+                                setRightPanelView('grade_input')
+                              } else {
+                                setIsScorePredictionStartModalOpen(true)
+                              }
+                            }}
+                            className="group flex flex-col items-center justify-center gap-2 rounded-2xl bg-gray-50 p-4 text-center ring-1 ring-gray-200 transition-all duration-200 hover:bg-gray-100 active:scale-[0.98] touch-manipulation min-h-[88px] sm:min-h-0"
+                          >
+                            <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-100 to-blue-50 text-blue-600">
+                              <Calculator className="h-5 w-5" />
+                            </div>
+                            <span className="text-xs font-medium text-gray-700">합격 예측</span>
+                          </button>
+
+                          {/* 새 채팅 */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRightPanelView('chat')
+                              handleNewChat()
+                            }}
+                            className="group flex flex-col items-center justify-center gap-2 rounded-2xl bg-gray-50 p-4 text-center ring-1 ring-gray-200 transition-all duration-200 hover:bg-gray-100 active:scale-[0.98] touch-manipulation min-h-[88px] sm:min-h-0"
+                          >
+                            <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-purple-100 to-purple-50 text-purple-600">
+                              <MessageSquare className="h-5 w-5" />
+                            </div>
+                            <span className="text-xs font-medium text-gray-700">새 채팅</span>
+                          </button>
+
+                          {/* 가이드 */}
+                          <button
+                            type="button"
+                            onClick={() => navigate('/guide')}
+                            className="group flex flex-col items-center justify-center gap-2 rounded-2xl bg-gray-50 p-4 text-center ring-1 ring-gray-200 transition-all duration-200 hover:bg-gray-100 active:scale-[0.98] touch-manipulation min-h-[88px] sm:min-h-0"
+                          >
+                            <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-100 to-amber-50 text-amber-600">
+                              <BookOpen className="h-5 w-5" />
+                            </div>
+                            <span className="text-xs font-medium text-gray-700">가이드</span>
+                          </button>
+                        </div>
+                      </section>
+                    )}
+                  </div>
                   </div>
                 </div>
               )}
-              {rightPanelView === 'school_record_link' && <SchoolRecordDeepAnalysisPage />}
+              {rightPanelView === 'school_record_link' && (
+                <div key="school_record_link" className="animate-panel-fadeIn flex-1 min-h-0 overflow-auto">
+                  <SchoolRecordDeepAnalysisPage onBack={() => setRightPanelView('school_record_menu')} />
+                </div>
+              )}
             </div>
           </>
         )}
@@ -3513,7 +4430,7 @@ export default function ChatPage() {
               <p className="text-sm text-gray-500 mb-6">내일 자정에 초기화됩니다.</p>
               
               <div className="space-y-3">
-                {!isGalaxySession && (
+                {!isAppBuild() && (
                   <button
                     onClick={() => {
                       setIsQuotaExceeded(false)
@@ -3537,7 +4454,7 @@ export default function ChatPage() {
       )}
 
       {/* PRO 구독 모달 (Fake Door Test) */}
-      {!isGalaxySession && isProModalOpen && (
+      {!isAppBuild() && isProModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full overflow-hidden animate-scaleIn border border-gray-200">
             {/* 헤더 */}
@@ -3608,7 +4525,7 @@ export default function ChatPage() {
       )}
 
       {/* 무통장입금 신청 모달 */}
-      {!isGalaxySession && isBankTransferModalOpen && (
+      {!isAppBuild() && isBankTransferModalOpen && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-gray-200">
             <div className="p-5 border-b border-gray-100 flex items-start justify-between gap-4">
@@ -3981,11 +4898,11 @@ export default function ChatPage() {
 
       <SchoolRecordToolStartModal
         isOpen={isScorePredictionStartModalOpen}
-        linked={!scorePredictionScoreSetsLoading && scorePredictionScoreSets.length > 0}
+        linked={!scorePredictionScoreSetsLoading && (scorePredictionScoreSets.length > 0 || scorePredictionNaesinLinked)}
         loading={scorePredictionScoreSetsLoading}
         dontAskAgain={skipScorePredictionConfirm}
         confirmLabel={
-          !scorePredictionScoreSetsLoading && scorePredictionScoreSets.length > 0
+          !scorePredictionScoreSetsLoading && (scorePredictionScoreSets.length > 0 || scorePredictionNaesinLinked)
             ? '새 채팅'
             : '성적 연동하기'
         }
@@ -3994,12 +4911,16 @@ export default function ChatPage() {
         statusText={
           scorePredictionScoreSetsLoading
             ? '성적 목록을 불러오는 중...'
-            : scorePredictionScoreSets.length === 0
-              ? '저장된 모의고사 성적이 없습니다. 성적을 먼저 입력해 주세요.'
+            : scorePredictionScoreSets.length === 0 && !scorePredictionNaesinLinked
+              ? '연동된 내신/모의고사 성적이 없습니다. 성적을 먼저 입력해 주세요.'
               : '연동된 성적을 읽어 더 정확하게 답합니다.'
         }
+        showLinkRequiredHighlight={!scorePredictionScoreSetsLoading && scorePredictionScoreSets.length === 0 && !scorePredictionNaesinLinked}
+        linkRequiredMessage="내신 성적과 모의고사 성적을 연동하세요."
         scoreSets={scorePredictionScoreSets.length > 0 ? scorePredictionScoreSets : undefined}
         onSelectScoreSet={handleSelectScoreSetForPrediction}
+        showNaesinOption={scorePredictionNaesinLinked}
+        onSelectNaesin={handleSelectNaesinForPrediction}
         onToggleDontAskAgain={setSkipScorePredictionConfirm}
         onClose={() => setIsScorePredictionStartModalOpen(false)}
         onConfirm={() => { void handleConfirmScorePredictionStart() }}
@@ -4011,6 +4932,10 @@ export default function ChatPage() {
         onRequireSchoolRecordLink={() => {
           setIsSchoolGradeInputModalOpen(false)
           navigate('/school-record-deep?tab=link')
+        }}
+        onUseNaesinSuggestion={(mention) => {
+          setIsSchoolGradeInputModalOpen(false)
+          setInput((prev) => (prev.trim() ? `${prev} ${mention} ` : `${mention} `))
         }}
         onOpenMockExamInput={() => {
           setIsSchoolGradeInputModalOpen(false)
@@ -4047,47 +4972,101 @@ export default function ChatPage() {
         <div className="fixed inset-0 z-[70] bg-black/40 flex items-center justify-center p-4" onClick={() => setScorePreview(null)}>
           <div className="bg-white w-full max-w-3xl rounded-xl shadow-xl max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
             <div className="sticky top-0 bg-white border-b px-4 py-3 flex items-center justify-between">
-              <h3 className="text-lg font-bold text-gray-900">{scorePreview.name} 성적표</h3>
+              <h3 className="text-lg font-bold text-gray-900">
+                {scorePreview.kind === 'naesin' ? '내신 성적표' : `${scorePreview.name} 성적표`}
+              </h3>
               <button className="text-gray-500 hover:text-gray-700 text-2xl" onClick={() => setScorePreview(null)}>
                 ×
               </button>
             </div>
             <div className="p-4">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm border-collapse">
-                  <thead>
-                    <tr className="text-left">
-                      <th className="py-2 border-b">과목</th>
-                      <th className="py-2 border-b">선택과목</th>
-                      <th className="py-2 border-b">표준점수</th>
-                      <th className="py-2 border-b">백분위</th>
-                      <th className="py-2 border-b">등급</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.entries(scorePreview.scores || {}).map(([subject, row]) => {
-                      const scoreRow = row as Record<string, any>
+              {scorePreview.kind === 'naesin' ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl bg-gray-50 p-4">
+                      <p className="text-xs font-medium text-gray-500">전체 평균</p>
+                      <p className="mt-2 text-4xl font-black tracking-tight text-gray-900">
+                        {scorePreview.gradeSummary.overallAverage || '-'}
+                      </p>
+                    </div>
+                    <div className="rounded-2xl bg-gray-50 p-4">
+                      <p className="text-xs font-medium text-gray-500">국수영탐 평균</p>
+                      <p className="mt-2 text-4xl font-black tracking-tight text-gray-900">
+                        {scorePreview.gradeSummary.coreAverage || '-'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {NAESIN_SEMESTER_KEYS.map((semesterKey) => {
+                      const semester = scorePreview.gradeSummary.semesterAverages[semesterKey]
                       return (
-                        <tr key={subject} className="border-b border-gray-100">
-                          <td className="py-2">{subject}</td>
-                          <td className="py-2">{scoreRow['선택과목'] ?? scoreRow['과목명'] ?? '-'}</td>
-                          <td className="py-2">{scoreRow['표준점수'] ?? '-'}</td>
-                          <td className="py-2">{scoreRow['백분위'] ?? '-'}</td>
-                          <td className="py-2">{scoreRow['등급'] ?? '-'}</td>
-                        </tr>
+                        <div key={`naesin-preview-${semesterKey}`} className="rounded-2xl border border-gray-100 bg-white p-4">
+                          <p className="text-xs font-medium text-gray-500">{NAESIN_SEMESTER_LABELS[semesterKey]}</p>
+                          <p className="mt-2 text-3xl font-black tracking-tight text-gray-900">{semester?.overall || '-'}</p>
+                          <p className="text-[11px] text-gray-400">전체 평균</p>
+                          <p className="mt-2 text-base font-bold text-gray-700">{semester?.core || '-'}</p>
+                          <p className="text-[11px] text-gray-400">국수영탐 평균</p>
+                        </div>
                       )
                     })}
-                  </tbody>
-                </table>
-              </div>
-              <p className="mt-3 text-xs text-gray-500">읽기 전용 보기입니다.</p>
+                  </div>
+                  <div className="rounded-2xl bg-gray-50 p-3 sm:p-4">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setScorePreview(null)
+                        setAutoOpenSavedGradeReport(true)
+                        setRightPanelView('grade_input')
+                      }}
+                      className="w-full rounded-xl bg-[#2B4C7E] px-4 py-3 text-sm font-bold text-white transition-all hover:brightness-105 active:scale-[0.99]"
+                    >
+                      자세히 보기
+                    </button>
+                    <p className="mt-2 text-center text-xs text-gray-500">
+                      과목별 원점수, 단위수, 출결/봉사까지 확인할 수 있어요.
+                    </p>
+                  </div>
+                  <p className="text-xs text-gray-500">읽기 전용 보기입니다.</p>
+                </div>
+              ) : (
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm border-collapse">
+                      <thead>
+                        <tr className="text-left">
+                          <th className="py-2 border-b">과목</th>
+                          <th className="py-2 border-b">선택과목</th>
+                          <th className="py-2 border-b">표준점수</th>
+                          <th className="py-2 border-b">백분위</th>
+                          <th className="py-2 border-b">등급</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(scorePreview.scores || {}).map(([subject, row]) => {
+                          const scoreRow = row as Record<string, any>
+                          return (
+                            <tr key={subject} className="border-b border-gray-100">
+                              <td className="py-2">{subject}</td>
+                              <td className="py-2">{scoreRow['선택과목'] ?? scoreRow['과목명'] ?? '-'}</td>
+                              <td className="py-2">{scoreRow['표준점수'] ?? '-'}</td>
+                              <td className="py-2">{scoreRow['백분위'] ?? '-'}</td>
+                              <td className="py-2">{scoreRow['등급'] ?? '-'}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="mt-3 text-xs text-gray-500">읽기 전용 보기입니다.</p>
+                </>
+              )}
             </div>
           </div>
         </div>
       )}
 
       {/* PRO 업그레이드 팝업 - 웹 + 로그인한 Basic 유저에게만 표시 (PRO 유저는 숨김) */}
-      {isProPopupVisible && !isGalaxySession && !isCapacitorApp() && isAuthenticated && user?.id && !user?.is_premium && (
+      {isProPopupVisible && !isAppBuild() && isAuthenticated && user?.id && !user?.is_premium && (
         <div className="fixed bottom-4 right-4 z-40 group">
           <div 
             className="relative bg-[#1a1a2e] text-white rounded-2xl p-4 shadow-2xl min-w-[260px] cursor-pointer overflow-hidden border border-gray-700/50"

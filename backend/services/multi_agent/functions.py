@@ -4,9 +4,11 @@ RAG Functions
 - uniroad_recommed_1/core/rag_system.py의 search_global_raw 로직 이식
 """
 
+import asyncio
 import os
 import json
 import re
+from threading import Lock
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
 from dotenv import load_dotenv
@@ -95,6 +97,12 @@ class RAGFunctions:
             model=_DEFAULT_EMBEDDING_MODEL,
             request_timeout=60,
         )
+        # 반복 질의/문서 조회를 줄이기 위한 경량 인메모리 캐시
+        self._query_embedding_cache: Dict[str, List[float]] = {}
+        self._query_embedding_cache_limit = 256
+        self._document_info_cache: Dict[int, Dict[str, Any]] = {}
+        self._document_info_cache_limit = 6000
+        self._cache_lock = Lock()
     
     @classmethod
     def get_instance(cls):
@@ -164,36 +172,81 @@ class RAGFunctions:
             return {}
         
         try:
-            unique_ids = list(set(document_ids))
-            response = self.supabase.table("documents").select("id, embedding_summary, summary, filename, file_url").in_("id", unique_ids).execute()
-            
-            result = {}
-            for doc in response.data:
-                emb_str = doc.get("embedding_summary")
-                summary = doc.get("summary", "")
-                # filename에서 PDF 확장자 제거하여 title로 사용
-                filename = doc.get("filename", "")
-                title = filename.replace(".pdf", "").replace(".PDF", "") if filename else ""
-                file_url = doc.get("file_url", "")  # PDF 다운로드 URL
-                
-                embedding = None
-                if emb_str:
-                    # vector 타입 → 문자열 → 리스트 변환
-                    if isinstance(emb_str, str):
-                        embedding = json.loads(emb_str)
+            unique_ids = list(dict.fromkeys(doc_id for doc_id in document_ids if doc_id is not None))
+            result: Dict[int, Dict[str, Any]] = {}
+            missing_ids: List[int] = []
+
+            with self._cache_lock:
+                for doc_id in unique_ids:
+                    cached = self._document_info_cache.get(doc_id)
+                    if cached is None:
+                        missing_ids.append(doc_id)
                     else:
-                        embedding = emb_str
-                
-                result[doc["id"]] = {
-                    "embedding": embedding,
-                    "summary": summary,
-                    "title": title,
-                    "file_url": file_url
-                }
+                        result[doc_id] = cached
+
+            if missing_ids:
+                response = (
+                    self.supabase.table("documents")
+                    .select("id, embedding_summary, summary, filename, file_url")
+                    .in_("id", missing_ids)
+                    .execute()
+                )
+
+                for doc in response.data:
+                    emb_str = doc.get("embedding_summary")
+                    summary = doc.get("summary", "")
+                    filename = doc.get("filename", "")
+                    title = filename.replace(".pdf", "").replace(".PDF", "") if filename else ""
+                    file_url = doc.get("file_url", "")
+
+                    embedding = None
+                    if emb_str:
+                        if isinstance(emb_str, str):
+                            embedding = json.loads(emb_str)
+                        else:
+                            embedding = emb_str
+
+                    normalized = {
+                        "embedding": embedding,
+                        "summary": summary,
+                        "title": title,
+                        "file_url": file_url,
+                    }
+                    doc_id = doc.get("id")
+                    if doc_id is None:
+                        continue
+                    result[doc_id] = normalized
+                    with self._cache_lock:
+                        self._document_info_cache[doc_id] = normalized
+
+                with self._cache_lock:
+                    if len(self._document_info_cache) > self._document_info_cache_limit:
+                        overflow = len(self._document_info_cache) - self._document_info_cache_limit
+                        for stale_key in list(self._document_info_cache.keys())[:overflow]:
+                            self._document_info_cache.pop(stale_key, None)
+
             return result
         except Exception as e:
             print(f"⚠️ Document 정보 조회 실패: {e}")
             return {}
+
+    def _get_query_embedding_cached(self, query: str) -> List[float]:
+        key = str(query or "").strip()
+        with self._cache_lock:
+            cached = self._query_embedding_cache.get(key)
+        if cached is not None:
+            return cached
+
+        embedding = self.embeddings.embed_query(key)
+        with self._cache_lock:
+            existing = self._query_embedding_cache.get(key)
+            if existing is not None:
+                return existing
+            if len(self._query_embedding_cache) >= self._query_embedding_cache_limit:
+                oldest_key = next(iter(self._query_embedding_cache))
+                self._query_embedding_cache.pop(oldest_key, None)
+            self._query_embedding_cache[key] = embedding
+        return embedding
     
     @staticmethod
     def _cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
@@ -242,13 +295,23 @@ class RAGFunctions:
         """
         print(f"🔍 전역 검색: '{query}' (학교: {university})")
         
-        # 쿼리 임베딩 1회 생성 (업로드와 동일한 모델: text-embedding-004, 768차원)
-        query_embedding = self.embeddings.embed_query(query)
+        # 쿼리 임베딩 1회 생성 (동일 질의는 캐시 재사용)
+        query_embedding = await asyncio.to_thread(self._get_query_embedding_cached, query)
         # 학교명 변형으로 검색 (연세대/연세대학교 등 업로드 폴더명·채팅 정식명 모두 매칭)
         all_documents = []
         seen_chunk_ids = set()
-        for school_name in _school_name_search_variants(university):
-            docs = self._supabase_search_rpc(query_embedding, school_name, top_k)
+        school_variants = _school_name_search_variants(university)
+        docs_per_variant = await asyncio.gather(
+            *[
+                asyncio.to_thread(self._supabase_search_rpc, query_embedding, school_name, top_k)
+                for school_name in school_variants
+            ],
+            return_exceptions=True,
+        )
+        for docs in docs_per_variant:
+            if isinstance(docs, Exception):
+                print(f"⚠️ 학교명 변형 검색 실패: {docs}")
+                continue
             for doc in docs:
                 cid = doc["metadata"].get("chunk_id")
                 if cid and cid not in seen_chunk_ids:
@@ -264,7 +327,7 @@ class RAGFunctions:
         
         # Step 3: document_id로 문서 정보 조회 (embedding + summary)
         doc_ids = [d["metadata"].get("document_id") for d in documents if d["metadata"].get("document_id")]
-        document_info = self._get_document_info(doc_ids)
+        document_info = await asyncio.to_thread(self._get_document_info, doc_ids)
         
         # Step 4: 쿼리 임베딩은 Step 1-2에서 재사용 (중복 제거)
         

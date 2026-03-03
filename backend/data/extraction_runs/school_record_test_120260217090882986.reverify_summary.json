@@ -1,0 +1,70 @@
+{
+  "pdf": "/Users/gimdogyun/Downloads/120260217090882986.pdf",
+  "method": "pdfplumber_words",
+  "pages": 18,
+  "parser_version": "v14",
+  "step1": {
+    "attendance_rows": 3,
+    "cert_has_no_item": true,
+    "cert_rows": 0
+  },
+  "step2": {
+    "creative_hours": {
+      "1": {
+        "autonomousHours": 47,
+        "clubHours": 32,
+        "careerHours": 37
+      },
+      "2": {
+        "autonomousHours": 54,
+        "clubHours": 25,
+        "careerHours": 33
+      },
+      "3": {
+        "autonomousHours": 35,
+        "clubHours": 12,
+        "careerHours": 28
+      }
+    },
+    "volunteer_rows": 9
+  },
+  "step3": {
+    "general_counts": {
+      "1": 16,
+      "2": 14,
+      "3": 10
+    },
+    "general_credits": {
+      "1": 50,
+      "2": 46,
+      "3": 30
+    },
+    "career_counts": {
+      "1": 2,
+      "2": 2,
+      "3": 12
+    },
+    "career_credits": {
+      "1": 4,
+      "2": 4,
+      "3": 28
+    },
+    "pe_counts": {
+      "1": 2,
+      "2": 4,
+      "3": 0
+    },
+    "pe_credits": {
+      "1": 4,
+      "2": 8,
+      "3": null
+    }
+  },
+  "step4": {
+    "behavior_non_empty_grades": [
+      "1",
+      "2",
+      "3"
+    ]
+  }
+}

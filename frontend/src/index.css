@@ -30,7 +30,12 @@ input, textarea {
   user-select: text;
 }
 
-/* 모바일 스크롤바 숨기기 */
+/* 모바일: 터치 반응 개선 (더블탭 지연 제거) */
+.touch-manipulation {
+  touch-action: manipulation;
+}
+
+/* 모바일 스크롤바 숨기기 및 가로 스크롤 방지 */
 @media (max-width: 768px) {
   ::-webkit-scrollbar {
     display: none;
@@ -38,12 +43,22 @@ input, textarea {
   body {
     -ms-overflow-style: none;
     scrollbar-width: none;
+    overflow-x: hidden;
+  }
+  /* 패널/카드가 뷰포트를 넘지 않도록 */
+  .overflow-x-hidden {
+    overflow-x: hidden;
   }
 }
 
 /* 하단 네비게이션 여백 */
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 0);
+}
+
+/* 모바일: 하단 패딩 + safe area (스크롤 끝 여백) */
+.pb-8-safe {
+  padding-bottom: calc(2rem + env(safe-area-inset-bottom, 0px));
 }
 
 /* Safe area 처리 */
@@ -89,6 +104,15 @@ code {
     monospace;
 }
 
+/* 입시 기록 탭 전환 시 부드러운 페이드 (노션 스타일) */
+@keyframes uniroad-panel-fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-panel-fadeIn {
+  animation: uniroad-panel-fadeIn 0.25s ease-out forwards;
+}
+
 /* Gemini 스타일 AI 답변 */
 .ai-response {
   font-family: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont, system-ui, Roboto, 
@@ -124,6 +148,36 @@ code {
 .ai-response strong,
 .ai-response b {
   font-weight: 600;
+}
+
+.ai-response .section-divider {
+  display: block;
+  width: 100%;
+  border: none;
+  border-top: 1px solid #cfd7e3;
+  margin: 0.6rem 0 0.45rem;
+}
+
+/* 보기 모드 강제: 데스크톱/모바일 토글 시 Tailwind sm: breakpoint 오버라이드 */
+@media (max-width: 639px) {
+  body[data-layout-force="desktop"] .sm\:block { display: block !important; }
+  body[data-layout-force="desktop"] .sm\:flex { display: flex !important; }
+  body[data-layout-force="desktop"] .sm\:hidden { display: none !important; }
+  body[data-layout-force="desktop"] .sm\:fixed { position: fixed !important; }
+  body[data-layout-force="desktop"] .sm\:z-40 { z-index: 40 !important; }
+  body[data-layout-force="desktop"] .sm\:ml-64 { margin-left: 16rem !important; }
+  body[data-layout-force="desktop"] .sm\:ml-0 { margin-left: 0 !important; }
+  body[data-layout-force="desktop"] .hidden.sm\:flex { display: flex !important; }
+  body[data-layout-force="desktop"] .hidden.sm\:block { display: block !important; }
+}
+@media (min-width: 640px) {
+  body[data-layout-force="mobile"] .sm\:block { display: none !important; }
+  body[data-layout-force="mobile"] .sm\:flex { display: none !important; }
+  body[data-layout-force="mobile"] .sm\:ml-64 { margin-left: 0 !important; }
+  body[data-layout-force="mobile"] .sm\:ml-0 { margin-left: 0 !important; }
+  body[data-layout-force="mobile"] .sm\:hidden { display: flex !important; }
+  /* 모바일 보기 시 오버레이를 사이드바 아래로 (z-30), 사이드바가 z-40으로 위에 보이게 */
+  body[data-layout-force="mobile"] .layout-overlay.sm\:hidden { z-index: 30 !important; }
 }
 
 /* 다크모드 대응 - 앱이 라이트모드만 지원하므로 시스템 다크모드 무시 */

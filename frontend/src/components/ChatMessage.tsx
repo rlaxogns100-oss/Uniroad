@@ -5,6 +5,20 @@ interface ScoreReviewCardData {
   pendingId: string
   titleAuto: string
   scores: Record<string, any>
+  useExistingScoreId?: boolean
+}
+
+interface SchoolGradeSavedData {
+  overallAverage: number
+  coreAverage: number
+  semesterAverages?: Record<string, { overall: string; core: string }>
+}
+
+/** 카드에서 수정 후 확인 시 전달하는 데이터 */
+export interface NaesinEditedData {
+  overallAverage: string
+  coreAverage: string
+  semesterAverages: Record<string, { overall: string; core: string }>
 }
 
 interface UsedChunk {
@@ -39,13 +53,18 @@ interface ChatMessageProps {
   isAdmin?: boolean
   onAgentClick?: () => void
   scoreReview?: ScoreReviewCardData
-  onScoreReviewApprove?: (pendingId: string, title: string, scores: Record<string, any>) => void
+  onScoreReviewApprove?: (pendingId: string, title: string, scores: Record<string, any>, useExistingScoreId?: boolean) => void
   onScoreReviewSkipSession?: (pendingId: string) => void
   onScoreTagClick?: (name: string) => void
   onFollowUpClick?: (question: string) => void
+  schoolGradeSaved?: SchoolGradeSavedData
+  onOpenSchoolGradeInput?: () => void
+  onNaesinConfirm?: (edited?: NaesinEditedData) => void
+  onNaesinDontAskAgain?: () => void
+  hideNaesinCard?: boolean
 }
 
-export default function ChatMessage({ message, isUser, scoreMentions, sources, source_urls, usedChunks, userQuery, isStreaming, onRegenerate, imageUrl, onLoginClick, isMasked, agentData, isAdmin, onAgentClick, scoreReview, onScoreReviewApprove, onScoreReviewSkipSession, onScoreTagClick, onFollowUpClick }: ChatMessageProps) {
+export default function ChatMessage({ message, isUser, scoreMentions, sources, source_urls, usedChunks, userQuery, isStreaming, onRegenerate, imageUrl, onLoginClick, isMasked, agentData, isAdmin, onAgentClick, scoreReview, onScoreReviewApprove, onScoreReviewSkipSession, onScoreTagClick, onFollowUpClick, schoolGradeSaved, onOpenSchoolGradeInput, onNaesinConfirm, onNaesinDontAskAgain, hideNaesinCard }: ChatMessageProps) {
   const [showFactCheck, setShowFactCheck] = useState(false)
   const [activeChunk, setActiveChunk] = useState<UsedChunk | null>(null)
   const [showGlow, setShowGlow] = useState(false)
@@ -54,6 +73,37 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
   const [isEditScoreReview, setIsEditScoreReview] = useState(false)
   const [scoreReviewTitle, setScoreReviewTitle] = useState((scoreReview?.titleAuto || '@내성적1').replace(/^@/, ''))
   const [scoreReviewScores, setScoreReviewScores] = useState<Record<string, any>>(scoreReview?.scores || {})
+
+  const semesterKeys = ['1-1', '1-2', '2-1', '2-2', '3-1', '3-2']
+  const initNaesinEdit = (s: typeof schoolGradeSaved): NaesinEditedData => {
+    if (!s) {
+      return {
+        overallAverage: '',
+        coreAverage: '',
+        semesterAverages: Object.fromEntries(semesterKeys.map((sk) => [sk, { overall: '', core: '' }])),
+      }
+    }
+    return {
+      overallAverage: String(s.overallAverage),
+      coreAverage: String(s.coreAverage),
+      semesterAverages: semesterKeys.reduce<Record<string, { overall: string; core: string }>>((acc, sk) => {
+        const sa = s.semesterAverages?.[sk]
+        acc[sk] = {
+          overall: sa?.overall ?? String(s.overallAverage),
+          core: sa?.core ?? String(s.coreAverage),
+        }
+        return acc
+      }, {}),
+    }
+  }
+  const [isNaesinCardEditing, setIsNaesinCardEditing] = useState(false)
+  const [naesinEdit, setNaesinEdit] = useState<NaesinEditedData>(() => initNaesinEdit(schoolGradeSaved))
+
+  useEffect(() => {
+    if (schoolGradeSaved) {
+      setNaesinEdit(initNaesinEdit(schoolGradeSaved))
+    }
+  }, [schoolGradeSaved])
 
   useEffect(() => {
     if (scoreReview) {
@@ -94,8 +144,35 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
   }
   
   // 후처리된 메시지 생성 (섹션 마크, 마크다운, 대괄호 제거)
+  const normalizeStructuredText = (raw: string) => {
+    const headingToken = '(?:#{1,4}\\s+|\\d+[-–—]\\d+\\.\\s+|\\d+\\.\\s+[가-힣A-Za-z])'
+    return String(raw || '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(/^\s*[*-]\s*(#{1,4}\s+)/gm, '$1') // "* ## 0-1..." -> "## 0-1..."
+      .replace(new RegExp(`([.!?])\\s*(?=${headingToken})`, 'g'), '$1\n')
+      .replace(new RegExp(`(<\\/cite>)\\s*(?=${headingToken})`, 'gi'), '$1\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+  }
+
+  const normalizeCiteSyntax = (raw: string) => {
+    return String(raw || '')
+      .split('\n')
+      .map((line) => {
+        // 줄 끝에서 끊긴 `<cite ...` 조각 제거
+        let fixed = line.replace(/<cite\b[^\n>]*$/gi, '')
+        const openCount = (fixed.match(/<cite\b[^>]*>/gi) || []).length
+        const closeCount = (fixed.match(/<\/cite>/gi) || []).length
+        // 같은 줄에서 닫히지 않은 cite는 줄 끝에서 자동 닫기
+        if (openCount > closeCount) fixed += '</cite>'
+        return fixed
+      })
+      .join('\n')
+  }
+
   const getCleanedMessage = () => {
-    return message
+    return normalizeStructuredText(message)
       .replace(/===SECTION_START(?::\w+)?===\s*/g, '')  // 섹션 마크 제거
       .replace(/===SECTION_END===\s*/g, '')
       .replace(/<cite[^>]*>([\s\S]*?)<\/cite>/g, '$1')  // cite 태그 제거
@@ -108,9 +185,13 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
 
   const isSchoolRecordReport = !isUser && (
     message.includes('# 0. 평가기준 설명') ||
+    message.includes('0. 평가기준 설명') ||
     message.includes('# 0. 학교별 평가기준 설명') ||
+    message.includes('0. 학교별 평가기준 설명') ||
     message.includes('# 1. 기준별 적용 평가') ||
+    message.includes('1. 기준별 적용 평가') ||
     message.includes('# 1. 대학별 기준 적용 평가') ||
+    message.includes('1. 대학별 기준 적용 평가') ||
     message.includes('부록 A. 학년별 과목 세특 확장 평가') ||
     message.includes('## 답변 후 꼬리 질문')
   )
@@ -142,7 +223,8 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
   const extractFollowUpSection = (text: string) => {
     if (!text) return { bodyText: text, questions: [] as string[] }
 
-    const headingRegex = /(?:^|\n)(?:##\s*답변 후 꼬리 질문|##\s*다음 질문 제안|【답변 후 꼬리 질문】|【다음 질문 제안】)\s*(?:\n|$)/m
+    // "다음에 물어보면 좋은 질문" 또는 비슷한 표현으로 시작하는 패턴
+    const headingRegex = /(?:^|\n)(?:##\s*답변 후 꼬리 질문|##\s*다음 질문 제안|【답변 후 꼬리 질문】|【다음 질문 제안】|(?:다음에 물어보면 좋은 질문))\s*(?:\n|$)/m
     const match = headingRegex.exec(text)
     if (!match || match.index == null) {
       return { bodyText: text, questions: [] as string[] }
@@ -150,9 +232,10 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
 
     const headingStart = match.index
     const sectionStart = headingStart + match[0].length
-    const bodyText = text.slice(0, headingStart).trim()
+    // 본문은 헤딩 직전까지 (줄바꿈 보존)
+    const bodyText = text.slice(0, headingStart)
     const tail = text.slice(sectionStart).trim()
-    if (!tail) return { bodyText, questions: [] as string[] }
+    if (!tail) return { bodyText: bodyText.trimEnd(), questions: [] as string[] }
 
     const questions: string[] = []
     const seen = new Set<string>()
@@ -177,7 +260,7 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
   const renderFollowUpBlock = (questions: string[]) => {
     if (!questions.length) return null
     return (
-      <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-4">
+      <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50/70 px-4 py-4">
         <p className="mb-3 text-[14px] font-semibold text-slate-700">다음에 물어보면 좋은 질문</p>
         <div className="flex flex-wrap gap-2">
           {questions.map((q, idx) => (
@@ -194,6 +277,17 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
         </div>
       </div>
     )
+  }
+
+  // 본문에서 follow-up 질문 추출 (컴포넌트 외부에서도 접근 가능)
+  const getFollowUpQuestions = (): string[] => {
+    const cleanedMessage = normalizeStructuredText(message)
+      .replace(/===SECTION_START(?::\w+)?===\s*/g, '')
+      .replace(/===SECTION_END===\s*/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+    const { questions } = extractFollowUpSection(cleanedMessage)
+    return questions
   }
   
   // 복사하기
@@ -256,15 +350,47 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
     return parts.length > 0 ? parts : text
   }
 
-  // 【】 타이틀 + 마크다운 ## ### #### 헤딩 파싱
+  // 【】 타이틀 + 마크다운 ## ### #### 헤딩 파싱 + 숫자-숫자 소주제
   const parseTitles = (text: string) => {
-    const lines = text.split('\n')
+    const rawLines = text.split('\n')
+    // 구분선 바로 앞/뒤의 빈 줄은 제거해서 과도한 간격을 막는다.
+    const lines = rawLines.filter((rawLine, idx) => {
+      if (rawLine.trim().length > 0) return true
+      const prev = rawLines[idx - 1]?.trim() || ''
+      const next = rawLines[idx + 1]?.trim() || ''
+      return prev !== '___DIVIDER___' && next !== '___DIVIDER___'
+    })
     const lineNodes: React.ReactNode[] = []
     let keyIndex = 0
 
+    // 숫자-숫자. 패턴 소주제 (예: 2-2. 진로 변경 및 지원 동기 질문)
+    // 하이픈(-), 엔대시(–), 엠대시(—) 모두 허용
+    const subsectionRegex = /^(\d+[-–—]\d+\.\s*)(.+)$/
+    // 단순 숫자. 패턴 (예: 1. 제목, 2. 제목)
+    const numberedRegex = /^(\d+\.\s*)(.+)$/
+
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i]
-      const headingMatch = line.match(/^(#{1,4})\s+(.*)$/)
+      const line = lines[i].trim() // 앞뒤 공백 제거
+      const normalizedLine = line.replace(/^[\s]*[•\-\*]\s+/, '')
+      if (!line) {
+        lineNodes.push(<span key={`empty-${keyIndex++}`}></span>)
+        if (i < lines.length - 1) lineNodes.push('\n')
+        continue
+      }
+      if (normalizedLine === '___DIVIDER___') {
+        lineNodes.push(
+          <hr
+            key={`section-divider-${keyIndex++}`}
+            className="section-divider"
+            aria-hidden="true"
+          />
+        )
+        continue
+      }
+      const headingMatch = normalizedLine.match(/^(#{1,4})\s*(.+)$/)
+      const subsectionMatch = normalizedLine.match(subsectionRegex)
+      const numberedMatch = normalizedLine.match(numberedRegex)
+
       if (headingMatch) {
         const level = headingMatch[1].length
         const content = headingMatch[2]
@@ -281,14 +407,37 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
             {parseBold(content)}
           </span>
         )
+      } else if (subsectionMatch) {
+        // 2-2. 같은 소주제 패턴
+        const numberPart = subsectionMatch[1]
+        const content = subsectionMatch[2]
+        lineNodes.push(
+          <span key={`sub-${keyIndex++}`} className="text-lg font-bold block mt-3 mb-1 text-slate-900">
+            {numberPart}{parseBold(content)}
+          </span>
+        )
+      } else if (numberedMatch && !line.match(/^\d+\.\s*$/)) {
+        // 숫자. 패턴 (번호만 있는 줄은 제외, 제목이 있으면 헤더로 렌더)
+        const numberPart = numberedMatch[1]
+        const content = numberedMatch[2]
+        lineNodes.push(
+          <span key={`num-${keyIndex++}`} className="text-base font-bold block mt-2 mb-0.5 text-slate-900">
+            {numberPart}{parseBold(content)}
+          </span>
+        )
       } else {
         lineNodes.push(
           <span key={`line-${keyIndex++}`}>
-            {parseTitlesLine(line)}
+            {parseTitlesLine(normalizedLine)}
           </span>
         )
       }
-      if (i < lines.length - 1) lineNodes.push('\n')
+      if (i < lines.length - 1) {
+        const nextLine = lines[i + 1]?.trim() || ''
+        if (nextLine !== '___DIVIDER___') {
+          lineNodes.push('\n')
+        }
+      }
     }
 
     return lineNodes.length > 0 ? lineNodes : parseBold(text)
@@ -359,7 +508,7 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
     return content
   }
 
-  // ___DIVIDER___ 마커를 <hr> 구분선으로 변환
+  // ___DIVIDER___ 마커를 시각 구분선으로 렌더링
   const addSectionDividers = (content: React.ReactNode): React.ReactNode => {
     if (typeof content === 'string') {
       if (!content.includes('___DIVIDER___')) return content
@@ -372,13 +521,8 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
           result.push(
             <hr
               key={`divider-${idx}`}
-              className="hidden sm:block"
-              style={{
-                border: 'none',
-                borderTop: '1.2px solid #dddddd',
-                marginTop: '2.0em',
-                marginBottom: '0.1em'
-              }}
+              className="section-divider"
+              aria-hidden="true"
             />
           )
         }
@@ -421,7 +565,7 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
 
   // cite 태그 개수 세기 (기존 <cite> + 생기부 리포트의 (외부근거: ...) 포함)
   const countCiteTags = () => {
-    const newCiteRegex = /<cite\s+data-source="([^"]*)"(?:\s+data-url="([^"]*)")?\s*>([\s\S]*?)<\/cite>/g
+    const newCiteRegex = /<cite\b[\s\S]*?>([\s\S]*?)<\/cite>/gi
     const oldCiteRegex = /<cite>(.*?)<\/cite>/g
     const externalCiteRegex = /\(외부근거:\s*[^)]+\)/g
 
@@ -435,31 +579,42 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
   // <cite> 태그를 파싱해서 희미한 밑줄 + 출처 표시
   const renderMessage = () => {
     if (isUser) {
-      return <div className="whitespace-pre-wrap">{message}</div>
+      return <div className="whitespace-pre-wrap">{renderInlineScoreMentions(message)}</div>
     }
 
     // 1. 섹션 경계를 구분선 마커로 변환 (===SECTION_END=== ... ===SECTION_START=== → ___DIVIDER___)
-    let cleanedMessage = message.replace(/===SECTION_END===\s*===SECTION_START(?::\w+)?===/g, '___DIVIDER___')
+    let cleanedMessage = message.replace(/===SECTION_END===\s*===SECTION_START(?::[^=]+)?===/g, '\n___DIVIDER___\n')
 
     // 남은 섹션 마커 제거 (맨 처음/끝에 있는 것들)
-    cleanedMessage = cleanedMessage.replace(/===SECTION_(START|END)(:\w+)?===/g, '')
+    cleanedMessage = cleanedMessage.replace(/===SECTION_(START|END)(:[^=]+)?===/g, '')
     
     // --- 구분선을 ___DIVIDER___ 마커로 변환 (백엔드에서 보내는 형식)
     // 줄바꿈은 유지하면서 ---만 마커로 변환 (모바일에서 빈 줄 1개만 표시되도록)
     cleanedMessage = cleanedMessage.replace(/\n*---\n*/g, '\n___DIVIDER___\n')
 
-    // 연속 줄바꿈 정리
-    cleanedMessage = cleanedMessage.replace(/\n{3,}/g, '\n\n').trim()
-    const { bodyText, questions: followUpQuestions } = extractFollowUpSection(cleanedMessage)
+    // 섹션/문단 줄바꿈 보정 + 연속 줄바꿈 정리
+    cleanedMessage = normalizeCiteSyntax(normalizeStructuredText(cleanedMessage))
+    const { bodyText } = extractFollowUpSection(cleanedMessage)
     cleanedMessage = bodyText
 
-    // 화면에 그대로 노출되면 안 되는 raw 태그/마크다운 제거 (모든 <cite ...> 제거, 절대 raw 노출 방지)
-    const stripRawCiteAndHeadingSyntax = (raw: string) => {
+    // 화면에 그대로 노출되면 안 되는 raw 태그 제거 (<cite ...> 제거)
+    const stripRawCiteTags = (raw: string) => {
       let s = raw
-        .replace(/<cite\s+[^>]*>/g, '')  // 속성 순서 무관하게 여는 태그 제거
-        .replace(/<\/cite>/g, '')
+        .replace(/<cite\b[^\n>]*(?:>|$)/gi, '')  // 여는 태그/깨진 태그 제거
+        .replace(/<\/cite>/gi, '')  // 닫는 태그 제거
       return s
     }
+
+    // cite 오픈 태그 내부 속성값의 줄바꿈 정규화 (data-url 개행으로 파싱 실패하는 케이스 보정)
+    // <cite ...> 태그를 찾아서 내부 속성값의 줄바꿈을 공백으로 치환
+    cleanedMessage = cleanedMessage.replace(/<cite\b([^>]*)>/gi, (fullMatch, attrPart) => {
+      // 속성값 내부의 줄바꿈 제거 (data-url, data-source 등)
+      const normalizedAttrs = attrPart
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim()
+      return `<cite ${normalizedAttrs}>`
+    })
 
     // (외부근거: 문서명/페이지) → <cite data-source="문서명/페이지">앞 문장</cite> 로 변환 (생기부 리포트 출처 표시)
     const externalCiteRegex = /\s*\((외부근거:\s*[^)]+)\)/g
@@ -492,7 +647,6 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
             <pre className="whitespace-pre-wrap font-mono text-sm bg-gray-50 p-3 rounded-lg overflow-x-auto">
               {formatted}
             </pre>
-            {renderFollowUpBlock(followUpQuestions)}
           </div>
         )
       } catch {
@@ -500,43 +654,38 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
       }
     }
 
-    // 2. 새로운 cite 형식 파싱: <cite data-source="..." data-url="...">...</cite> (속성 순서 무관)
+    // 2. 새로운 cite 형식 파싱: <cite ...>...</cite> (속성 순서/공백/개행 무관)
     const parts: React.ReactNode[] = []
     let lastIndex = 0
 
-    // data-source/data-url 순서 무관, 속성 사이 공백/줄바꿈 허용
-    const newCiteRegex = /<cite\s+[^>]*data-source="([^"]*)"[^>]*(?:data-url="([^"]*)")?[^>]*>([\s\S]*?)<\/cite>/g
-    const newCiteRegexAlt = /<cite\s+[^>]*data-url="([^"]*)"[^>]*data-source="([^"]*)"[^>]*>([\s\S]*?)<\/cite>/g
+    // 속성 파싱은 태그 문자열에서 별도 추출
+    const newCiteRegex = /<cite\b([\s\S]*?)>([\s\S]*?)<\/cite>/gi
     // 기존 형식: <cite>...</cite>
     const oldCiteRegex = /<cite>(.*?)<\/cite>/g
 
-    const tryMatchNewCite = (str: string, startIndex: number): { match: RegExpExecArray; source: string; url: string; content: string } | null => {
-      let best: { match: RegExpExecArray; source: string; url: string; content: string } | null = null
-      newCiteRegex.lastIndex = startIndex
-      let m = newCiteRegex.exec(str)
-      if (m && m.index >= startIndex) best = { match: m, source: m[1], url: (m[2] || '').trim(), content: (m[3] || '').trim() }
-      newCiteRegexAlt.lastIndex = startIndex
-      m = newCiteRegexAlt.exec(str)
-      if (m && m.index >= startIndex) {
-        const cur = { match: m, source: m[2], url: (m[1] || '').trim(), content: (m[3] || '').trim() }
-        if (!best || m.index < best.match.index) best = cur
+    const parseCiteAttrs = (rawAttrs: string): { source: string; url: string } => {
+      const sourceMatch = rawAttrs.match(/data-source="([^"]*)"/i)
+      const urlMatch = rawAttrs.match(/data-url="([^"]*)"/i)
+      return {
+        source: (sourceMatch?.[1] || '').trim(),
+        url: (urlMatch?.[1] || '').trim(),
       }
-      return best
     }
 
-    // 새 형식이 있는지 먼저 확인 (두 패턴 모두)
-    const hasNewFormat = newCiteRegex.test(cleanedMessage) || newCiteRegexAlt.test(cleanedMessage)
+    // 새 형식이 있는지 먼저 확인
+    const hasNewFormat = newCiteRegex.test(cleanedMessage)
     newCiteRegex.lastIndex = 0
-    newCiteRegexAlt.lastIndex = 0
     
     if (hasNewFormat) {
-      // 새로운 형식으로 파싱 (data-source/data-url 순서 무관)
-      let parsed: ReturnType<typeof tryMatchNewCite>
-      while ((parsed = tryMatchNewCite(cleanedMessage, lastIndex)) !== null) {
-        const { match, source: sourceText, url: sourceUrl, content: citedContentRaw } = parsed
+      // 새로운 형식으로 파싱 (속성 순서/공백/개행 무관)
+      let match: RegExpExecArray | null
+      while ((match = newCiteRegex.exec(cleanedMessage)) !== null) {
+        const attrText = match[1] || ''
+        const citedContentRaw = match[2] || ''
+        const { source: sourceText, url: sourceUrl } = parseCiteAttrs(attrText)
         // cite 이전 텍스트 (raw cite 태그 제거 후 파싱)
         if (match.index > lastIndex) {
-          const textBefore = stripRawCiteAndHeadingSyntax(cleanedMessage.substring(lastIndex, match.index))
+          const textBefore = stripRawCiteTags(cleanedMessage.substring(lastIndex, match.index))
           if (textBefore) {
             parts.push(
               <span key={`text-${lastIndex}`}>
@@ -582,12 +731,12 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
           </span>
         )
 
-        lastIndex = match.index + match[0].length
+        lastIndex = newCiteRegex.lastIndex
       }
 
       // 마지막 남은 텍스트 (raw cite 태그 제거 후 파싱)
       if (lastIndex < cleanedMessage.length) {
-        const remainingText = stripRawCiteAndHeadingSyntax(cleanedMessage.substring(lastIndex))
+        const remainingText = stripRawCiteTags(cleanedMessage.substring(lastIndex))
         if (remainingText) {
           parts.push(
             <span key={`text-${lastIndex}`}>
@@ -597,11 +746,10 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
         }
       }
 
-      const content = wrapBulletLines(parts.length > 0 ? parts : parseTitles(stripRawCiteAndHeadingSyntax(cleanedMessage)))
+      const content = wrapBulletLines(parts.length > 0 ? parts : parseTitles(stripRawCiteTags(cleanedMessage)))
       return (
         <div className="whitespace-pre-wrap">
-          {addSectionDividers(content)}
-          {renderFollowUpBlock(followUpQuestions)}
+          {renderInlineScoreMentions(addSectionDividers(content))}
         </div>
       )
     }
@@ -613,12 +761,11 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
 
     // cite 태그와 sources가 매칭되지 않으면 cite 무시하고 일반 텍스트로 표시
     if (citeCount > 0 && sourcesCount === 0) {
-      const finalClean = stripRawCiteAndHeadingSyntax(cleanedMessage.replace(/<\/?cite>/g, ''))
+      const finalClean = stripRawCiteTags(cleanedMessage.replace(/<\/?cite>/g, ''))
       const content = wrapBulletLines(parseTitles(finalClean))
       return (
         <div className="whitespace-pre-wrap">
-          {addSectionDividers(content)}
-          {renderFollowUpBlock(followUpQuestions)}
+          {renderInlineScoreMentions(addSectionDividers(content))}
         </div>
       )
     }
@@ -629,7 +776,7 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
 
     while ((match = oldCiteRegex.exec(cleanedMessage)) !== null) {
       if (match.index > lastIndex) {
-        const textBefore = stripRawCiteAndHeadingSyntax(cleanedMessage.substring(lastIndex, match.index))
+        const textBefore = stripRawCiteTags(cleanedMessage.substring(lastIndex, match.index))
         if (textBefore) {
           parts.push(
             <span key={`text-${lastIndex}`}>
@@ -680,7 +827,7 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
     }
 
     if (lastIndex < cleanedMessage.length) {
-      const remainingText = stripRawCiteAndHeadingSyntax(cleanedMessage.substring(lastIndex))
+      const remainingText = stripRawCiteTags(cleanedMessage.substring(lastIndex))
       if (remainingText) {
         parts.push(
           <span key={`text-${lastIndex}`}>
@@ -690,11 +837,24 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
       }
     }
 
-    const content = wrapBulletLines(parts.length > 0 ? parts : parseTitles(stripRawCiteAndHeadingSyntax(cleanedMessage)))
+    // 남은 raw cite 태그 최종 제거 (안전장치)
+    const finalCleanAllCite = (input: string) => {
+      return input.replace(/<cite\b[^\n>]*(?:>|$)/gi, '').replace(/<\/cite>/gi, '')
+    }
+
+    const content = wrapBulletLines(parts.length > 0 ? parts : parseTitles(stripRawCiteTags(cleanedMessage)))
+    
+    // parts가 있을 경우에도 각 노드에서 남은 cite 태그 제거
+    const safeContent = Array.isArray(content) 
+      ? content.map(node => {
+          if (typeof node === 'string') return finalCleanAllCite(node)
+          return node
+        })
+      : content
+    
     return (
       <div className="whitespace-pre-wrap">
-        {addSectionDividers(content)}
-        {renderFollowUpBlock(followUpQuestions)}
+        {renderInlineScoreMentions(addSectionDividers(safeContent))}
       </div>
     )
   }
@@ -708,23 +868,43 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
 
   const renderInlineScoreMentions = (content: React.ReactNode): React.ReactNode => {
     if (typeof content === 'string') {
-      const mentionRegex = /(@[가-힣a-zA-Z0-9_]{1,10})/g
-      const parts = content.split(mentionRegex)
+      // @내신성적 / @내신 성적 은 한 덩어리 칩, 그 외 @멘션도 칩. 조사(으로/로/...)는 일반 텍스트
+      const mentionWithJosa = /(@내신\s*성적|@[가-힣a-zA-Z0-9_]{1,20})(으로|로|은|는|이|가|을|를|와|과)?/g
+      const parts = content.split(mentionWithJosa)
       if (parts.length <= 1) return content
 
       return parts.map((part, idx) => {
-        if (mentionRegex.test(part)) {
-          mentionRegex.lastIndex = 0
+        if (part === undefined || typeof part !== 'string') return part ?? ''
+        // part가 "@멘션" 또는 "@멘션+조사" 형태인 경우: 멘션만 칩으로, 조사는 일반 텍스트
+        let withJosa = part.match(/^(@내신\s*성적|@[가-힣a-zA-Z0-9_]{1,20})(으로|로|은|는|이|가|을|를|와|과)?$/)
+        if (!withJosa) return part
+
+        let mention = withJosa[1]
+        let josa = withJosa[2] ?? ''
+        if (!josa) {
+          const trailing = mention.match(/^(@내신\s*성적|@[가-힣a-zA-Z0-9_]{1,20}?)(으로|로|은|는|이|가|을|를|와|과)$/)
+          if (trailing) {
+            mention = trailing[1]
+            josa = trailing[2]
+          }
+        }
+
+        const isMention = /^@내신\s*성적$/.test(mention) || /^@[가-힣a-zA-Z0-9_]{1,20}$/.test(mention)
+        if (isMention) {
           return (
-            <button
-              key={`inline-score-${idx}-${part}`}
-              className="inline-flex items-center align-baseline bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-full px-2 py-0.5 text-xs hover:bg-indigo-100 transition-colors mx-0.5"
-              onClick={() => onScoreTagClick?.(part)}
-            >
-              {part}
-            </button>
+            <span key={`inline-score-${idx}-${part}`}>
+              <button
+                type="button"
+                className="inline-flex items-center align-baseline rounded-md bg-[#eaf2ff] text-[#2563eb] text-[0.9em] leading-[1.15] px-1.5 py-0.5 [box-shadow:-0.14ch_0_0_#eaf2ff,0.14ch_0_0_#eaf2ff] hover:bg-[#dbeafe] cursor-pointer transition-colors mx-0.5"
+                onClick={() => onScoreTagClick?.(mention)}
+              >
+                {mention}
+              </button>
+              {josa}
+            </span>
           )
         }
+
         return part
       })
     }
@@ -744,6 +924,191 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
     }
 
     return content
+  }
+
+  if (!isUser && schoolGradeSaved && !scoreReview) {
+    if (hideNaesinCard) {
+      return (
+        <div className="flex justify-start mb-4 w-full">
+          <div className="w-full relative">
+            <div className="text-gray-900 ai-response">
+              <div className="text-sm text-gray-800">{renderMessage()}</div>
+            </div>
+            {!isMasked && renderFollowUpBlock(getFollowUpQuestions())}
+          </div>
+        </div>
+      )
+    }
+    const semesterLabels: Record<string, string> = {
+      '1-1': '1학년 1학기',
+      '1-2': '1학년 2학기',
+      '2-1': '2학년 1학기',
+      '2-2': '2학년 2학기',
+      '3-1': '3학년 1학기',
+      '3-2': '3학년 2학기',
+    }
+    const getConfirmPayload = (): NaesinEditedData =>
+      isNaesinCardEditing
+        ? naesinEdit
+        : initNaesinEdit(schoolGradeSaved)
+
+    return (
+      <>
+        {/* 수시 성적 입력 카드 (첫 번째 말풍선) */}
+        <div className="flex justify-start mb-4 w-full">
+          <div className="w-full max-w-2xl rounded-xl border border-gray-200 bg-[#fbfcfd] p-3 shadow-sm">
+            <div className="flex items-start justify-between gap-2 mb-3">
+              <p className="font-semibold text-gray-900 pt-1">다음 성적을 기반으로 답변할까요?</p>
+              <div className="flex gap-2 shrink-0">
+                {!isNaesinCardEditing ? (
+                  <button
+                    type="button"
+                    onClick={() => setIsNaesinCardEditing(true)}
+                    className="px-3 py-1.5 rounded-lg bg-gray-100 text-sm text-gray-700 hover:bg-gray-200"
+                  >
+                    수정
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsNaesinCardEditing(false)
+                      setNaesinEdit(initNaesinEdit(schoolGradeSaved))
+                    }}
+                    className="px-3 py-1.5 rounded-lg bg-gray-100 text-sm text-gray-700 hover:bg-gray-200"
+                  >
+                    취소
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onNaesinConfirm?.(getConfirmPayload())}
+                  className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700"
+                >
+                  확인
+                </button>
+                <button
+                  type="button"
+                  onClick={onNaesinDontAskAgain}
+                  className="px-3 py-1.5 rounded-lg bg-gray-800 text-white text-sm hover:bg-gray-900"
+                >
+                  다시 묻지 않기
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-3 sm:gap-4 mb-3">
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-semibold text-gray-600">평균 내신(전체)</p>
+                {isNaesinCardEditing ? (
+                  <input
+                    type="text"
+                    value={naesinEdit.overallAverage}
+                    onChange={(e) => setNaesinEdit((prev) => ({ ...prev, overallAverage: e.target.value }))}
+                    className="h-9 w-[100px] rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900"
+                  />
+                ) : (
+                  <div className="h-9 w-[100px] rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 flex items-center">
+                    {schoolGradeSaved.overallAverage}
+                  </div>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-semibold text-gray-600">평균 내신(국영수탐)</p>
+                {isNaesinCardEditing ? (
+                  <input
+                    type="text"
+                    value={naesinEdit.coreAverage}
+                    onChange={(e) => setNaesinEdit((prev) => ({ ...prev, coreAverage: e.target.value }))}
+                    className="h-9 w-[100px] rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900"
+                  />
+                ) : (
+                  <div className="h-9 w-[100px] rounded-lg border border-gray-300 bg-white px-2.5 py-1.5 text-sm text-gray-900 flex items-center">
+                    {schoolGradeSaved.coreAverage}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div
+              className="grid items-start gap-2 mb-3"
+              style={{ gridTemplateColumns: '90px repeat(6, minmax(0, 1fr))' }}
+            >
+              <div className="flex flex-col gap-2">
+                <div className="text-[11px] font-semibold leading-tight text-gray-600">구분</div>
+                <div className="flex h-8 items-center text-xs font-semibold text-gray-700">평균 내신(전체)</div>
+                <div className="flex h-8 items-center text-xs font-semibold text-gray-700">평균 내신(국영수탐)</div>
+              </div>
+              {semesterKeys.map((sk) => {
+                if (isNaesinCardEditing) {
+                  const sa = naesinEdit.semesterAverages[sk] ?? { overall: '', core: '' }
+                  return (
+                    <div key={sk} className="flex flex-col gap-2">
+                      <div className="text-center text-[11px] font-semibold leading-tight text-gray-600">
+                        {semesterLabels[sk]}
+                      </div>
+                      <input
+                        type="text"
+                        value={sa.overall}
+                        onChange={(e) =>
+                          setNaesinEdit((prev) => ({
+                            ...prev,
+                            semesterAverages: {
+                              ...prev.semesterAverages,
+                              [sk]: { ...prev.semesterAverages[sk], overall: e.target.value },
+                            },
+                          }))
+                        }
+                        className="h-8 rounded border border-gray-200 bg-white px-2 text-sm text-gray-700 text-center"
+                      />
+                      <input
+                        type="text"
+                        value={sa.core}
+                        onChange={(e) =>
+                          setNaesinEdit((prev) => ({
+                            ...prev,
+                            semesterAverages: {
+                              ...prev.semesterAverages,
+                              [sk]: { ...prev.semesterAverages[sk], core: e.target.value },
+                            },
+                          }))
+                        }
+                        className="h-8 rounded border border-gray-200 bg-white px-2 text-sm text-gray-700 text-center"
+                      />
+                    </div>
+                  )
+                }
+                const sa = schoolGradeSaved.semesterAverages?.[sk]
+                const ov = sa?.overall ?? String(schoolGradeSaved.overallAverage)
+                const co = sa?.core ?? String(schoolGradeSaved.coreAverage)
+                return (
+                  <div key={sk} className="flex flex-col gap-2">
+                    <div className="text-center text-[11px] font-semibold leading-tight text-gray-600">
+                      {semesterLabels[sk]}
+                    </div>
+                    <div className="flex h-8 items-center justify-center rounded border border-gray-200 bg-white px-2 text-sm text-gray-700">
+                      {ov}
+                    </div>
+                    <div className="flex h-8 items-center justify-center rounded border border-gray-200 bg-white px-2 text-sm text-gray-700">
+                      {co}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={onOpenSchoolGradeInput}
+                className="inline-flex h-9 items-center justify-center rounded-lg bg-[#0e6093] px-4 text-sm font-medium text-white transition-colors hover:bg-[#0b4f77]"
+              >
+                더 자세히 입력하러 가기
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-gray-500">확인을 누르면 성적을 반영한 답변이 표시됩니다.</p>
+          </div>
+        </div>
+        {/* 답변은 확인 버튼을 누른 뒤에만 표시됨 (onNaesinConfirm 시 schoolGradeSaved 제거 후 재렌더) */}
+      </>
+    )
   }
 
   if (!isUser && scoreReview) {
@@ -771,7 +1136,8 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
                   onScoreReviewApprove?.(
                     scoreReview.pendingId,
                     `@${(scoreReviewTitle || '내성적1').slice(0, 10)}`,
-                    scoreReviewScores
+                    scoreReviewScores,
+                    scoreReview.useExistingScoreId
                   )
                 }
               >
@@ -957,7 +1323,7 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
             </div>
           )}
           <div className="rounded-2xl px-4 py-3 text-gray-800" style={{ backgroundColor: '#F1F5FB' }}>
-            <div className="whitespace-pre-wrap">{getDisplayMessage()}</div>
+            <div className="whitespace-pre-wrap">{renderInlineScoreMentions(getDisplayMessage())}</div>
           </div>
         </div>
       ) : (
@@ -996,8 +1362,9 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
             </div>
           )}
           
+          {/* 메시지 본문 영역 */}
           <div
-            className={`text-gray-900 ai-response mb-4 ${isMasked ? 'blur-sm select-none' : ''} ${
+            className={`text-gray-900 ai-response ${isMasked ? 'blur-sm select-none' : ''} ${
               isSchoolRecordReport
                 ? 'rounded-2xl border border-gray-200 bg-white px-5 py-5 sm:px-7 sm:py-6'
                 : ''
@@ -1032,6 +1399,9 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
             )}
             {renderMessage()}
           </div>
+
+          {/* Follow-up 질문 영역 - 메시지 본문 밖으로 분리 (구분선 없음) */}
+          {!isMasked && renderFollowUpBlock(getFollowUpQuestions())}
           
           {/* 버튼 영역 - 스트리밍 완료 후에만 표시, 마스킹 시 숨김 */}
           {!isStreaming && !isMasked && (
@@ -1252,4 +1622,3 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
     </div>
   )
 }
-

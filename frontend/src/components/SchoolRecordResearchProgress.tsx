@@ -241,12 +241,12 @@ export default function SchoolRecordResearchProgress({ logs, query, onStop }: Sc
     >
       <div className="flex items-start justify-between gap-4">
         <div>
-          <p className="text-[13px] font-semibold tracking-wide text-[#0e6093]">리포트 리서치</p>
-          <h3 className="mt-1 text-[22px] font-semibold leading-tight text-slate-900 sm:text-[30px]">
+          <p className="text-[11px] font-semibold tracking-wide text-[#0e6093]">리포트 리서치</p>
+          <h3 className="mt-1 text-[17px] font-semibold leading-tight text-slate-900 sm:text-[22px]">
             {researchTitle}
           </h3>
           {query && (
-            <p className="mt-2 line-clamp-2 max-w-[760px] text-sm text-slate-500">
+            <p className="mt-2 line-clamp-2 max-w-[760px] text-xs text-slate-500">
               질문: {query}
             </p>
           )}
@@ -274,7 +274,7 @@ export default function SchoolRecordResearchProgress({ logs, query, onStop }: Sc
               <div className="pt-0.5">{renderStepIndicator(state)}</div>
               <p
                 className={[
-                  'text-[19px] leading-[1.45] sm:text-[30px]',
+                  'text-[14px] leading-[1.45] sm:text-[18px]',
                   state === 'pending' ? 'text-slate-500' : 'text-slate-900',
                 ].join(' ')}
               >
@@ -286,7 +286,7 @@ export default function SchoolRecordResearchProgress({ logs, query, onStop }: Sc
       </div>
 
       <div className="mt-8">
-        <p className="text-[22px] text-slate-500 sm:text-[34px]">리서치 중...</p>
+        <p className="text-[16px] text-slate-500 sm:text-[22px]">리서치 중...</p>
         <div className="mt-4 flex items-center gap-3">
           <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
             <div
@@ -308,7 +308,7 @@ export default function SchoolRecordResearchProgress({ logs, query, onStop }: Sc
             </button>
           )}
         </div>
-        <p className="mt-2 text-sm text-slate-500">{latestStatusText}</p>
+        <p className="mt-2 text-xs text-slate-500">{latestStatusText}</p>
       </div>
     </div>
   )

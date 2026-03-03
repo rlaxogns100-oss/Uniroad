@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
+import { LayoutModeProvider } from './contexts/LayoutModeContext'
 import LandingPage from './pages/LandingPage'
 import ChatPage from './pages/ChatPage'
 import AdminPage from './pages/AdminPage'
@@ -21,6 +22,7 @@ import OAuthCallbackPage from './pages/OAuthCallbackPage'
 import SchoolRecordEvalPage from './pages/SchoolRecordEvalPage'
 import SchoolRecordDeepAnalysisPage from './pages/SchoolRecordDeepAnalysisPage'
 import SchoolGradeInputPage from './pages/SchoolGradeInputPage'
+import SchoolRecordGuidePage from './pages/SchoolRecordGuidePage'
 import { useEffect } from 'react'
 import { initializeTracking, trackPageView } from './utils/tracking'
 
@@ -98,6 +100,7 @@ function App() {
   return (
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
+        <LayoutModeProvider>
         <PageTracker />
         <div>
           <Routes>
@@ -139,6 +142,7 @@ function App() {
             <Route path="/school-record" element={<SchoolRecordEvalPage />} />
             <Route path="/school-record-deep" element={<SchoolRecordDeepAnalysisPage />} />
             <Route path="/school-grade-input" element={<SchoolGradeInputPage />} />
+            <Route path="/guide" element={<SchoolRecordGuidePage />} />
             
             {/* 공유된 채팅 페이지 */}
             <Route path="/s/:shareId" element={<SharedChatPage />} />
@@ -195,10 +199,10 @@ function App() {
             <Route path="*" element={<Navigate to="/chat" replace />} />
           </Routes>
         </div>
+        </LayoutModeProvider>
       </AuthProvider>
     </BrowserRouter>
   )
 }
 
 export default App
-

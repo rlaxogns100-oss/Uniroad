@@ -13,14 +13,19 @@ interface SchoolGradeInputModalProps {
   isOpen: boolean
   onClose: () => void
   embedded?: boolean
+  autoOpenSavedGradeReport?: boolean
+  onAutoOpenSavedGradeReportHandled?: () => void
   onRequireSchoolRecordLink?: () => void
   /** 정시/모의고사 성적 입력 모달을 열 때 호출 (메뉴에서 "정시 성적 입력" 선택 시) */
   onOpenMockExamInput?: () => void
+  onUseNaesinSuggestion?: (mention: string) => void
 }
 
 type ModalStep = 'menu' | 'semester' | 'extracurricular' | 'record_upload'
 type SemesterKey = '1-1' | '1-2' | '2-1' | '2-2' | '3-1' | '3-2'
 type GradeKey = '1' | '2' | '3'
+type GradeAverageFieldKey = 'overall' | 'core'
+type QuickInputMode = 'overall' | 'semester'
 
 interface SemesterRow {
   id: string
@@ -51,9 +56,18 @@ interface ExtracurricularData {
   volunteerHours: Record<GradeKey, string>
 }
 
+interface GradeSummaryData {
+  overallAverage: string
+  coreAverage: string
+  semesterAverages: Record<SemesterKey, Record<GradeAverageFieldKey, string>>
+}
+
 interface SchoolGradeInputData {
   semesters: Record<SemesterKey, SemesterRow[]>
   extracurricular: ExtracurricularData
+  gradeSummary: GradeSummaryData
+  /** 성적표(생기부 연동) 업로드 여부. false이면 평균만 입력 모드로, 석차등급·원점수만 편집 가능 */
+  hasReportCardData: boolean
   recordUpload: {
     fileName: string
     summary: string
@@ -76,7 +90,10 @@ const semesterSections: Array<{ title: string; semesters: SemesterKey[] }> = [
   { title: '2학년', semesters: ['2-1', '2-2'] },
   { title: '3학년', semesters: ['3-1', '3-2'] },
 ]
+const semesterKeys: SemesterKey[] = ['1-1', '1-2', '2-1', '2-2', '3-1', '3-2']
 const gradeKeys: GradeKey[] = ['1', '2', '3']
+const NAESIN_CHAT_MENTION_EXAMPLE = '@내신 성적으로 갈 수 있는 학교 알려줘'
+const NAESIN_SCHOOL_RECOMMEND_MENTION = '@내신 성적 학교 추천'
 
 const schoolYearOptions = [...ADIGA_SCHOOL_YEAR_OPTIONS]
 const trackTypeOptions = [...ADIGA_TRACK_OPTIONS]
@@ -147,6 +164,73 @@ const createEmptyExtracurricularData = (): ExtracurricularData => ({
   },
 })
 
+const createEmptyGradeSummaryData = (): GradeSummaryData => ({
+  overallAverage: '',
+  coreAverage: '',
+  semesterAverages: {
+    '1-1': { overall: '', core: '' },
+    '1-2': { overall: '', core: '' },
+    '2-1': { overall: '', core: '' },
+    '2-2': { overall: '', core: '' },
+    '3-1': { overall: '', core: '' },
+    '3-2': { overall: '', core: '' },
+  },
+})
+
+const sanitizeGradeNumberInput = (value: string): string => {
+  let cleaned = value.replace(/[^\d.]/g, '')
+  if (!cleaned) return ''
+  const firstDotIndex = cleaned.indexOf('.')
+  if (firstDotIndex >= 0) {
+    cleaned = `${cleaned.slice(0, firstDotIndex + 1)}${cleaned.slice(firstDotIndex + 1).replace(/\./g, '')}`
+  }
+  if (cleaned.startsWith('.')) cleaned = `0${cleaned}`
+  const [intPartRaw, decimalPartRaw] = cleaned.split('.')
+  const intPart = intPartRaw.replace(/^0+(?=\d)/, '')
+  if (decimalPartRaw === undefined) return intPart
+  return `${intPart || '0'}.${decimalPartRaw.slice(0, 2)}`
+}
+
+const parseGradeNumber = (value: string): number | null => {
+  const text = value.trim()
+  if (!text) return null
+  const parsed = Number.parseFloat(text)
+  if (!Number.isFinite(parsed)) return null
+  return parsed
+}
+
+const formatGradeForDisplay = (value: number): string =>
+  Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.?0+$/, '')
+
+/** 석차등급은 1~9 정수만 허용 (한 자리) */
+const sanitizeClassRankInput = (value: string): string => {
+  const digits = value.replace(/[^\d]/g, '')
+  if (!digits) return ''
+  const first = digits.slice(0, 1)
+  const n = Number.parseInt(first, 10)
+  if (n >= 1 && n <= 9) return String(n)
+  return ''
+}
+
+/** 석차등급(1~9)에 따른 기본 원점수 (내신 등급별 대표값, 사용자가 수정 가능) */
+const RAW_SCORE_BY_CLASS_RANK: Record<number, number> = {
+  1: 96, 2: 92, 3: 88, 4: 84, 5: 80, 6: 76, 7: 72, 8: 68, 9: 64,
+}
+
+const getRawScoreByClassRank = (classRank: number): string => {
+  if (classRank >= 1 && classRank <= 9) return String(RAW_SCORE_BY_CLASS_RANK[classRank] ?? '')
+  return ''
+}
+
+const formatAveragedGrade = (values: string[]): string => {
+  const numericValues = values
+    .map((v) => parseGradeNumber(v))
+    .filter((v): v is number => v !== null)
+  if (numericValues.length === 0) return ''
+  const average = numericValues.reduce((sum, v) => sum + v, 0) / numericValues.length
+  return Number.isInteger(average) ? String(average) : average.toFixed(2).replace(/\.?0+$/, '')
+}
+
 const buildDefaultData = (): SchoolGradeInputData => ({
   semesters: {
     '1-1': [createEmptyRow()],
@@ -157,6 +241,8 @@ const buildDefaultData = (): SchoolGradeInputData => ({
     '3-2': [createEmptyRow()],
   },
   extracurricular: createEmptyExtracurricularData(),
+  gradeSummary: createEmptyGradeSummaryData(),
+  hasReportCardData: false,
   recordUpload: {
     fileName: '',
     summary: '',
@@ -170,15 +256,22 @@ const normalizeRows = (rows: unknown): SemesterRow[] => {
     .filter((row) => row && typeof row === 'object')
     .map((row) => {
       const r = row as Record<string, unknown>
-
+      let classRank = String(r.classRank || '').trim()
+      let rawScore = String(r.rawScore || '')
+      const parsed = parseGradeNumber(classRank)
+      if (parsed !== null) {
+        const grade = Math.min(9, Math.max(1, Math.round(parsed)))
+        classRank = String(grade)
+        rawScore = getRawScoreByClassRank(grade) || rawScore
+      }
       return normalizeSemesterRow({
         id: String(r.id || createEmptyRow().id),
         trackType: String(r.trackType || trackTypeOptions[0]),
         curriculum: String(r.curriculum || getCurriculumOptions(trackTypeOptions[0])[0] || ''),
         subject: String(r.subject || ''),
         credits: String(r.credits || ''),
-        classRank: String(r.classRank || ''),
-        rawScore: String(r.rawScore || ''),
+        classRank,
+        rawScore,
         avgScore: String(r.avgScore || ''),
         stdDev: String(r.stdDev || ''),
         studentCount: String(r.studentCount || ''),
@@ -203,7 +296,9 @@ const normalizeSchoolGradeInputData = (rawData: unknown): SchoolGradeInputData =
       ? (semestersRaw as Partial<Record<SemesterKey, unknown>>)
       : {}
   const extracurricularRaw = parsedRecord.extracurricular
+  const gradeSummaryRaw = parsedRecord.gradeSummary
   const fallbackExtracurricular = createEmptyExtracurricularData()
+  const fallbackGradeSummary = createEmptyGradeSummaryData()
   const extracurricularRecord =
     extracurricularRaw && typeof extracurricularRaw === 'object'
       ? (extracurricularRaw as Record<string, unknown>)
@@ -215,6 +310,14 @@ const normalizeSchoolGradeInputData = (rawData: unknown): SchoolGradeInputData =
   const volunteerHoursRecordRaw =
     extracurricularRecord?.volunteerHours && typeof extracurricularRecord.volunteerHours === 'object'
       ? (extracurricularRecord.volunteerHours as Record<string, unknown>)
+      : {}
+  const gradeSummaryRecord =
+    gradeSummaryRaw && typeof gradeSummaryRaw === 'object'
+      ? (gradeSummaryRaw as Record<string, unknown>)
+      : null
+  const semesterAveragesRaw =
+    gradeSummaryRecord?.semesterAverages && typeof gradeSummaryRecord.semesterAverages === 'object'
+      ? (gradeSummaryRecord.semesterAverages as Record<string, unknown>)
       : {}
 
   const readAttendanceField = (grade: GradeKey, field: keyof ExtracurricularAttendanceRow): string => {
@@ -254,6 +357,29 @@ const normalizeSchoolGradeInputData = (rawData: unknown): SchoolGradeInputData =
         }
       : fallbackExtracurricular
 
+  const readSemesterAverageField = (semester: SemesterKey, field: GradeAverageFieldKey): string => {
+    const semesterRecord = semesterAveragesRaw[semester]
+    if (!semesterRecord || typeof semesterRecord !== 'object') return ''
+    return String((semesterRecord as Record<string, unknown>)[field] || '')
+  }
+  const gradeSummary = gradeSummaryRecord
+    ? {
+        overallAverage: String(gradeSummaryRecord.overallAverage || ''),
+        coreAverage: String(gradeSummaryRecord.coreAverage || ''),
+        semesterAverages: {
+          '1-1': { overall: readSemesterAverageField('1-1', 'overall'), core: readSemesterAverageField('1-1', 'core') },
+          '1-2': { overall: readSemesterAverageField('1-2', 'overall'), core: readSemesterAverageField('1-2', 'core') },
+          '2-1': { overall: readSemesterAverageField('2-1', 'overall'), core: readSemesterAverageField('2-1', 'core') },
+          '2-2': { overall: readSemesterAverageField('2-2', 'overall'), core: readSemesterAverageField('2-2', 'core') },
+          '3-1': { overall: readSemesterAverageField('3-1', 'overall'), core: readSemesterAverageField('3-1', 'core') },
+          '3-2': { overall: readSemesterAverageField('3-2', 'overall'), core: readSemesterAverageField('3-2', 'core') },
+        },
+      }
+    : fallbackGradeSummary
+
+  const hasReportCardData =
+    parsedRecord.hasReportCardData === true
+
   return {
     semesters: {
       '1-1': normalizeRows(semesters['1-1']),
@@ -264,6 +390,8 @@ const normalizeSchoolGradeInputData = (rawData: unknown): SchoolGradeInputData =
       '3-2': normalizeRows(semesters['3-2']),
     },
     extracurricular,
+    gradeSummary,
+    hasReportCardData: Boolean(hasReportCardData),
     recordUpload: {
       fileName: String(
         parsedRecord.recordUpload && typeof parsedRecord.recordUpload === 'object'
@@ -288,6 +416,14 @@ const loadSavedData = (): SchoolGradeInputData => {
   } catch {
     return buildDefaultData()
   }
+}
+
+const hasSavedNaesinData = (value: SchoolGradeInputData): boolean => {
+  const hasSemesterAverage = semesterKeys.some(
+    (semesterKey) => parseGradeNumber(value.gradeSummary.semesterAverages[semesterKey].overall) !== null
+  )
+  if (hasSemesterAverage) return true
+  return semesterKeys.some((semesterKey) => (value.semesters[semesterKey] || []).some(isMeaningfulSemesterRow))
 }
 
 type ParsedAcademicRow = Record<string, unknown>
@@ -316,6 +452,21 @@ const sanitizeCellValue = (value: unknown): string => {
 
 const sanitizeNumberInput = (value: string): string =>
   value.replace(/[^\d]/g, '')
+
+const isMeaningfulSemesterRow = (row: SemesterRow): boolean => {
+  if (row.subject.trim()) return true
+  if (row.credits.trim()) return true
+  if (row.classRank.trim()) return true
+  if (row.rawScore.trim()) return true
+  if (row.avgScore.trim()) return true
+  if (row.stdDev.trim()) return true
+  if (row.studentCount.trim()) return true
+  if (row.distA.trim()) return true
+  if (row.distB.trim()) return true
+  if (row.distC.trim()) return true
+  if (row.achievement && row.achievement !== '선택') return true
+  return false
+}
 
 const toNonNegativeInt = (value: string): number => {
   const parsed = Number.parseInt(value, 10)
@@ -889,6 +1040,8 @@ interface ScrollableSelectProps {
   placeholder?: string
   minPanelWidth?: number
   buttonClassName?: string
+  /** 스크롤 시 드롭다운 닫기 (다른 영역 클릭이 가능하도록) */
+  scrollContainerRef?: React.RefObject<HTMLElement | null>
 }
 
 function ScrollableSelect({
@@ -898,19 +1051,35 @@ function ScrollableSelect({
   placeholder = '선택',
   minPanelWidth = 0,
   buttonClassName = 'h-10 w-full rounded-md border border-gray-300 bg-white px-2',
+  scrollContainerRef,
 }: ScrollableSelectProps) {
   const [isOpen, setIsOpen] = useState(false)
+  const [panelVisible, setPanelVisible] = useState(false)
   const [panelRect, setPanelRect] = useState({ top: 0, left: 0, width: 0 })
   const rootRef = useRef<HTMLDivElement | null>(null)
   const buttonRef = useRef<HTMLButtonElement | null>(null)
   const panelRef = useRef<HTMLDivElement | null>(null)
+  const openedAtRef = useRef<number>(0)
 
   const selectedValue = value || ''
   const hasValue = selectedValue.length > 0
   const displayValue = hasValue ? selectedValue : placeholder
 
+  // isOpen이 true가 된 뒤 한 프레임 지연해서 패널 표시 (열기 클릭 이벤트가 완전히 끝난 뒤)
   useEffect(() => {
-    if (!isOpen) return
+    if (!isOpen) {
+      setPanelVisible(false)
+      return
+    }
+    openedAtRef.current = Date.now()
+    const frame = requestAnimationFrame(() => {
+      setPanelVisible(true)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [isOpen])
+
+  useEffect(() => {
+    if (!isOpen || !panelVisible) return
 
     const updatePanelPosition = () => {
       if (!buttonRef.current) return
@@ -924,6 +1093,7 @@ function ScrollableSelect({
 
     const handlePointerDown = (event: MouseEvent) => {
       const target = event.target as Node
+      if (Date.now() - openedAtRef.current < 400) return
       if (rootRef.current?.contains(target)) return
       if (panelRef.current?.contains(target)) return
       setIsOpen(false)
@@ -934,16 +1104,33 @@ function ScrollableSelect({
     }
 
     updatePanelPosition()
-    document.addEventListener('mousedown', handlePointerDown)
     window.addEventListener('resize', updatePanelPosition)
     window.addEventListener('scroll', handleWindowScroll, true)
 
+    const scrollContainer = scrollContainerRef?.current
+    const handleContainerScroll = () => {
+      if (Date.now() - openedAtRef.current < 400) return
+      setIsOpen(false)
+    }
+
+    // 닫기 리스너는 패널 표시 후 250ms 뒤에 등록
+    const tid = setTimeout(() => {
+      document.addEventListener('mousedown', handlePointerDown)
+      if (scrollContainer) {
+        scrollContainer.addEventListener('scroll', handleContainerScroll, true)
+      }
+    }, 250)
+
     return () => {
+      clearTimeout(tid)
       document.removeEventListener('mousedown', handlePointerDown)
+      if (scrollContainer) {
+        scrollContainer.removeEventListener('scroll', handleContainerScroll, true)
+      }
       window.removeEventListener('resize', updatePanelPosition)
       window.removeEventListener('scroll', handleWindowScroll, true)
     }
-  }, [isOpen, minPanelWidth])
+  }, [isOpen, panelVisible, minPanelWidth])
 
   return (
     <div ref={rootRef} className="relative">
@@ -957,7 +1144,7 @@ function ScrollableSelect({
         <span className="shrink-0 text-xs text-gray-500">▼</span>
       </button>
 
-      {isOpen && createPortal(
+      {panelVisible && createPortal(
         <div
           ref={panelRef}
           style={{ top: panelRect.top, left: panelRect.left, width: panelRect.width }}
@@ -965,17 +1152,13 @@ function ScrollableSelect({
         >
           <div
             className="max-h-72 overflow-y-auto overscroll-contain p-2"
-            onWheel={(event) => event.stopPropagation()}
           >
             {options.length > 0 ? (
               options.map((option) => (
                 <button
                   key={option}
                   type="button"
-                  onClick={() => {
-                    onChange(option)
-                    setIsOpen(false)
-                  }}
+                  onClick={() => onChange(option)}
                   className={`block w-full rounded-lg px-3 py-2 text-left text-sm hover:bg-[#eef5fb] ${
                     option === selectedValue ? 'bg-[#0e6093]/10 font-semibold text-[#0e6093]' : 'text-gray-800'
                   }`}
@@ -994,29 +1177,116 @@ function ScrollableSelect({
   )
 }
 
+function CountUpGrade({
+  value,
+  className,
+}: {
+  value: string
+  className?: string
+}) {
+  const initialNumeric = parseGradeNumber(value)
+  const [displayValue, setDisplayValue] = useState<string>(
+    initialNumeric === null ? '-' : formatGradeForDisplay(initialNumeric)
+  )
+  const previousNumericRef = useRef<number | null>(initialNumeric)
+
+  useEffect(() => {
+    const targetNumeric = parseGradeNumber(value)
+    if (targetNumeric === null) {
+      previousNumericRef.current = null
+      setDisplayValue('-')
+      return
+    }
+
+    const fromNumeric = previousNumericRef.current ?? targetNumeric
+    previousNumericRef.current = targetNumeric
+    if (Math.abs(fromNumeric - targetNumeric) < 0.0001) {
+      setDisplayValue(formatGradeForDisplay(targetNumeric))
+      return
+    }
+
+    let animationFrameId = 0
+    const startedAt = performance.now()
+    const duration = 360
+    const delta = targetNumeric - fromNumeric
+
+    const animate = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / duration)
+      const eased = 1 - Math.pow(1 - progress, 3)
+      const current = fromNumeric + delta * eased
+      setDisplayValue(formatGradeForDisplay(current))
+      if (progress < 1) {
+        animationFrameId = requestAnimationFrame(animate)
+      }
+    }
+
+    animationFrameId = requestAnimationFrame(animate)
+    return () => {
+      cancelAnimationFrame(animationFrameId)
+    }
+  }, [value])
+
+  return <span className={className}>{displayValue}</span>
+}
+
 export default function SchoolGradeInputModal({
   isOpen,
   onClose,
   embedded = false,
+  autoOpenSavedGradeReport = false,
+  onAutoOpenSavedGradeReportHandled,
   onRequireSchoolRecordLink,
   onOpenMockExamInput,
+  onUseNaesinSuggestion,
 }: SchoolGradeInputModalProps) {
   const { isAuthenticated, accessToken } = useAuth()
-  const baseUrl = getApiBaseUrl()
   const [step, setStep] = useState<ModalStep>('menu')
   const [selectedSemester, setSelectedSemester] = useState<SemesterKey>('1-1')
   const [selectedSchoolYear, setSelectedSchoolYear] = useState<string>(schoolYearOptions[0])
   const [data, setData] = useState<SchoolGradeInputData>(() => buildDefaultData())
+  const [selectedInputChoice, setSelectedInputChoice] = useState<QuickInputMode | null>(null)
+  const [isChoiceFormVisible, setIsChoiceFormVisible] = useState(false)
+  const [isOverallEstimateSubmitted, setIsOverallEstimateSubmitted] = useState(false)
+  const [isOverallInputLeaving, setIsOverallInputLeaving] = useState(false)
+  const [, setHasCalculatedResult] = useState(false)
+  const [isInlineDetailVisible, setIsInlineDetailVisible] = useState(false)
+  const [isEstimateToastVisible, setIsEstimateToastVisible] = useState(false)
+  const [isGradeReportModalOpen, setIsGradeReportModalOpen] = useState(false)
+  const [reportSemester, setReportSemester] = useState<SemesterKey>('1-1')
+  const [showSavedGradeLinkHint, setShowSavedGradeLinkHint] = useState(false)
+  const [isSubjectDetailModalOpen, setIsSubjectDetailModalOpen] = useState(false)
+  const [subjectDetailSemester, setSubjectDetailSemester] = useState<SemesterKey>('1-1')
   const [message, setMessage] = useState('')
   const [isAutofillLoading, setIsAutofillLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const rightMainScrollRef = useRef<HTMLDivElement>(null)
+  const dataRef = useRef<SchoolGradeInputData>(data)
+  const hasUserInteractedRef = useRef(false)
+  const overallTransitionTimerRef = useRef<number | null>(null)
+  const estimateToastTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    dataRef.current = data
+  }, [data])
+
+  useEffect(() => {
+    return () => {
+      if (overallTransitionTimerRef.current !== null) {
+        window.clearTimeout(overallTransitionTimerRef.current)
+      }
+      if (estimateToastTimerRef.current !== null) {
+        window.clearTimeout(estimateToastTimerRef.current)
+      }
+    }
+  }, [])
 
   const loadSchoolGradeInputFromServer = useCallback(
     async (signal?: AbortSignal) => {
       if (!isAuthenticated || !accessToken) return
 
       try {
-        const response = await fetch(`${baseUrl}/api/profile/me/school-grade-input?ts=${Date.now()}`, {
+        const apiBase = getApiBaseUrl()
+        const response = await fetch(`${apiBase ? `${apiBase}/api` : '/api'}/profile/me/school-grade-input?ts=${Date.now()}`, {
           headers: { Authorization: `Bearer ${accessToken}` },
           cache: 'no-store',
           signal,
@@ -1030,7 +1300,9 @@ export default function SchoolGradeInputModal({
         }
 
         const serverData = normalizeSchoolGradeInputData(rawServerData)
+        if (hasUserInteractedRef.current) return
         setData(serverData)
+        setHasCalculatedResult(hasSavedNaesinData(serverData))
         try {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(serverData))
         } catch {
@@ -1040,7 +1312,7 @@ export default function SchoolGradeInputModal({
         if (error instanceof Error && error.name === 'AbortError') return
       }
     },
-    [isAuthenticated, accessToken, baseUrl]
+    [isAuthenticated, accessToken]
   )
 
   const persistSchoolGradeInput = useCallback(async (nextData: SchoolGradeInputData, successMessage: string) => {
@@ -1065,7 +1337,8 @@ export default function SchoolGradeInputModal({
 
     setIsSaving(true)
     try {
-      const response = await fetch(`${baseUrl}/api/profile/me/school-grade-input`, {
+      const apiBase = getApiBaseUrl()
+      const response = await fetch(`${apiBase ? `${apiBase}/api` : '/api'}/profile/me/school-grade-input`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1105,7 +1378,7 @@ export default function SchoolGradeInputModal({
     } finally {
       setIsSaving(false)
     }
-  }, [isAuthenticated, accessToken, baseUrl])
+  }, [isAuthenticated, accessToken])
 
   const autofillFromLinkedSchoolRecord = useCallback(
     async ({
@@ -1130,27 +1403,33 @@ export default function SchoolGradeInputModal({
 
       if (showLoading) setIsAutofillLoading(true)
       try {
+        const moveToSchoolRecordLinkPage = () => {
+          if (!silentWhenUnavailable) {
+            setMessage('연동된 생기부가 없어 내 프로필/생활기록부로 이동할게요.')
+          }
+          onRequireSchoolRecordLink?.()
+        }
+
         if (redirectIfNotLinked) {
-          const statusRes = await fetch(`${baseUrl}/api/school-record/status`, {
+          const apiBase = getApiBaseUrl()
+          const statusRes = await fetch(`${apiBase ? `${apiBase}/api` : '/api'}/school-record/status`, {
             headers: { Authorization: `Bearer ${accessToken}` },
             cache: 'no-store',
             signal,
           })
-          const linked =
+          const linkedStatus =
             statusRes.ok
               ? ((await statusRes.json().catch(() => null))?.linked === true)
-              : false
+              : null
 
-          if (!linked) {
-            if (!silentWhenUnavailable) {
-              setMessage('연동된 생기부가 없어 생활기록부 연동하기 페이지로 이동합니다.')
-            }
-            onRequireSchoolRecordLink?.()
+          if (linkedStatus === false) {
+            moveToSchoolRecordLinkPage()
             return
           }
         }
 
-        const response = await fetch(`${baseUrl}/api/school-record/forms?ts=${Date.now()}`, {
+        const apiBase = getApiBaseUrl()
+        const response = await fetch(`${apiBase ? `${apiBase}/api` : '/api'}/school-record/forms?ts=${Date.now()}`, {
           headers: { Authorization: `Bearer ${accessToken}` },
           cache: 'no-store',
           signal,
@@ -1170,16 +1449,31 @@ export default function SchoolGradeInputModal({
         const semesterRows = convertParsedSchoolRecordToSemesterRows(parsedSchoolRecord)
         const extracurricularData = convertParsedSchoolRecordToExtracurricularData(parsedSchoolRecord)
         if (!semesterRows && !extracurricularData) {
+          if (redirectIfNotLinked) {
+            moveToSchoolRecordLinkPage()
+            return
+          }
           if (!silentWhenUnavailable) {
             setMessage('연동된 생기부에서 가져올 데이터가 없습니다.')
           }
           return
         }
 
+        const isBackgroundAutofill = !persistAfterFill && !redirectIfNotLinked
+        if (isBackgroundAutofill && hasUserInteractedRef.current) {
+          return
+        }
+
+        const baseData = dataRef.current
+        const nextSemesters = semesterRows || baseData.semesters
         const nextData: SchoolGradeInputData = {
-          ...data,
-          semesters: semesterRows || data.semesters,
-          extracurricular: extracurricularData || data.extracurricular,
+          ...baseData,
+          semesters: nextSemesters,
+          extracurricular: extracurricularData || baseData.extracurricular,
+          gradeSummary: semesterRows
+            ? buildGradeSummaryFromSemesters(nextSemesters, baseData.gradeSummary)
+            : baseData.gradeSummary,
+          hasReportCardData: Boolean(semesterRows) || baseData.hasReportCardData,
         }
         const filledMessage =
           semesterRows && extracurricularData
@@ -1203,6 +1497,8 @@ export default function SchoolGradeInputModal({
             )
           }
         }
+        setHasCalculatedResult(hasSavedNaesinData(nextData))
+        setIsSubjectDetailModalOpen(false)
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') return
         if (!silentWhenUnavailable) {
@@ -1212,18 +1508,54 @@ export default function SchoolGradeInputModal({
         if (showLoading) setIsAutofillLoading(false)
       }
     },
-    [isAuthenticated, accessToken, baseUrl, onRequireSchoolRecordLink, data, persistSchoolGradeInput]
+    [isAuthenticated, accessToken, onRequireSchoolRecordLink, persistSchoolGradeInput]
   )
 
   useEffect(() => {
     if (!isOpen) return
 
-    setStep('menu')
+    if (overallTransitionTimerRef.current !== null) {
+      window.clearTimeout(overallTransitionTimerRef.current)
+      overallTransitionTimerRef.current = null
+    }
+    if (estimateToastTimerRef.current !== null) {
+      window.clearTimeout(estimateToastTimerRef.current)
+      estimateToastTimerRef.current = null
+    }
+    hasUserInteractedRef.current = false
+    const savedData = loadSavedData()
+    setStep(embedded ? 'menu' : 'semester')
     setSelectedSemester('1-1')
     setSelectedSchoolYear(schoolYearOptions[0])
+    setSelectedInputChoice(null)
+    setIsChoiceFormVisible(false)
+    setIsOverallEstimateSubmitted(false)
+    setIsOverallInputLeaving(false)
+    setHasCalculatedResult(hasSavedNaesinData(savedData))
+    setIsInlineDetailVisible(false)
+    setIsEstimateToastVisible(false)
+    setIsGradeReportModalOpen(false)
+    setReportSemester('1-1')
+    setShowSavedGradeLinkHint(false)
+    setSubjectDetailSemester('1-1')
     setMessage('')
-    setData(loadSavedData())
-  }, [isOpen])
+    setData(savedData)
+  }, [isOpen, embedded])
+
+  useEffect(() => {
+    if (!selectedInputChoice) {
+      setIsChoiceFormVisible(false)
+      return
+    }
+
+    setIsChoiceFormVisible(false)
+    const tid = window.setTimeout(() => {
+      setIsChoiceFormVisible(true)
+    }, 10)
+    return () => {
+      window.clearTimeout(tid)
+    }
+  }, [selectedInputChoice])
 
   useEffect(() => {
     if (!isOpen) return
@@ -1271,9 +1603,8 @@ export default function SchoolGradeInputModal({
     field: keyof Omit<SemesterRow, 'id'>,
     value: string
   ) => {
-    setData((prev) => ({
-      ...prev,
-      semesters: {
+    setData((prev) => {
+      const nextSemesters = {
         ...prev.semesters,
         [semester]: prev.semesters[semester].map((row) => {
           if (row.id !== rowId) return row
@@ -1304,27 +1635,227 @@ export default function SchoolGradeInputModal({
             }
           }
 
+          if (field === 'classRank') {
+            const sanitized = sanitizeClassRankInput(value)
+            const grade = sanitized ? Number.parseInt(sanitized, 10) : null
+            const rawScore = grade != null && grade >= 1 && grade <= 9 ? getRawScoreByClassRank(grade) : row.rawScore
+            return { ...row, classRank: sanitized, rawScore }
+          }
+
           return { ...row, [field]: value }
         }),
-      },
-    }))
+      }
+
+      return {
+        ...prev,
+        semesters: nextSemesters,
+        gradeSummary: buildGradeSummaryFromSemesters(nextSemesters, prev.gradeSummary),
+      }
+    })
   }
 
   const addSemesterRow = (semester: SemesterKey, count = 1) => {
-    setData((prev) => ({
-      ...prev,
-      semesters: {
+    setData((prev) => {
+      const nextSemesters = {
         ...prev.semesters,
         [semester]: [
           ...prev.semesters[semester],
           ...Array.from({ length: count }).map(() => createEmptyRow()),
         ],
-      },
-    }))
+      }
+      return {
+        ...prev,
+        semesters: nextSemesters,
+        gradeSummary: buildGradeSummaryFromSemesters(nextSemesters, prev.gradeSummary),
+      }
+    })
   }
 
+  const coreCurriculumNames = new Set(['국어', '수학', '영어', '한국사', '과학', '사회(역사/도덕포함)', '통합사회', '통합과학'])
+
+  const buildGradeSummaryFromSemesters = (
+    semesters: Record<SemesterKey, SemesterRow[]>,
+    baseSummary: GradeSummaryData
+  ): GradeSummaryData => {
+    const nextSemesterAverages: Record<SemesterKey, Record<GradeAverageFieldKey, string>> = {
+      '1-1': { ...baseSummary.semesterAverages['1-1'] },
+      '1-2': { ...baseSummary.semesterAverages['1-2'] },
+      '2-1': { ...baseSummary.semesterAverages['2-1'] },
+      '2-2': { ...baseSummary.semesterAverages['2-2'] },
+      '3-1': { ...baseSummary.semesterAverages['3-1'] },
+      '3-2': { ...baseSummary.semesterAverages['3-2'] },
+    }
+
+    for (const semesterKey of semesterKeys) {
+      const rows = semesters[semesterKey] || []
+      const overallGrades: number[] = []
+      const coreGrades: number[] = []
+      for (const row of rows) {
+        const value = parseGradeNumber(row.classRank)
+        if (value === null) continue
+        overallGrades.push(value)
+        if (coreCurriculumNames.has(row.curriculum)) {
+          coreGrades.push(value)
+        }
+      }
+
+      nextSemesterAverages[semesterKey] = {
+        overall: formatAveragedGrade(overallGrades.map(String)),
+        core: formatAveragedGrade(coreGrades.map(String)),
+      }
+    }
+
+    return {
+      ...baseSummary,
+      semesterAverages: nextSemesterAverages,
+      overallAverage: formatAveragedGrade(semesterKeys.map((k) => nextSemesterAverages[k].overall)),
+      coreAverage: formatAveragedGrade(semesterKeys.map((k) => nextSemesterAverages[k].core)),
+    }
+  }
+
+  const applyClassRanksFromSummary = (
+    semesters: Record<SemesterKey, SemesterRow[]>,
+    summary: GradeSummaryData
+  ): Record<SemesterKey, SemesterRow[]> => {
+    const fallbackOverall = parseGradeNumber(summary.overallAverage)
+    const fallbackCore = parseGradeNumber(summary.coreAverage)
+    if (fallbackOverall === null && fallbackCore === null) {
+      return semesters
+    }
+
+    const defaultOverall = fallbackOverall ?? fallbackCore ?? 0
+    const defaultCore = fallbackCore ?? fallbackOverall ?? 0
+
+    const allocateGrades = (count: number, targetSum: number): number[] => {
+      if (count <= 0) return []
+      const sum = Math.round(targetSum)
+      const base = Math.max(1, Math.min(9, Math.floor(sum / count)))
+      const remainder = sum - base * count
+      const grades: number[] = []
+      if (remainder > 0 && base < 9) {
+        const high = Math.min(9, base + 1)
+        for (let i = 0; i < remainder; i++) grades.push(high)
+        for (let i = remainder; i < count; i++) grades.push(base)
+        return grades
+      }
+      for (let i = 0; i < count; i++) grades.push(base)
+      return grades
+    }
+
+    const nextSemesters = { ...semesters }
+    for (const semesterKey of semesterKeys) {
+      const rows = semesters[semesterKey] || []
+      if (rows.length === 0) continue
+
+      const semOverall = parseGradeNumber(summary.semesterAverages[semesterKey].overall)
+      const semCore = parseGradeNumber(summary.semesterAverages[semesterKey].core)
+      const overall = semOverall ?? defaultOverall
+      const core = semCore ?? defaultCore
+
+      const coreRows: typeof rows = []
+      const nonCoreRows: typeof rows = []
+      for (const row of rows) {
+        if (coreCurriculumNames.has(row.curriculum)) coreRows.push(row)
+        else nonCoreRows.push(row)
+      }
+
+      const nCore = coreRows.length
+      const nNonCore = nonCoreRows.length
+      const n = nCore + nNonCore
+      const sumTotal = Math.round(overall * n)
+      const sumCore = Math.round(core * nCore)
+      const sumNonCore = nNonCore > 0 ? sumTotal - sumCore : 0
+
+      const coreGrades = allocateGrades(nCore, nCore > 0 ? sumCore : 0)
+      const nonCoreGrades = allocateGrades(nNonCore, sumNonCore)
+      let coreIdx = 0
+      let nonCoreIdx = 0
+
+      nextSemesters[semesterKey] = rows.map((row) => {
+        const isCore = coreCurriculumNames.has(row.curriculum)
+        const rank = isCore ? coreGrades[coreIdx++] : nonCoreGrades[nonCoreIdx++]
+        const grade = rank >= 1 && rank <= 9 ? rank : 1
+        return { ...row, classRank: String(grade), rawScore: getRawScoreByClassRank(grade) }
+      })
+    }
+
+    return nextSemesters
+  }
+
+  const updateSummaryAverage = (field: GradeAverageFieldKey, value: string) => {
+    const sanitized = sanitizeGradeNumberInput(value)
+    setData((prev) => {
+      const nextSemesterAverages = semesterKeys.reduce<Record<SemesterKey, Record<GradeAverageFieldKey, string>>>(
+        (acc, semesterKey) => {
+          acc[semesterKey] = {
+            ...prev.gradeSummary.semesterAverages[semesterKey],
+            [field]: sanitized,
+          }
+          return acc
+        },
+        {} as Record<SemesterKey, Record<GradeAverageFieldKey, string>>
+      )
+      const nextGradeSummary = {
+        ...prev.gradeSummary,
+        overallAverage: field === 'overall' ? sanitized : prev.gradeSummary.overallAverage,
+        coreAverage: field === 'core' ? sanitized : prev.gradeSummary.coreAverage,
+        semesterAverages: nextSemesterAverages,
+      }
+      const nextSemesters = applyClassRanksFromSummary(prev.semesters, nextGradeSummary)
+      return {
+        ...prev,
+        semesters: nextSemesters,
+        gradeSummary: nextGradeSummary,
+      }
+    })
+  }
+
+  const updateSemesterAverage = (semester: SemesterKey, field: GradeAverageFieldKey, value: string) => {
+    const sanitized = sanitizeGradeNumberInput(value)
+    setData((prev) => {
+      const nextSemesterAverages = {
+        ...prev.gradeSummary.semesterAverages,
+        [semester]: {
+          ...prev.gradeSummary.semesterAverages[semester],
+          [field]: sanitized,
+        },
+      }
+      const nextAverage = formatAveragedGrade(
+        semesterKeys.map((semesterKey) => nextSemesterAverages[semesterKey][field])
+      )
+      const nextGradeSummary = {
+        ...prev.gradeSummary,
+        semesterAverages: nextSemesterAverages,
+        overallAverage: field === 'overall' ? nextAverage : prev.gradeSummary.overallAverage,
+        coreAverage: field === 'core' ? nextAverage : prev.gradeSummary.coreAverage,
+      }
+      const nextSemesters = applyClassRanksFromSummary(prev.semesters, nextGradeSummary)
+      return {
+        ...prev,
+        semesters: nextSemesters,
+        gradeSummary: nextGradeSummary,
+      }
+    })
+  }
+
+  const handleQuickAverageChange = (value: string) => {
+    const sanitized = sanitizeGradeNumberInput(value)
+    updateSummaryAverage('overall', sanitized)
+  }
+
+  const handleSemesterModeAverageChange = (semester: SemesterKey, value: string) => {
+    updateSemesterAverage(semester, 'overall', value)
+  }
+
+  const handleSaveAll = useCallback(() => {
+    void saveData(
+      data,
+      `전체 입력 데이터가 저장되었습니다. 채팅창에서 "${NAESIN_CHAT_MENTION_EXAMPLE}"로 바로 활용할 수 있어요.`
+    )
+  }, [data, saveData])
+
   const handleSemesterSave = () => {
-    void saveData(data, `${semesterLabels[selectedSemester]} 성적이 저장되었습니다.`)
+    handleSaveAll()
   }
 
   const handleSemesterCancel = () => {
@@ -1333,7 +1864,7 @@ export default function SchoolGradeInputModal({
   }
 
   const handleExtracurricularSave = () => {
-    void saveData(data, '비교과 데이터가 저장되었습니다.')
+    handleSaveAll()
   }
 
   const handleExtracurricularCancel = () => {
@@ -1417,7 +1948,7 @@ export default function SchoolGradeInputModal({
   )
 
   const handleRecordUploadSave = () => {
-    void saveData(data, '학생부 성적 업로드 정보가 저장되었습니다.')
+    handleSaveAll()
   }
 
   const handleRecordUploadCancel = () => {
@@ -1437,11 +1968,989 @@ export default function SchoolGradeInputModal({
     }))
   }
 
+  const quickAverageValue = data.gradeSummary.overallAverage
+  const hasQuickAverage = parseGradeNumber(quickAverageValue) !== null
+  const hasAnySemesterAverage = semesterKeys.some(
+    (semesterKey) => parseGradeNumber(data.gradeSummary.semesterAverages[semesterKey].overall) !== null
+  )
+
+  const showEstimateToast = useCallback(() => {
+    setIsEstimateToastVisible(true)
+    if (estimateToastTimerRef.current !== null) {
+      window.clearTimeout(estimateToastTimerRef.current)
+    }
+    estimateToastTimerRef.current = window.setTimeout(() => {
+      setIsEstimateToastVisible(false)
+      estimateToastTimerRef.current = null
+    }, 2600)
+  }, [])
+
+  const handleOverallEstimateSubmit = useCallback(() => {
+    if (!hasQuickAverage) {
+      setMessage('평균 등급을 먼저 입력해 주세요.')
+      return
+    }
+
+    void saveData(data, '입력하신 평균으로 학기별 성적을 추산했어요')
+    setIsOverallInputLeaving(true)
+    if (overallTransitionTimerRef.current !== null) {
+      window.clearTimeout(overallTransitionTimerRef.current)
+    }
+    overallTransitionTimerRef.current = window.setTimeout(() => {
+      setIsOverallEstimateSubmitted(true)
+      setIsOverallInputLeaving(false)
+      setHasCalculatedResult(true)
+      setIsInlineDetailVisible(true)
+      showEstimateToast()
+      overallTransitionTimerRef.current = null
+    }, 280)
+  }, [data, hasQuickAverage, saveData, showEstimateToast])
+
+  const handleSemesterEstimateSubmit = useCallback(() => {
+    if (!hasAnySemesterAverage) {
+      setMessage('학기별 평균을 먼저 입력해 주세요.')
+      return
+    }
+
+    void saveData(data, '입력하신 성적으로 과목별 상세 입력까지 이어서 도와드릴게요')
+    setHasCalculatedResult(true)
+    setIsInlineDetailVisible(true)
+  }, [data, hasAnySemesterAverage, saveData])
+
+  const subjectDetailRows = data.semesters[subjectDetailSemester] || [createEmptyRow()]
+  const reportRowsBySemester = useMemo(
+    () =>
+      semesterKeys.reduce<Record<SemesterKey, SemesterRow[]>>((acc, semesterKey) => {
+        acc[semesterKey] = (data.semesters[semesterKey] || []).filter(isMeaningfulSemesterRow)
+        return acc
+      }, {} as Record<SemesterKey, SemesterRow[]>),
+    [data.semesters]
+  )
+  const hasSavedGradeData = hasSavedNaesinData(data)
+
+  useEffect(() => {
+    if (hasSavedGradeData) {
+      setShowSavedGradeLinkHint(false)
+    }
+  }, [hasSavedGradeData])
+
+  useEffect(() => {
+    if (!embedded || !autoOpenSavedGradeReport) return
+
+    if (hasSavedGradeData) {
+      setReportSemester(selectedSemester)
+      setIsGradeReportModalOpen(true)
+      setShowSavedGradeLinkHint(false)
+    } else {
+      setShowSavedGradeLinkHint(true)
+    }
+
+    onAutoOpenSavedGradeReportHandled?.()
+  }, [
+    embedded,
+    autoOpenSavedGradeReport,
+    hasSavedGradeData,
+    selectedSemester,
+    onAutoOpenSavedGradeReportHandled,
+  ])
+
   if (!isOpen && !embedded) return null
 
+  // 임베디드 UI: Toss 스타일 간편 입력 플로우
+  if (embedded) {
+    return (
+      <div
+        className="flex h-full w-full flex-col bg-gray-50"
+        style={{ fontFamily: "'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}
+        onPointerDownCapture={() => {
+          hasUserInteractedRef.current = true
+        }}
+        onKeyDownCapture={() => {
+          hasUserInteractedRef.current = true
+        }}
+      >
+        <div className="mx-auto flex h-full w-full max-w-6xl flex-col px-3 pb-4 pt-4 sm:px-6 lg:px-8 overflow-x-hidden">
+          <div className="flex-shrink-0">
+            <div className="flex items-center justify-between gap-2 rounded-2xl sm:rounded-3xl bg-white px-4 sm:px-5 py-3.5 sm:py-4">
+              <div className="min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!hasSavedGradeData) {
+                      setShowSavedGradeLinkHint(true)
+                      return
+                    }
+                    setShowSavedGradeLinkHint(false)
+                    setReportSemester(selectedSemester)
+                    setIsGradeReportModalOpen(true)
+                  }}
+                  className={`mt-1 inline-flex min-h-[52px] items-center justify-center rounded-2xl px-5 sm:px-6 text-[16px] sm:text-[17px] font-extrabold leading-none transition-all ${
+                    hasSavedGradeData
+                      ? 'bg-[#1f3b61] text-white shadow-sm hover:bg-[#162b49] hover:shadow-md active:scale-[0.99]'
+                      : 'bg-gray-200 text-gray-500'
+                  }`}
+                >
+                  저장된 내 내신 성적 보기
+                </button>
+                <p className="mt-2 text-xs text-gray-500">학기별로 나눠서 성적표를 확인할 수 있어요.</p>
+                {showSavedGradeLinkHint && !hasSavedGradeData && (
+                  <p className="mt-1 text-xs font-semibold text-[#0e6093]">아래에서 연동하세요</p>
+                )}
+              </div>
+              <button
+                onClick={onClose}
+                className="shrink-0 inline-flex h-11 min-h-[44px] items-center justify-center rounded-xl border border-gray-200 bg-white px-4 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-100 active:bg-gray-200 touch-manipulation"
+                aria-label="닫기"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 min-h-0 flex-1">
+            <div className="min-h-0 h-full overflow-y-auto">
+          {message && (
+            <div className="mb-3 rounded-2xl border border-[#0e6093]/20 bg-[#0e6093]/10 px-4 py-3 text-sm font-medium text-[#0e6093]">
+              {message}
+            </div>
+          )}
+
+          <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-[#e9f2ff] via-[#f3efff] to-[#edf5ff] p-6 shadow-sm transition-all hover:shadow-lg sm:p-7">
+            <div className="pointer-events-none absolute -left-10 -top-14 h-40 w-40 rounded-full bg-blue-200/40 blur-3xl" />
+            <div className="pointer-events-none absolute -bottom-14 -right-10 h-44 w-44 rounded-full bg-violet-200/40 blur-3xl" />
+            <div className="relative">
+              <div className="flex flex-wrap gap-2">
+                <span className="inline-flex items-center rounded-full bg-white/80 px-3 py-1 text-xs font-semibold text-[#34507a]">가장 정확한 입력</span>
+              </div>
+              <h3 className="mt-3 text-2xl font-black tracking-tight text-[#1f2937] sm:text-3xl">생기부 연동으로 바로 끝낼까요?</h3>
+              <p className="mt-2 text-sm font-medium text-[#4b5563] sm:text-base">
+                생기부를 연동하면 학기별 성적이 자동으로 채워져요.
+              </p>
+              <div className="mt-5 rounded-2xl bg-white/80 p-4 shadow-sm">
+                <p className="text-sm font-semibold text-[#4b5563]">생기부로 3초안에 연동하기</p>
+                <button
+                  type="button"
+                  onClick={() => void autofillFromLinkedSchoolRecord({ redirectIfNotLinked: true, persistAfterFill: true })}
+                  disabled={isAutofillLoading}
+                  className="mt-3 inline-flex h-16 w-full items-center justify-center rounded-2xl bg-[#1f3b61] px-6 text-lg font-extrabold text-white shadow-sm transition-all hover:scale-[1.01] hover:bg-[#162b49] hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {isAutofillLoading ? '연동 중...' : '생기부 연동하기'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <section className="mt-6 rounded-3xl bg-white p-5 shadow-sm transition-all hover:shadow-lg sm:p-6">
+            <p className="text-2xl font-black tracking-tight text-gray-900 sm:text-3xl">성적을 직접 입력하시겠어요?</p>
+            <p className="mt-2 text-base text-gray-500 sm:text-lg">알고 있는 방식 하나만 선택하면 바로 시작할 수 있어요.</p>
+            <div className="mt-5 grid grid-cols-1 gap-6 md:grid-cols-2">
+              <button
+                type="button"
+                onClick={() => {
+                    setSelectedInputChoice('overall')
+                    setIsOverallEstimateSubmitted(false)
+                    setIsOverallInputLeaving(false)
+                    setHasCalculatedResult(false)
+                    setIsInlineDetailVisible(false)
+                    setIsEstimateToastVisible(false)
+                }}
+                className={`h-44 w-full rounded-3xl border-2 p-4 transition-all hover:scale-[1.01] hover:shadow-lg ${
+                  selectedInputChoice === 'overall'
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-transparent bg-gray-50 hover:bg-gray-100'
+                }`}
+              >
+                <div className="flex h-full flex-col items-center justify-center text-center">
+                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-blue-600 shadow-sm">
+                    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.6} d="M4 19h16M7 15l3-3 2 2 5-5" />
+                    </svg>
+                  </div>
+                  <p className="mt-3 text-2xl font-bold text-gray-900">전체 평균만 알아요</p>
+                  <p className="mt-1 text-sm text-gray-500 sm:text-base">평균 등급 1개만 입력하면 빠르게 계산해드릴게요.</p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                    setSelectedInputChoice('semester')
+                    setIsOverallEstimateSubmitted(false)
+                    setIsOverallInputLeaving(false)
+                    setHasCalculatedResult(false)
+                    setIsInlineDetailVisible(false)
+                    setIsEstimateToastVisible(false)
+                }}
+                className={`h-44 w-full rounded-3xl border-2 p-4 transition-all hover:scale-[1.01] hover:shadow-lg ${
+                  selectedInputChoice === 'semester'
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-transparent bg-gray-50 hover:bg-gray-100'
+                }`}
+              >
+                <div className="flex h-full flex-col items-center justify-center text-center">
+                  <div className="inline-flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-blue-600 shadow-sm">
+                    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.6} d="M5 7h14M5 12h14M5 17h14" />
+                    </svg>
+                  </div>
+                  <p className="mt-3 text-2xl font-bold text-gray-900">학기별 성적을 알아요</p>
+                  <p className="mt-1 text-sm text-gray-500 sm:text-base">6개 학기 평균을 바로 입력해서 더 정확히 볼 수 있어요.</p>
+                </div>
+              </button>
+            </div>
+          </section>
+
+          {selectedInputChoice === 'overall' && (
+            <section
+              className={`mt-10 rounded-3xl bg-white p-5 shadow-sm transition-all duration-300 sm:p-8 ${
+                isChoiceFormVisible ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'
+              }`}
+            >
+              <div className="mx-auto w-full max-w-5xl">
+                <div
+                  className={`transition-all duration-300 ${
+                    isOverallEstimateSubmitted
+                      ? 'pointer-events-none max-h-0 -translate-y-3 overflow-hidden opacity-0'
+                      : isOverallInputLeaving
+                        ? 'pointer-events-none max-h-[420px] -translate-y-2 opacity-0'
+                        : 'max-h-[420px] translate-y-0 opacity-100'
+                  }`}
+                >
+                  <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-10">
+                    <label className="w-full text-center">
+                      <span className="text-sm font-medium text-gray-500">님은 평균 몇 등급인가요?</span>
+                      <input
+                        value={quickAverageValue}
+                        onChange={(e) => handleQuickAverageChange(e.target.value)}
+                        inputMode="decimal"
+                        placeholder="2.3"
+                        className="mt-3 h-24 w-full rounded-3xl border border-gray-200 bg-white px-6 text-center text-5xl font-black tracking-tight text-gray-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 sm:h-28 sm:text-6xl"
+                      />
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={handleOverallEstimateSubmit}
+                      disabled={isSaving}
+                      className="inline-flex h-14 min-w-[260px] items-center justify-center rounded-2xl bg-[#1f3b61] px-8 text-base font-extrabold text-white transition-all hover:scale-[1.01] hover:bg-[#162b49] hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isSaving ? '저장 중...' : '이 성적으로 계산하기'}
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  className={`transition-all duration-500 ${
+                    isOverallEstimateSubmitted
+                      ? 'max-h-[1200px] translate-y-0 opacity-100'
+                      : 'max-h-0 translate-y-4 overflow-hidden opacity-0'
+                  }`}
+                >
+                  <div className="grid gap-4 pt-2 md:grid-cols-2 lg:grid-cols-3">
+                    {semesterKeys.map((semesterKey, index) => {
+                      const semesterValue = data.gradeSummary.semesterAverages[semesterKey].overall
+                      return (
+                        <button
+                          key={`estimated-semester-${semesterKey}`}
+                          type="button"
+                          onClick={() => {
+                            setSubjectDetailSemester(semesterKey)
+                            setSelectedSemester(semesterKey)
+                            setIsInlineDetailVisible(true)
+                          }}
+                          className="rounded-3xl bg-white p-5 text-left shadow-sm transition-all duration-500 hover:scale-[1.01] hover:shadow-lg"
+                          style={{ transitionDelay: `${70 + index * 40}ms` }}
+                        >
+                          <p className="text-xs font-semibold text-gray-500">{semesterLabels[semesterKey]}</p>
+                          <div className="mt-2">
+                            <CountUpGrade
+                              value={semesterValue}
+                              className="text-4xl font-black tracking-tight text-gray-900"
+                            />
+                          </div>
+                          <p className="mt-2 text-xs text-gray-400">[자동 추산됨]</p>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {selectedInputChoice === 'semester' && (
+            <section
+              className={`mt-10 rounded-3xl bg-white p-5 shadow-sm transition-all duration-300 sm:p-8 ${
+                isChoiceFormVisible ? 'translate-y-0 opacity-100' : 'translate-y-2 opacity-0'
+              }`}
+            >
+              <div className="mx-auto flex w-full max-w-5xl flex-col items-center gap-10">
+                <p className="text-sm font-medium text-gray-500">학기별 평균을 알려주시면 바로 반영할게요.</p>
+                <div className="grid w-full gap-4 md:grid-cols-2 lg:grid-cols-3">
+                  {semesterKeys.map((semesterKey) => (
+                    <label key={`semester-input-${semesterKey}`} className="rounded-3xl bg-gray-50 p-4">
+                      <span className="text-xs font-semibold text-gray-500">{semesterLabels[semesterKey]}</span>
+                      <input
+                        value={data.gradeSummary.semesterAverages[semesterKey].overall}
+                        onChange={(e) => handleSemesterModeAverageChange(semesterKey, e.target.value)}
+                        onFocus={() => setSelectedSemester(semesterKey)}
+                        inputMode="decimal"
+                        placeholder="-"
+                        className="mt-3 h-24 w-full rounded-3xl border border-gray-200 bg-white px-5 text-center text-5xl font-black tracking-tight text-gray-900 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
+                      />
+                    </label>
+                  ))}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSemesterEstimateSubmit}
+                  disabled={isSaving}
+                  className="inline-flex h-14 min-w-[260px] items-center justify-center rounded-2xl bg-[#1f3b61] px-8 text-base font-extrabold text-white transition-all hover:scale-[1.01] hover:bg-[#162b49] hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSaving ? '저장 중...' : '이 성적으로 계산하기'}
+                </button>
+              </div>
+            </section>
+          )}
+
+          {isInlineDetailVisible && (
+            <section className="mt-10 rounded-3xl bg-white p-5 shadow-sm sm:p-6">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-lg font-black text-gray-900">과목별 상세 입력</p>
+                  <p className="text-xs text-gray-500">여기서 바로 과목, 출결, 봉사까지 수정할 수 있어요.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsInlineDetailVisible(false)}
+                  className="inline-flex h-10 items-center justify-center rounded-xl bg-gray-100 px-3 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-200"
+                >
+                  접기
+                </button>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 gap-2 md:grid-cols-3">
+                {semesterKeys.map((semesterKey) => (
+                  <button
+                    key={`inline-detail-semester-${semesterKey}`}
+                    type="button"
+                    onClick={() => {
+                      setSubjectDetailSemester(semesterKey)
+                      setSelectedSemester(semesterKey)
+                    }}
+                    className={`h-11 w-full rounded-xl px-3 text-sm font-semibold transition-all hover:scale-[1.01] ${
+                      subjectDetailSemester === semesterKey
+                        ? 'bg-[#1f3b61] text-white'
+                        : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                    }`}
+                  >
+                    {semesterLabels[semesterKey]}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-4 overflow-x-auto">
+                <div className="min-w-[1120px] space-y-2">
+                  <div className="grid grid-cols-[48px_1.2fr_1.2fr_1.4fr_0.7fr_0.8fr_0.8fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 px-2 text-[11px] font-medium text-gray-400">
+                    <span className="text-center">번호</span>
+                    <span>교과구분</span>
+                    <span>교과</span>
+                    <span>과목명</span>
+                    <span>단위수</span>
+                    <span>원점수</span>
+                    <span>성취도</span>
+                    <span>석차등급</span>
+                    <span>과목평균</span>
+                    <span>표준편차</span>
+                    <span>수강자수</span>
+                  </div>
+
+                  {subjectDetailRows.map((row, index) => {
+                    const availableCurriculumOptions = getCurriculumOptions(row.trackType)
+                    const availableSubjectOptions = getSubjectOptions(row.trackType, row.curriculum)
+                    const hasCustomCurriculum = Boolean(row.curriculum) && !availableCurriculumOptions.includes(row.curriculum)
+                    const hasCustomSubject = Boolean(row.subject) && !availableSubjectOptions.includes(row.subject)
+                    const curriculumOptionsForRow = hasCustomCurriculum
+                      ? [row.curriculum, ...availableCurriculumOptions]
+                      : availableCurriculumOptions
+                    const subjectOptionsForRow = hasCustomSubject
+                      ? [row.subject, ...availableSubjectOptions]
+                      : availableSubjectOptions
+                    const cellClassName =
+                      'h-11 w-full rounded-xl border border-transparent bg-white px-2.5 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#1f3b61]/40 focus:ring-2 focus:ring-[#1f3b61]/20'
+                    return (
+                      <div
+                        key={`inline-detail-row-${row.id}`}
+                        className="grid grid-cols-[48px_1.2fr_1.2fr_1.4fr_0.7fr_0.8fr_0.8fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 rounded-2xl bg-[#f5f7fb] p-2"
+                      >
+                        <div className="flex items-center justify-center text-sm font-bold text-gray-500">{index + 1}</div>
+                        <select
+                          value={row.trackType}
+                          onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'trackType', e.target.value)}
+                          className={cellClassName}
+                        >
+                          {trackTypeOptions.map((opt) => (
+                            <option key={`${row.id}-inline-track-${opt}`} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={row.curriculum}
+                          onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'curriculum', e.target.value)}
+                          className={cellClassName}
+                        >
+                          {curriculumOptionsForRow.map((opt) => (
+                            <option key={`${row.id}-inline-curriculum-${opt}`} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                        <select
+                          value={row.subject}
+                          onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'subject', e.target.value)}
+                          className={cellClassName}
+                        >
+                          <option value="">과목 선택</option>
+                          {subjectOptionsForRow.map((opt) => (
+                            <option key={`${row.id}-inline-subject-${opt}`} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                        <input
+                          value={row.credits}
+                          onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'credits', e.target.value)}
+                          inputMode="numeric"
+                          className={cellClassName}
+                        />
+                        <input
+                          value={row.rawScore}
+                          onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'rawScore', e.target.value)}
+                          inputMode="numeric"
+                          className={cellClassName}
+                        />
+                        <select
+                          value={row.achievement}
+                          onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'achievement', e.target.value)}
+                          className={cellClassName}
+                        >
+                          {achievementOptions.map((opt) => (
+                            <option key={`${row.id}-inline-achievement-${opt}`} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                        <input
+                          value={row.classRank}
+                          onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'classRank', e.target.value)}
+                          inputMode="numeric"
+                          className={cellClassName}
+                        />
+                        <input
+                          value={row.avgScore}
+                          onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'avgScore', e.target.value)}
+                          inputMode="numeric"
+                          className={cellClassName}
+                        />
+                        <input
+                          value={row.stdDev}
+                          onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'stdDev', e.target.value)}
+                          inputMode="numeric"
+                          className={cellClassName}
+                        />
+                        <input
+                          value={row.studentCount}
+                          onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'studentCount', e.target.value)}
+                          inputMode="numeric"
+                          className={cellClassName}
+                        />
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <div className="rounded-2xl bg-gray-50 p-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-bold text-gray-900">출결</p>
+                    <p className="text-xs font-semibold text-gray-500">총 {attendanceGrandTotal}일</p>
+                  </div>
+                  <div className="mt-3 grid grid-cols-5 gap-2 text-[11px] text-gray-400">
+                    <span>학년</span>
+                    <span>결석</span>
+                    <span>지각</span>
+                    <span>조퇴</span>
+                    <span>결과</span>
+                  </div>
+                  <div className="mt-2 space-y-2">
+                    {gradeKeys.map((grade) => (
+                      <div key={`inline-attendance-${grade}`} className="grid grid-cols-5 gap-2 rounded-xl bg-white p-2">
+                        <div className="flex items-center text-sm font-semibold text-gray-700">{grade}학년</div>
+                        <input value={data.extracurricular.attendance[grade].absence} onChange={(e) => updateAttendanceField(grade, 'absence', e.target.value)} inputMode="numeric" className="h-10 rounded-xl border border-gray-100 px-2 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#1f3b61]/40 focus:ring-2 focus:ring-[#1f3b61]/20" />
+                        <input value={data.extracurricular.attendance[grade].tardy} onChange={(e) => updateAttendanceField(grade, 'tardy', e.target.value)} inputMode="numeric" className="h-10 rounded-xl border border-gray-100 px-2 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#1f3b61]/40 focus:ring-2 focus:ring-[#1f3b61]/20" />
+                        <input value={data.extracurricular.attendance[grade].earlyLeave} onChange={(e) => updateAttendanceField(grade, 'earlyLeave', e.target.value)} inputMode="numeric" className="h-10 rounded-xl border border-gray-100 px-2 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#1f3b61]/40 focus:ring-2 focus:ring-[#1f3b61]/20" />
+                        <input value={data.extracurricular.attendance[grade].result} onChange={(e) => updateAttendanceField(grade, 'result', e.target.value)} inputMode="numeric" className="h-10 rounded-xl border border-gray-100 px-2 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#1f3b61]/40 focus:ring-2 focus:ring-[#1f3b61]/20" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-gray-50 p-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-bold text-gray-900">봉사</p>
+                    <p className="text-xs font-semibold text-gray-500">총 {volunteerTotal}시간</p>
+                  </div>
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-gray-400">
+                    <span>학년</span>
+                    <span>시간</span>
+                  </div>
+                  <div className="mt-2 space-y-2">
+                    {gradeKeys.map((grade) => (
+                      <div key={`inline-volunteer-${grade}`} className="grid grid-cols-2 gap-2 rounded-xl bg-white p-2">
+                        <div className="flex items-center text-sm font-semibold text-gray-700">{grade}학년</div>
+                        <input value={data.extracurricular.volunteerHours[grade]} onChange={(e) => updateVolunteerHours(grade, e.target.value)} inputMode="numeric" className="h-10 rounded-xl border border-gray-100 px-2 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#1f3b61]/40 focus:ring-2 focus:ring-[#1f3b61]/20" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => addSemesterRow(subjectDetailSemester, 1)}
+                  className="inline-flex h-11 items-center justify-center rounded-xl border border-gray-200 bg-white px-4 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  + 과목 한 줄 더 추가
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveAll}
+                  disabled={isSaving}
+                  className="inline-flex h-12 min-w-[220px] items-center justify-center rounded-xl bg-[#1f3b61] px-6 text-base font-extrabold text-white transition-colors hover:bg-[#162b49] disabled:opacity-60"
+                >
+                  {isSaving ? '저장 중...' : '상세 입력 저장하기'}
+                </button>
+              </div>
+            </section>
+          )}
+
+          <div
+            className={`fixed bottom-5 left-1/2 z-[92] w-[calc(100%-24px)] max-w-xl -translate-x-1/2 transition-all duration-300 ${
+              isEstimateToastVisible
+                ? 'translate-y-0 opacity-100'
+                : 'pointer-events-none translate-y-3 opacity-0'
+            }`}
+          >
+            <div className="rounded-2xl border border-gray-200 bg-white/95 p-3 shadow-lg backdrop-blur">
+              <p className="text-xs font-semibold text-gray-700">내신 성적이 반영되었어요</p>
+              <p className="mt-0.5 text-[11px] text-gray-500">입력하신 평균으로 학기별 성적을 추산했어요</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsEstimateToastVisible(false)
+                  onUseNaesinSuggestion?.(NAESIN_SCHOOL_RECOMMEND_MENTION)
+                }}
+                className="mt-2 inline-flex h-9 items-center justify-center rounded-xl bg-[#1f3b61] px-3 text-xs font-bold text-white transition-colors hover:bg-[#162b49]"
+              >
+                @내신 성적 학교 추천
+              </button>
+            </div>
+          </div>
+            </div>
+          </div>
+
+        {isGradeReportModalOpen && (
+          <div className="fixed inset-0 z-[94]">
+            <div
+              className="absolute inset-0 bg-black/45 backdrop-blur-[2px]"
+              onClick={() => setIsGradeReportModalOpen(false)}
+              aria-hidden
+            />
+            <div className="relative mx-auto flex h-full w-full max-w-4xl flex-col bg-gray-50">
+              <div className="border-b border-gray-200 bg-white px-4 py-4 sm:px-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-lg font-black text-gray-900 sm:text-xl">나의 성적표</p>
+                    <p className="text-xs text-gray-500">입력한 과목을 학기별 카드로 한눈에 볼 수 있어요.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsGradeReportModalOpen(false)}
+                    className="inline-flex h-11 min-h-[44px] items-center justify-center rounded-xl border border-gray-200 bg-white px-4 text-sm font-bold text-gray-700 transition hover:bg-gray-100"
+                    aria-label="닫기"
+                  >
+                    닫기
+                  </button>
+                </div>
+
+                <div className="mt-3 rounded-3xl bg-gray-50 px-4 py-3">
+                  <p className="text-[11px] font-medium text-gray-500">전체 평균 등급</p>
+                  <CountUpGrade
+                    value={data.gradeSummary.overallAverage}
+                    className="mt-1 text-4xl font-black tracking-tight text-gray-900 sm:text-5xl"
+                  />
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
+                <div className="mb-4 flex flex-wrap gap-2">
+                  {semesterKeys.map((semesterKey) => (
+                    <button
+                      key={`report-tab-${semesterKey}`}
+                      type="button"
+                      onClick={() => setReportSemester(semesterKey)}
+                      className={`h-10 rounded-xl px-3 text-sm font-semibold transition-colors ${
+                        reportSemester === semesterKey
+                          ? 'bg-[#1f3b61] text-white'
+                          : 'bg-white text-gray-600 hover:bg-gray-100'
+                      }`}
+                    >
+                      {semesterLabels[semesterKey]}
+                    </button>
+                  ))}
+                </div>
+
+                {(() => {
+                  const rows = reportRowsBySemester[reportSemester] || []
+                  const semesterAverage = data.gradeSummary.semesterAverages[reportSemester].overall
+                  return (
+                    <section className="rounded-3xl bg-white p-4 shadow-sm sm:p-5">
+                      <div className="flex items-end justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-gray-900">{semesterLabels[reportSemester]}</p>
+                          <p className="text-xs text-gray-400">입력된 과목 {rows.length}개</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[11px] font-medium text-gray-500">학기 평균</p>
+                          <CountUpGrade
+                            value={semesterAverage}
+                            className="text-2xl font-black tracking-tight text-gray-900"
+                          />
+                        </div>
+                      </div>
+
+                      {rows.length === 0 ? (
+                        <div className="mt-3 rounded-2xl bg-gray-50 px-4 py-3 text-xs text-gray-500">
+                          이 학기는 아직 입력한 과목이 없어요.
+                        </div>
+                      ) : (
+                        <div className="mt-3 space-y-2">
+                          {rows.map((row, index) => (
+                            <article key={`report-row-${reportSemester}-${row.id}`} className="rounded-2xl bg-gray-50 p-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <p className="text-sm font-bold text-gray-900">{row.subject.trim() || `과목 ${index + 1}`}</p>
+                                  <p className="text-xs text-gray-400">{row.curriculum || '교과 미설정'} · {row.trackType}</p>
+                                </div>
+                                <span className="text-[11px] font-medium text-gray-400">
+                                  {row.achievement && row.achievement !== '선택' ? `성취도 ${row.achievement}` : '성취도 -'}
+                                </span>
+                              </div>
+
+                              <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-6">
+                                <div className="rounded-xl bg-white px-2.5 py-2">
+                                  <p className="text-[10px] text-gray-400">단위수</p>
+                                  <p className="text-sm font-black text-gray-900">{row.credits || '-'}</p>
+                                </div>
+                                <div className="rounded-xl bg-white px-2.5 py-2">
+                                  <p className="text-[10px] text-gray-400">석차등급</p>
+                                  <p className="text-sm font-black text-gray-900">{row.classRank || '-'}</p>
+                                </div>
+                                <div className="rounded-xl bg-white px-2.5 py-2">
+                                  <p className="text-[10px] text-gray-400">원점수</p>
+                                  <p className="text-sm font-black text-gray-900">{row.rawScore || '-'}</p>
+                                </div>
+                                <div className="rounded-xl bg-white px-2.5 py-2">
+                                  <p className="text-[10px] text-gray-400">과목평균</p>
+                                  <p className="text-sm font-black text-gray-900">{row.avgScore || '-'}</p>
+                                </div>
+                                <div className="rounded-xl bg-white px-2.5 py-2">
+                                  <p className="text-[10px] text-gray-400">표준편차</p>
+                                  <p className="text-sm font-black text-gray-900">{row.stdDev || '-'}</p>
+                                </div>
+                                <div className="rounded-xl bg-white px-2.5 py-2">
+                                  <p className="text-[10px] text-gray-400">수강자수</p>
+                                  <p className="text-sm font-black text-gray-900">{row.studentCount || '-'}</p>
+                                </div>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  )
+                })()}
+              </div>
+
+              <div className="border-t border-gray-200 bg-white px-4 py-4 sm:px-6">
+                <button
+                  type="button"
+                  onClick={() => setIsGradeReportModalOpen(false)}
+                  className="inline-flex h-12 w-full items-center justify-center rounded-2xl bg-[#1f3b61] px-6 text-base font-bold text-white transition-colors hover:bg-[#162b49]"
+                >
+                  닫기
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isSubjectDetailModalOpen && (
+          <div className="fixed inset-0 z-[95]">
+            <div
+              className="absolute inset-0 bg-black/55 backdrop-blur-[2px]"
+              onClick={() => setIsSubjectDetailModalOpen(false)}
+              aria-hidden
+            />
+            <div className="relative h-full w-full bg-gray-50">
+              <div className="flex h-full flex-col">
+                <div className="border-b border-gray-200 bg-white px-4 py-4 sm:px-6">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-lg font-black text-gray-900">{semesterLabels[subjectDetailSemester]} 성적을 입력해주세요</p>
+                      <p className="text-xs text-gray-500">숫자를 바꾸면 평균이 바로 업데이트돼요.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsSubjectDetailModalOpen(false)}
+                      className="flex h-10 w-10 items-center justify-center rounded-xl text-gray-500 transition hover:bg-gray-100 hover:text-gray-700"
+                      aria-label="닫기"
+                    >
+                      <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    <div className="rounded-xl bg-gray-50 px-3 py-2">
+                      <p className="text-[11px] font-medium text-gray-500">전체 평균</p>
+                      <CountUpGrade
+                        value={data.gradeSummary.overallAverage}
+                        className="mt-1 text-2xl font-black tracking-tight text-gray-900"
+                      />
+                    </div>
+                    <div className="rounded-xl bg-gray-50 px-3 py-2">
+                      <p className="text-[11px] font-medium text-gray-500">{semesterLabels[subjectDetailSemester]} 평균</p>
+                      <CountUpGrade
+                        value={data.gradeSummary.semesterAverages[subjectDetailSemester].overall}
+                        className="mt-1 text-2xl font-black tracking-tight text-gray-900"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-auto px-4 py-4 sm:px-6">
+                  <div className="flex flex-wrap gap-2">
+                    {semesterKeys.map((semesterKey) => (
+                      <button
+                        key={`detail-semester-${semesterKey}`}
+                        type="button"
+                        onClick={() => {
+                          setSubjectDetailSemester(semesterKey)
+                          setSelectedSemester(semesterKey)
+                        }}
+                        className={`h-10 rounded-xl px-3 text-sm font-semibold transition-colors ${
+                          subjectDetailSemester === semesterKey
+                            ? 'bg-[#1f3b61] text-white'
+                            : 'bg-white text-gray-600 hover:bg-gray-100'
+                        }`}
+                      >
+                        {semesterLabels[semesterKey]}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 space-y-2">
+                    <div className="grid grid-cols-[48px_1.2fr_1.2fr_1.4fr_0.7fr_0.8fr_0.8fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 px-2 text-[11px] font-medium text-gray-400">
+                      <span className="text-center">번호</span>
+                      <span>교과구분</span>
+                      <span>교과</span>
+                      <span>과목명</span>
+                      <span>단위수</span>
+                      <span>원점수</span>
+                      <span>성취도</span>
+                      <span>석차등급</span>
+                      <span>과목평균</span>
+                      <span>표준편차</span>
+                      <span>수강자수</span>
+                    </div>
+
+                    {subjectDetailRows.map((row, index) => {
+                      const availableCurriculumOptions = getCurriculumOptions(row.trackType)
+                      const availableSubjectOptions = getSubjectOptions(row.trackType, row.curriculum)
+                      const hasCustomCurriculum = Boolean(row.curriculum) && !availableCurriculumOptions.includes(row.curriculum)
+                      const hasCustomSubject = Boolean(row.subject) && !availableSubjectOptions.includes(row.subject)
+                      const curriculumOptionsForRow = hasCustomCurriculum
+                        ? [row.curriculum, ...availableCurriculumOptions]
+                        : availableCurriculumOptions
+                      const subjectOptionsForRow = hasCustomSubject
+                        ? [row.subject, ...availableSubjectOptions]
+                        : availableSubjectOptions
+                      const cellClassName =
+                        'h-11 w-full rounded-xl border border-transparent bg-white px-2.5 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#1f3b61]/40 focus:ring-2 focus:ring-[#1f3b61]/20'
+                      return (
+                        <div
+                          key={`detail-row-${row.id}`}
+                          className="grid grid-cols-[48px_1.2fr_1.2fr_1.4fr_0.7fr_0.8fr_0.8fr_0.7fr_0.8fr_0.8fr_0.8fr] gap-2 rounded-2xl bg-[#f5f7fb] p-2"
+                        >
+                          <div className="flex items-center justify-center text-sm font-bold text-gray-500">{index + 1}</div>
+                          <select
+                            value={row.trackType}
+                            onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'trackType', e.target.value)}
+                            className={cellClassName}
+                          >
+                            {trackTypeOptions.map((opt) => (
+                              <option key={`${row.id}-track-${opt}`} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          <select
+                            value={row.curriculum}
+                            onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'curriculum', e.target.value)}
+                            className={cellClassName}
+                          >
+                            {curriculumOptionsForRow.map((opt) => (
+                              <option key={`${row.id}-curriculum-${opt}`} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          <select
+                            value={row.subject}
+                            onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'subject', e.target.value)}
+                            className={cellClassName}
+                          >
+                            <option value="">과목 선택</option>
+                            {subjectOptionsForRow.map((opt) => (
+                              <option key={`${row.id}-subject-${opt}`} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          <input
+                            value={row.credits}
+                            onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'credits', e.target.value)}
+                            inputMode="numeric"
+                            className={cellClassName}
+                          />
+                          <input
+                            value={row.rawScore}
+                            onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'rawScore', e.target.value)}
+                            inputMode="numeric"
+                            className={cellClassName}
+                          />
+                          <select
+                            value={row.achievement}
+                            onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'achievement', e.target.value)}
+                            className={cellClassName}
+                          >
+                            {achievementOptions.map((opt) => (
+                              <option key={`${row.id}-achievement-${opt}`} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          <input
+                            value={row.classRank}
+                            onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'classRank', e.target.value)}
+                            inputMode="numeric"
+                            className={cellClassName}
+                          />
+                          <input
+                            value={row.avgScore}
+                            onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'avgScore', e.target.value)}
+                            inputMode="numeric"
+                            className={cellClassName}
+                          />
+                          <input
+                            value={row.stdDev}
+                            onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'stdDev', e.target.value)}
+                            inputMode="numeric"
+                            className={cellClassName}
+                          />
+                          <input
+                            value={row.studentCount}
+                            onChange={(e) => updateSemesterRow(subjectDetailSemester, row.id, 'studentCount', e.target.value)}
+                            inputMode="numeric"
+                            className={cellClassName}
+                          />
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                    <div className="rounded-2xl bg-white p-4">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-bold text-gray-900">출결도 같이 입력할까요?</p>
+                        <p className="text-xs font-semibold text-gray-500">총 {attendanceGrandTotal}일</p>
+                      </div>
+                      <div className="mt-3 grid grid-cols-5 gap-2 text-[11px] text-gray-400">
+                        <span>학년</span>
+                        <span>결석</span>
+                        <span>지각</span>
+                        <span>조퇴</span>
+                        <span>결과</span>
+                      </div>
+                      <div className="mt-2 space-y-2">
+                        {gradeKeys.map((grade) => (
+                          <div key={`detail-attendance-${grade}`} className="grid grid-cols-5 gap-2 rounded-xl bg-[#f5f7fb] p-2">
+                            <div className="flex items-center text-sm font-semibold text-gray-700">{grade}학년</div>
+                            <input value={data.extracurricular.attendance[grade].absence} onChange={(e) => updateAttendanceField(grade, 'absence', e.target.value)} inputMode="numeric" className="h-11 rounded-xl border border-transparent bg-white px-2.5 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#1f3b61]/40 focus:ring-2 focus:ring-[#1f3b61]/20" />
+                            <input value={data.extracurricular.attendance[grade].tardy} onChange={(e) => updateAttendanceField(grade, 'tardy', e.target.value)} inputMode="numeric" className="h-11 rounded-xl border border-transparent bg-white px-2.5 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#1f3b61]/40 focus:ring-2 focus:ring-[#1f3b61]/20" />
+                            <input value={data.extracurricular.attendance[grade].earlyLeave} onChange={(e) => updateAttendanceField(grade, 'earlyLeave', e.target.value)} inputMode="numeric" className="h-11 rounded-xl border border-transparent bg-white px-2.5 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#1f3b61]/40 focus:ring-2 focus:ring-[#1f3b61]/20" />
+                            <input value={data.extracurricular.attendance[grade].result} onChange={(e) => updateAttendanceField(grade, 'result', e.target.value)} inputMode="numeric" className="h-11 rounded-xl border border-transparent bg-white px-2.5 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#1f3b61]/40 focus:ring-2 focus:ring-[#1f3b61]/20" />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl bg-white p-4">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-bold text-gray-900">봉사 시간도 같이 적어둘까요?</p>
+                        <p className="text-xs font-semibold text-gray-500">총 {volunteerTotal}시간</p>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-gray-400">
+                        <span>학년</span>
+                        <span>시간</span>
+                      </div>
+                      <div className="mt-2 space-y-2">
+                        {gradeKeys.map((grade) => (
+                          <div key={`detail-volunteer-${grade}`} className="grid grid-cols-2 gap-2 rounded-xl bg-[#f5f7fb] p-2">
+                            <div className="flex items-center text-sm font-semibold text-gray-700">{grade}학년</div>
+                            <input value={data.extracurricular.volunteerHours[grade]} onChange={(e) => updateVolunteerHours(grade, e.target.value)} inputMode="numeric" className="h-11 rounded-xl border border-transparent bg-white px-2.5 text-sm font-semibold text-gray-900 outline-none transition focus:border-[#1f3b61]/40 focus:ring-2 focus:ring-[#1f3b61]/20" />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-gray-200 bg-white px-4 py-4 sm:px-6">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => addSemesterRow(subjectDetailSemester, 1)}
+                      className="inline-flex h-11 items-center justify-center rounded-xl border border-gray-200 bg-white px-4 text-sm font-bold text-gray-700 transition-colors hover:bg-gray-50"
+                    >
+                      + 과목 한 줄 더 추가
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleSaveAll()
+                        setIsSubjectDetailModalOpen(false)
+                      }}
+                      disabled={isSaving}
+                      className="inline-flex h-12 min-w-[220px] items-center justify-center rounded-xl bg-[#1f3b61] px-6 text-base font-extrabold text-white transition-colors hover:bg-[#162b49] disabled:opacity-60"
+                    >
+                      {isSaving ? '저장 중...' : '저장하고 닫기'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+      </div>
+    </div>
+    )
+  }
+
+  // 모달 모드 (기존 UI 유지)
   return (
-    <div className={embedded ? 'w-full h-full overflow-y-auto px-4 py-4 sm:px-6 sm:py-6' : 'fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4'}>
-      <div className={embedded ? 'mx-auto w-full max-w-[1240px] max-h-[calc(100vh-3rem)] overflow-y-auto rounded-3xl border border-gray-300 bg-[#f7f8fa] shadow-sm' : 'w-full max-w-[1240px] max-h-[92vh] overflow-y-auto rounded-3xl border border-gray-300 bg-[#f7f8fa] shadow-2xl'}>
+    <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4'>
+      <div className='w-full max-w-[1240px] max-h-[92vh] overflow-y-auto rounded-3xl border border-gray-300 bg-[#f7f8fa] shadow-2xl'>
         <div className="sticky top-0 z-10 border-b border-gray-300 bg-[#f7f8fa] px-6 py-4">
           <div className="flex items-center justify-between">
             <h2 className="text-2xl font-bold text-gray-900 md:text-3xl">{step === 'menu' ? '성적입력' : '학생부 성적입력'}</h2>
@@ -1771,7 +3280,7 @@ export default function SchoolGradeInputModal({
                   disabled={isSaving}
                   className="h-12 min-w-[200px] rounded-2xl bg-[#0e8098] px-6 text-xl font-bold text-white hover:bg-[#0d7288] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isSaving ? '저장 중...' : '저장'}
+                  {isSaving ? '저장 중...' : '전체 저장'}
                 </button>
               </div>
             </div>
@@ -1906,7 +3415,7 @@ export default function SchoolGradeInputModal({
                   disabled={isSaving}
                   className="h-12 min-w-[200px] rounded-2xl bg-[#0e8098] px-6 text-xl font-bold text-white hover:bg-[#0d7288] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isSaving ? '저장 중...' : '저장'}
+                  {isSaving ? '저장 중...' : '전체 저장'}
                 </button>
               </div>
             </div>
@@ -1950,7 +3459,7 @@ export default function SchoolGradeInputModal({
                   disabled={isSaving}
                   className="h-12 min-w-[200px] rounded-2xl bg-[#0e8098] px-6 text-xl font-bold text-white hover:bg-[#0d7288] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isSaving ? '저장 중...' : '저장'}
+                  {isSaving ? '저장 중...' : '전체 저장'}
                 </button>
               </div>
             </div>

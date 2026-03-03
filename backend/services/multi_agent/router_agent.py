@@ -535,7 +535,35 @@ async def route_query(message: str, history: List[Dict] = None, user_id: str = N
         if call.get("function") == "consult_jungsi":
             params = call.setdefault("params", {})
             params.pop("j_scores", None)
+    if user_id:
+        await _fill_s_scores_from_naesin_profile(result, user_id)
     return result
+
+
+async def _fill_s_scores_from_naesin_profile(result: Dict[str, Any], user_id: str) -> None:
+    """
+    consult_susi 호출에 s_scores가 비어 있으면 프로필 metadata의 school_grade_input(연동 내신)으로 채우기.
+    내신 카드 확인 후 답변 시 해당 성적을 기준으로 수시 분석이 되도록 함.
+    """
+    function_calls = result.get("function_calls", [])
+    for call in function_calls:
+        if call.get("function") != "consult_susi":
+            continue
+        params = call.setdefault("params", {})
+        s_scores = params.get("s_scores")
+        if s_scores is not None and (isinstance(s_scores, list) and len(s_scores) > 0 or (not isinstance(s_scores, list) and s_scores)):
+            continue
+        try:
+            from services.supabase_client import supabase_service
+            meta = await supabase_service.get_user_profile_metadata(user_id)
+            sgi = (meta or {}).get("school_grade_input") or {}
+            gs = sgi.get("gradeSummary") or {}
+            ov = gs.get("overallAverage") or gs.get("coreAverage")
+            if ov is not None and str(ov).strip() != "":
+                params["s_scores"] = [str(ov).strip()]
+                print(f"✅ 연동 내신으로 s_scores 보완: {params['s_scores']}")
+        except Exception as e:
+            print(f"⚠️ 연동 내신(s_scores) 보완 실패: {e}")
 
 
 async def _fill_scores_from_profile(result: Dict[str, Any], user_id: str) -> None:
