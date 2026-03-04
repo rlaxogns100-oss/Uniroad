@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react'
 import { trackGA4SignUp, trackGA4Login, trackUserAction, trackMetaSignUp } from '../utils/tracking'
 import { api, migrateMessages } from '../api/client'
 import { isCapacitorApp } from '../config'
+import { supabase } from '../lib/supabase'
 
 interface User {
   id: string
@@ -37,12 +38,114 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // OAuth 콜백 처리 (URL query에서 code 추출)
       const urlParams = new URLSearchParams(window.location.search)
       const code = urlParams.get('code')
+      const hashRaw = window.location.hash?.startsWith('#') ? window.location.hash.slice(1) : ''
+      const hashParams = new URLSearchParams(hashRaw)
+      const hashAccessToken = hashParams.get('access_token')
+      const hashRefreshToken = hashParams.get('refresh_token')
+
+      // Implicit flow: #access_token=... 형태 처리
+      if (hashAccessToken) {
+        try {
+          localStorage.setItem('access_token', hashAccessToken)
+          // 먼저 인증 상태를 반영해 콜백 직후 비로그인 UI가 잠깐 보이는 현상을 줄인다.
+          setAccessToken(hashAccessToken)
+          if (hashRefreshToken) {
+            localStorage.setItem('refresh_token', hashRefreshToken)
+          }
+
+          const meResponse = await api.get('/auth/me', {
+            headers: { Authorization: `Bearer ${hashAccessToken}` }
+          })
+          const verifiedUser = meResponse.data as User & { created_at?: string }
+
+          setAccessToken(hashAccessToken)
+          setUser(verifiedUser)
+          localStorage.setItem('user', JSON.stringify(verifiedUser))
+          setLoading(false)
+
+          const provider = (sessionStorage.getItem('uniroad_oauth_provider') || 'google') as 'google' | 'kakao'
+          const signupSource = sessionStorage.getItem('uniroad_oauth_signup_source') || 'unknown'
+          const createdAt = verifiedUser?.created_at
+          const isNewUser = createdAt
+            ? (Date.now() - new Date(createdAt).getTime()) / 1000 < 90
+            : false
+
+          if (isNewUser) {
+            trackGA4SignUp(provider)
+            trackMetaSignUp(provider)
+            trackUserAction('signup_success', provider, {
+              customData: { signup_source: signupSource }
+            })
+          } else {
+            trackGA4Login(provider)
+            trackUserAction('login_success', provider, {
+              customData: { signup_source: signupSource }
+            })
+          }
+          sessionStorage.removeItem('uniroad_oauth_provider')
+          sessionStorage.removeItem('uniroad_oauth_signup_source')
+
+          const pendingMigration = sessionStorage.getItem('uniroad_pending_migration')
+          if (pendingMigration) {
+            try {
+              const { messages, sessionId } = JSON.parse(pendingMigration)
+              if (messages && messages.length > 0) {
+                const result = await migrateMessages(hashAccessToken, messages, sessionId)
+                sessionStorage.setItem('uniroad_migrated_session_id', result.session_id)
+              }
+            } catch (migrationError) {
+              console.error('❌ OAuth 채팅 마이그레이션 실패:', migrationError)
+            } finally {
+              sessionStorage.removeItem('uniroad_pending_migration')
+            }
+          }
+
+          // URL에서 토큰 파라미터 제거
+          window.history.replaceState(null, '', window.location.pathname)
+
+          const isAdmin = verifiedUser?.name === '김도균' || verifiedUser?.email === 'herry0515@naver.com'
+          window.location.href = isAdmin ? '/chat/login/admin' : '/chat/login'
+          return
+        } catch (error) {
+          console.error('OAuth hash 토큰 처리 실패:', error)
+          window.history.replaceState(null, '', window.location.pathname)
+        }
+      }
 
       if (code) {
         console.log('OAuth code found, exchanging for token...')
+        if (!supabase) {
+          console.error('Supabase client not configured')
+          window.history.replaceState(null, '', window.location.pathname)
+          return
+        }
         try {
-          const response = await api.post('/auth/oauth/callback', { code })
-          const { access_token, refresh_token, user: userData, is_new_user } = response.data
+          const { data, error } = await supabase.auth.exchangeCodeForSession(code)
+          if (error) {
+            console.error('OAuth exchange error:', error)
+            window.history.replaceState(null, '', window.location.pathname)
+            return
+          }
+          const session = data.session
+          const authUser = data.user
+          if (!session || !authUser) {
+            window.history.replaceState(null, '', window.location.pathname)
+            return
+          }
+
+          const access_token = session.access_token
+          const refresh_token = session.refresh_token ?? ''
+          const userData: User = {
+            id: authUser.id,
+            email: authUser.email ?? '',
+            name: authUser.user_metadata?.name ?? authUser.user_metadata?.full_name ?? (authUser.email?.split('@')[0] ?? ''),
+            avatar_url: authUser.user_metadata?.avatar_url,
+          }
+
+          const createdAt = authUser.created_at
+          const is_new_user = createdAt
+            ? (Date.now() - new Date(createdAt).getTime()) / 1000 < 90
+            : false
 
           localStorage.setItem('access_token', access_token)
           if (refresh_token) {
@@ -80,7 +183,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 console.log('🔄 OAuth 로그인 후 채팅 마이그레이션 시작:', messages.length, '개 메시지')
                 const result = await migrateMessages(access_token, messages, sessionId)
                 console.log('✅ OAuth 채팅 마이그레이션 완료, session_id:', result.session_id)
-                // 마이그레이션된 세션 ID 저장 (ChatPage에서 자동 선택용)
                 sessionStorage.setItem('uniroad_migrated_session_id', result.session_id)
               }
             } catch (migrationError) {
@@ -90,7 +192,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
           }
 
-          // OAuth 로그인 성공 시: 관리자(김도균)는 /chat/login/admin, 그 외는 /chat/login
           const isAdmin = userData?.name === '김도균' || userData?.email === 'herry0515@naver.com'
           console.log('✅ OAuth 로그인 성공:', userData, '관리자:', isAdmin)
           window.location.href = isAdmin ? '/chat/login/admin' : '/chat/login'
@@ -202,55 +303,72 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const signInWithGoogle = async () => {
+    if (!supabase) {
+      throw new Error('Supabase가 설정되지 않았습니다.')
+    }
     try {
       sessionStorage.setItem('uniroad_oauth_provider', 'google')
-      // 앱(Capacitor)에서는 Google/Kakao가 capacitor:// 리다이렉트를 허용하지 않으므로 웹 URL로 콜백 받은 뒤 앱 딥링크로 복귀
       const redirectTo = isCapacitorApp()
         ? 'https://uni2road.com/oauth-callback'
-        : `${window.location.origin}/chat`
-      const response = await api.post('/auth/oauth/url', {
+        : `${window.location.origin}/chat/login`
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
-        redirect_to: redirectTo
+        options: { redirectTo },
       })
-      if (isCapacitorApp()) {
-        try {
-          const { Browser } = await import('@capacitor/browser')
-          await Browser.open({ url: response.data.url })
-        } catch {
-          window.location.href = response.data.url
+      if (error) {
+        sessionStorage.removeItem('uniroad_oauth_provider')
+        throw new Error(error.message || 'Google 로그인 실패')
+      }
+      if (data?.url) {
+        if (isCapacitorApp()) {
+          try {
+            const { Browser } = await import('@capacitor/browser')
+            await Browser.open({ url: data.url })
+          } catch {
+            window.location.href = data.url
+          }
+        } else {
+          window.location.href = data.url
         }
-      } else {
-        window.location.href = response.data.url
       }
     } catch (error: any) {
       sessionStorage.removeItem('uniroad_oauth_provider')
-      throw new Error(error.response?.data?.detail || 'Google 로그인 실패')
+      throw new Error(error?.message || 'Google 로그인 실패')
     }
   }
 
   const signInWithKakao = async () => {
+    if (!supabase) {
+      throw new Error('Supabase가 설정되지 않았습니다.')
+    }
     try {
       sessionStorage.setItem('uniroad_oauth_provider', 'kakao')
       const redirectTo = isCapacitorApp()
         ? 'https://uni2road.com/oauth-callback'
-        : `${window.location.origin}/chat`
-      const response = await api.post('/auth/oauth/url', {
+        : `${window.location.origin}/chat/login`
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'kakao',
-        redirect_to: redirectTo
+        options: { redirectTo },
       })
-      if (isCapacitorApp()) {
-        try {
-          const { Browser } = await import('@capacitor/browser')
-          await Browser.open({ url: response.data.url })
-        } catch {
-          window.location.href = response.data.url
+      if (error) {
+        sessionStorage.removeItem('uniroad_oauth_provider')
+        throw new Error(error.message || '카카오 로그인 실패')
+      }
+      if (data?.url) {
+        if (isCapacitorApp()) {
+          try {
+            const { Browser } = await import('@capacitor/browser')
+            await Browser.open({ url: data.url })
+          } catch {
+            window.location.href = data.url
+          }
+        } else {
+          window.location.href = data.url
         }
-      } else {
-        window.location.href = response.data.url
       }
     } catch (error: any) {
       sessionStorage.removeItem('uniroad_oauth_provider')
-      throw new Error(error.response?.data?.detail || '카카오 로그인 실패')
+      throw new Error(error?.message || '카카오 로그인 실패')
     }
   }
 
@@ -307,7 +425,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signInWithKakao,
         quickSignIn,
         signOut,
-        isAuthenticated: !!user,
+        isAuthenticated: !!accessToken,
       }}
     >
       {children}
