@@ -7,7 +7,6 @@ import AdminPage from './pages/AdminPage'
 import AdminUploadPage from './pages/AdminUploadPage'
 import AgentAdminPage from './pages/AgentAdminPage'
 import AdminAgentPage from './pages/AdminAgentPage'
-import AuthPage from './pages/AuthPage'
 import TimingDashboard from './pages/TimingDashboard'
 import AutoReplyPage from './pages/AutoReplyPage'
 import AdminAnalyticsLayout from './pages/AdminAnalyticsLayout'
@@ -43,7 +42,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
   
   if (!isAuthenticated) {
-    return <Navigate to="/auth" replace />
+    return <Navigate to="/chat" replace />
   }
   
   return <>{children}</>
@@ -65,8 +64,8 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   }
   
   if (!isAuthenticated) {
-    console.warn('❌ 인증되지 않음, /auth로 리다이렉트')
-    return <Navigate to="/auth" replace />
+    console.warn('❌ 인증되지 않음, /chat으로 리다이렉트')
+    return <Navigate to="/chat" replace />
   }
   
   // 관리자 확인 (이름 또는 이메일로 확인)
@@ -105,7 +104,7 @@ function App() {
         <PageTracker />
         <div>
           <Routes>
-            <Route path="/auth" element={<AuthPage />} />
+            <Route path="/auth" element={<Navigate to="/chat" replace />} />
             <Route path="/oauth-callback" element={<OAuthCallbackPage />} />
             <Route path="/policy" element={<PolicyPage />} />
             <Route path="/" element={isAppBuild() ? <Navigate to="/chat" replace /> : <LandingPage />} />

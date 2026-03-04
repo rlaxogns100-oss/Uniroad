@@ -82,7 +82,6 @@ export function getUTMParams(): Record<string, string | null> {
 export function getPageType(pathname: string): string {
   if (pathname === '/') return 'landing'
   if (pathname.includes('/chat')) return 'chat'
-  if (pathname.includes('/auth')) return 'auth'
   if (pathname.includes('/admin') || pathname.includes('/upload')) return 'admin'
   return 'other'
 }

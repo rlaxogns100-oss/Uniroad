@@ -1,10 +1,11 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import React, { useState, useEffect } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 
 export default function AuthPage() {
   const navigate = useNavigate()
-  const { signIn, signUp, quickSignIn } = useAuth()
+  const location = useLocation()
+  const { signIn, signUp, quickSignIn, isAuthenticated, user } = useAuth()
   
   const [isSignUp, setIsSignUp] = useState(false)
   const [email, setEmail] = useState('')
@@ -13,6 +14,31 @@ export default function AuthPage() {
   const [quickName, setQuickName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+
+  // 이미 로그인된 상태면 채팅으로 보냄 (구글 로그인 후 /auth에 도착했을 때 등)
+  useEffect(() => {
+    if (!isAuthenticated) return
+    const isAdmin = user?.name === '김도균' || user?.email === 'herry0515@naver.com'
+    navigate(isAdmin ? '/chat/login/admin' : '/chat/login', { replace: true })
+  }, [isAuthenticated, user, navigate])
+
+  // OAuth 콜백 처리 중이면(URL에 토큰/코드 있음) 이메일 폼 대신 로딩만 표시
+  const hash = location.hash?.replace(/^#/, '') || ''
+  const hashParams = new URLSearchParams(hash)
+  const searchParams = new URLSearchParams(location.search)
+  const hasOAuthCallback = Boolean(
+    hashParams.get('access_token') || hashParams.get('refresh_token') || searchParams.get('code')
+  )
+  if (hasOAuthCallback) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center p-4">
+        <div className="text-center">
+          <div className="animate-spin w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4" />
+          <p className="text-gray-600">로그인 처리 중...</p>
+        </div>
+      </div>
+    )
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
