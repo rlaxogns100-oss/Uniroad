@@ -37,6 +37,8 @@ export const getApiBaseUrl = (): string => {
     } catch (_) {}
     const origin = (window.location?.origin || '').toLowerCase()
     if (/^(capacitor|ionic|file):/.test(origin)) return PRODUCTION_API_BASE
+    // 웹에서는 현재 오리진을 API 베이스로 사용해 localhost fallback/CORS를 방지한다.
+    if (origin && /^(https?):\/\//.test(origin)) return origin
   }
   return ''
 }

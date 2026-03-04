@@ -149,7 +149,7 @@ async def track_page_view(
 
     except Exception as e:
         print(f"❌ 페이지 뷰 추적 오류: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"success": False, "session_id": getattr(request, "session_id", ""), "message": "Tracking skipped"}
 
 
 @router.post("/api/tracking/user-action")
@@ -219,8 +219,9 @@ async def track_user_action(
         return {"success": True}
 
     except Exception as e:
+        # 로컬/테스트 환경에서 events 테이블 없음·RLS 등으로 실패해도 앱이 동작하도록 200 반환
         print(f"❌ 사용자 행동 추적 오류: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {"success": False, "message": "Tracking skipped"}
 
 
 @router.get("/api/tracking/session/{session_id}")

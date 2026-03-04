@@ -157,6 +157,11 @@ async def sign_in(request: SignInRequest):
     except HTTPException:
         raise
     except Exception as e:
+        err_msg = str(e).lower()
+        if "email" in err_msg and "confirm" in err_msg:
+            raise HTTPException(status_code=401, detail="이메일 확인이 필요합니다")
+        if "invalid login" in err_msg or "invalid credentials" in err_msg:
+            raise HTTPException(status_code=401, detail="이메일 또는 비밀번호가 올바르지 않습니다")
         raise HTTPException(status_code=401, detail=f"로그인 실패: {str(e)}")
 
 
