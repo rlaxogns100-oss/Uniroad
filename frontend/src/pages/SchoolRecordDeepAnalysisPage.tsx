@@ -426,7 +426,13 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
   }, [parsedPreview])
 
   const handleFileUploadFromModal = () => {
-    void handleUploadSchoolRecordPdf(pdfFile ?? undefined)
+    if (!pdfFile) {
+      setPdfUploadError('PDF 파일을 먼저 선택해 주세요.')
+      return
+    }
+    // 업로드 시작 즉시 모달을 닫고, 상단 진행 카드에서 상태를 보여준다.
+    setRegisterModalOpen(false)
+    void handleUploadSchoolRecordPdf(pdfFile)
   }
 
   const parsedSections = (parsedPreview?.sections || {}) as Record<string, any>

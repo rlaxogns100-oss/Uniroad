@@ -3,7 +3,9 @@
 
 - prefix: /api/school-record (main.py에서 지정)
 - 로그인 유저의 세특 데이터는 user_profiles.metadata.school_record 에 연동 저장
+- 생기부 파싱: Gemini만 사용 (규칙 파서 사용하지 않음)
 """
+import asyncio
 import copy
 import json
 import time
@@ -18,13 +20,13 @@ from utils.school_record_context import has_meaningful_school_record
 from .models import SchoolRecordEvaluateRequest, SchoolRecordEvaluateResponse
 from .service import evaluate_school_record
 from .diagnose import diagnose_school_record
+from .gemini_parser import parse_school_record_with_gemini, parse_school_record_pdf_with_gemini
 from .uniroad_school_record_support import (
     MAX_PDF_SIZE,
     MAX_PDF_SIZE_MB,
     MIN_EXTRACTED_TEXT_CHARS,
     RULE_PARSER_VERSION,
     _build_pdf_file_hash,
-    _build_forms_from_pdf_text,
     _build_parsed_preview,
     _extract_text_from_pdf_bytes,
     _is_cache_compatible,
@@ -376,16 +378,21 @@ async def upload_school_record_pdf(
             status_code=400,
             detail="PDF 페이지를 읽을 수 없습니다. 파일이 손상되었거나 지원되지 않는 형식인지 확인해 주세요.",
         )
-    if len(extracted.strip()) < MIN_EXTRACTED_TEXT_CHARS:
-        raise HTTPException(
-            status_code=400,
-            detail="스캔본(이미지 PDF)은 현재 지원하지 않습니다. 정부24 또는 카카오톡 전자문서지갑에서 저장한 원본 PDF를 업로드해 주세요.",
-        )
-
     parse_started_at = time.perf_counter()
-    raw_text = extracted
-    parse_method = "rule"
-    parsed_forms = _build_forms_from_pdf_text(raw_text)
+
+    # Gemini 병렬 파싱: 텍스트 있으면 하이브리드, 없으면 전부 PDF 직접
+    raw_text = extracted if extracted.strip() else ""
+    parsed_forms = await asyncio.to_thread(
+        parse_school_record_pdf_with_gemini, file_bytes, raw_text
+    )
+    extraction_method = "gemini_hybrid" if raw_text else "gemini_vision"
+
+    if parsed_forms is None:
+        raise HTTPException(
+            status_code=500,
+            detail="생활기록부 파싱에 실패했습니다. 다시 시도해 주세요."
+        )
+    parse_method = "gemini"
     _normalize_academic_subjects(parsed_forms.get("parsedSchoolRecord") or {})
     parse_ms = int((time.perf_counter() - parse_started_at) * 1000)
     total_ms = int((time.perf_counter() - started_at) * 1000)
