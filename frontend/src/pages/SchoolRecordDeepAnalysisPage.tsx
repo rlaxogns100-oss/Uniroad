@@ -1372,8 +1372,8 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
           <div className="w-full max-w-md rounded-[20px] bg-white p-6 shadow-sm">
             <p className="text-2xl font-extrabold text-[#191F28]">PDF 파일 불러오기</p>
             <p className="mt-2 text-sm font-medium text-[#6B7684]">학교생활기록부 PDF 파일을 선택해 주세요.</p>
-            <div className="mt-4 rounded-2xl border border-[#D7E6FF] bg-[#F4F8FF] p-4">
-              <p className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-[#1E40AF]">지원파일 : 학교생활기록부 PDF</p>
+            <div className="mt-4 rounded-2xl border border-[#D7E6FF] bg-[#F4F8FF] px-4 py-3">
+              <p className="text-base font-bold text-[#1E40AF]">지원파일 : 학교생활기록부 PDF</p>
             </div>
 
             <div className="mt-5 rounded-2xl border border-dashed border-[#D1D6DB] bg-[#F9FAFB] p-4">
