@@ -22,6 +22,7 @@ import SchoolRecordEvalPage from './pages/SchoolRecordEvalPage'
 import SchoolRecordDeepAnalysisPage from './pages/SchoolRecordDeepAnalysisPage'
 import SchoolGradeInputPage from './pages/SchoolGradeInputPage'
 import SchoolRecordGuidePage from './pages/SchoolRecordGuidePage'
+import AdminChatReviewPage from './pages/AdminChatReviewPage'
 import { isAppBuild } from './config'
 import { useEffect } from 'react'
 import { initializeTracking, trackPageView } from './utils/tracking'
@@ -123,6 +124,14 @@ function App() {
               element={
                 <AdminRoute>
                   <AdminPage />
+                </AdminRoute>
+              }
+            />
+            <Route
+              path="/chat/admin/review"
+              element={
+                <AdminRoute>
+                  <AdminChatReviewPage />
                 </AdminRoute>
               }
             />

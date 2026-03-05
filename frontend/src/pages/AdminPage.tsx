@@ -504,6 +504,13 @@ export default function AdminPage() {
               <span className="text-2xl">👤</span>
               <span className="text-sm text-center">유저</span>
             </button>
+            <button
+              onClick={() => navigate('/chat/admin/review')}
+              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-slate-100 text-slate-800 hover:bg-slate-200 transition-colors font-medium border border-slate-200"
+            >
+              <span className="text-2xl">📝</span>
+              <span className="text-sm text-center">로그리뷰</span>
+            </button>
           </div>
         </div>
 

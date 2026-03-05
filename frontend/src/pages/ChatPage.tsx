@@ -38,7 +38,6 @@ import SchoolRecordDeepAnalysisPageBase from './SchoolRecordDeepAnalysisPage'
 import type { SchoolRecordDeepAnalysisPageProps } from './SchoolRecordDeepAnalysisPage'
 
 const SchoolRecordDeepAnalysisPage = SchoolRecordDeepAnalysisPageBase as React.ComponentType<SchoolRecordDeepAnalysisPageProps>
-import { redirectToGumroadCheckout } from '../utils/gumroad'
 import { useAuth } from '../contexts/AuthContext'
 import { useLayoutMode } from '../contexts/LayoutModeContext'
 import { useChat } from '../hooks/useChat'
@@ -297,6 +296,7 @@ export default function ChatPage() {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
   const [isPreregisterModalOpen, setIsPreregisterModalOpen] = useState(false)
   const [isProModalOpen, setIsProModalOpen] = useState(false)
+  const [isApprovalWidgetChoiceOpen, setIsApprovalWidgetChoiceOpen] = useState(false)
   const [isBankTransferModalOpen, setIsBankTransferModalOpen] = useState(false)
   const [bankTransferName, setBankTransferName] = useState('')
   const [bankTransferPhone, setBankTransferPhone] = useState('')
@@ -505,10 +505,12 @@ export default function ChatPage() {
   const [scorePredictionScoreSets, setScorePredictionScoreSets] = useState<Array<{ id: string; name: string }>>([])
   const [scorePredictionScoreSetsLoading, setScorePredictionScoreSetsLoading] = useState(false)
   const [scorePredictionNaesinLinked, setScorePredictionNaesinLinked] = useState(false)
+  const [referralPromoExpiresAt, setReferralPromoExpiresAt] = useState<number | null>(null)
   /** 내 점수로 어디 갈 수 있을까 전용 채팅일 때 true (RollingPlaceholder·최근 컨텐츠 숨김) */
   const [scorePredictionMode, setScorePredictionMode] = useState(false)
   const isGalaxySession = isGalaxyAppSession()
-  const hasProAccess = !!user?.is_premium || isAppBuild()
+  const isReferralPromoActive = !!referralPromoExpiresAt && referralPromoExpiresAt > Date.now()
+  const hasProAccess = !!user?.is_premium || isAppBuild() || isReferralPromoActive
   const isInputLocked = sessionLockedByMasking && !isAuthenticated
   const getRequestToken = (): string | undefined => {
     if (accessToken) return accessToken
@@ -529,6 +531,53 @@ export default function ChatPage() {
     if (isGalaxySession) return
     setIsProModalOpen(true)
   }
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('uniroad_referral_promo')
+      if (!raw) {
+        setReferralPromoExpiresAt(null)
+        return
+      }
+      const parsed = JSON.parse(raw) as { userId?: string; expiresAt?: number }
+      const expiresAt = Number(parsed?.expiresAt || 0)
+      const ownerUserId = (parsed?.userId || '').trim()
+      if (!ownerUserId || !user?.id || ownerUserId !== user.id || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+        localStorage.removeItem('uniroad_referral_promo')
+        setReferralPromoExpiresAt(null)
+        return
+      }
+      setReferralPromoExpiresAt(expiresAt)
+    } catch {
+      localStorage.removeItem('uniroad_referral_promo')
+      setReferralPromoExpiresAt(null)
+    }
+  }, [user?.id])
+
+  const applyReferralCode = () => {
+    if (!isAuthenticated || !user?.id) {
+      setIsProModalOpen(false)
+      setIsAuthModalOpen(true)
+      return
+    }
+    const input = window.prompt('추천인 코드를 입력해 주세요.')
+    if (input === null) return
+    const code = input.trim().toLowerCase()
+    if (code !== 'tube123') {
+      alert('유효하지 않은 추천인 코드입니다.')
+      return
+    }
+
+    const expiresAt = Date.now() + 1000 * 60 * 60 * 24 * 30
+    localStorage.setItem('uniroad_referral_promo', JSON.stringify({
+      userId: user.id,
+      code: 'tube123',
+      expiresAt,
+    }))
+    setReferralPromoExpiresAt(expiresAt)
+    setIsProModalOpen(false)
+    alert('추천인 코드가 적용되었습니다. 1달 무료(Pro) 혜택이 활성화되었어요.')
+  }
+
   const fetchSchoolRecordLinkedStatus = async (): Promise<boolean> => {
     if (!isAuthenticated) return false
     const token = getRequestToken()
@@ -717,29 +766,28 @@ export default function ChatPage() {
     }
     if (!isDesktopLayout) setIsSideNavOpen(false)
   }
-  const goToGumroadCheckout = () => {
-    if (!isAuthenticated || !user?.id) {
-      setIsProModalOpen(false)
-      setIsAuthModalOpen(true)
+  const openApprovalPaymentWidget = (fallbackUrl: string) => {
+    const widgetUrl = fallbackUrl.trim()
+    if (!widgetUrl) {
+      alert('승인용 간편결제 위젯 주소가 비어 있습니다.')
       return
     }
-    const requestToken = getRequestToken()
-    // 관리자 결제 이력용 카드결제 신청 로그 (실패해도 결제는 계속 진행)
-    fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/payments/card-checkout/attempt`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(requestToken && { Authorization: `Bearer ${requestToken}` }),
-      },
-      body: JSON.stringify({ amount: 2900, source: 'gumroad' }),
-    }).catch(() => undefined)
 
-    const ok = redirectToGumroadCheckout(user.id, user.email)
-    if (!ok) {
-      alert('결제 페이지 URL이 설정되지 않았습니다. 잠시 후 다시 시도해 주세요.')
-      return
-    }
-    setIsProModalOpen(false)
+    // 중복 창 생성 방지: 항상 현재 창에서만 이동
+    window.location.href = widgetUrl
+  }
+  const openApprovalWidgetChoice = () => {
+    setIsApprovalWidgetChoiceOpen(true)
+  }
+  const openApprovalSimplePayWidget = () => {
+    const oneTimeWidgetUrl = import.meta.env.VITE_TOSS_WIDGET_APPROVAL_ONETIME_URL || 'http://localhost:3000/payments/checkout.html'
+    openApprovalPaymentWidget(oneTimeWidgetUrl)
+    setIsApprovalWidgetChoiceOpen(false)
+  }
+  const openApprovalBillingWidget = () => {
+    const billingWidgetUrl = import.meta.env.VITE_TOSS_WIDGET_APPROVAL_BILLING_URL || 'http://localhost:3000/payments/billing.html'
+    openApprovalPaymentWidget(billingWidgetUrl)
+    setIsApprovalWidgetChoiceOpen(false)
   }
   const subscribeByBankTransfer = () => {
     setBankTransferName(user?.name || '')
@@ -2343,6 +2391,19 @@ export default function ChatPage() {
     void handleSend(question)
   }
 
+  const openExternalPage = async (url: string) => {
+    if (isAppBuild()) {
+      try {
+        const { Browser } = await import('@capacitor/browser')
+        await Browser.open({ url })
+      } catch {
+        window.location.href = url
+      }
+      return
+    }
+    window.open(url, '_blank', 'noopener,noreferrer')
+  }
+
 
 
   return (
@@ -2582,6 +2643,10 @@ export default function ChatPage() {
             <div className="mb-3 flex flex-nowrap items-center justify-center gap-2 text-[11px] sm:text-xs text-gray-500 whitespace-nowrap overflow-x-auto">
               <a
                 href="https://uni2road.com/terms"
+                onClick={(e) => {
+                  e.preventDefault()
+                  void openExternalPage('https://uni2road.com/terms')
+                }}
                 className="hover:text-gray-700 transition-colors shrink-0"
               >
                 이용약관
@@ -2589,6 +2654,10 @@ export default function ChatPage() {
               <span className="text-gray-300 shrink-0">|</span>
               <a
                 href="https://uni2road.com/policy"
+                onClick={(e) => {
+                  e.preventDefault()
+                  void openExternalPage('https://uni2road.com/policy')
+                }}
                 className="hover:text-gray-700 transition-colors shrink-0"
               >
                 개인정보처리방침
@@ -2596,6 +2665,10 @@ export default function ChatPage() {
               <span className="text-gray-300 shrink-0">|</span>
               <a
                 href="https://uni2road.com/delete.html"
+                onClick={(e) => {
+                  e.preventDefault()
+                  void openExternalPage('https://uni2road.com/delete.html')
+                }}
                 className="hover:text-gray-700 transition-colors shrink-0"
               >
                 회원 탈퇴
@@ -3907,13 +3980,15 @@ export default function ChatPage() {
             </div>
           </div>
         )}
-        <div className="px-4 sm:px-6 pb-2 sm:pb-3">
-          <div className="mx-auto max-w-[760px] overflow-x-auto">
-            <p className="inline-block whitespace-nowrap text-[10px] sm:text-[11px] text-gray-500">
-              사업자필수정보: 매장직결 | 사업자등록번호 140-29-01759 | 대표 김태훈 | 경기도 용인시 수지구 현암로125번길 11, 723동 704호 | 010-2808-9914 | rlaxogns100@snu.ac.kr | 통신판매업 신고 준비중
-            </p>
+        {!isAppBuild() && (
+          <div className="px-4 sm:px-6 pb-2 sm:pb-3">
+            <div className="mx-auto max-w-[760px] overflow-x-auto">
+              <p className="inline-block whitespace-nowrap text-[10px] sm:text-[11px] text-gray-500">
+                사업자필수정보: 매장직결 | 사업자등록번호 140-29-01759 | 대표 김태훈 | 경기도 용인시 수지구 현암로125번길 11, 723동 704호 | 010-2808-9914 | rlaxogns100@snu.ac.kr | 통신판매업 신고 준비중
+              </p>
+            </div>
           </div>
-        </div>
+        )}
           </>
         ) : (
           <>
@@ -4516,13 +4591,16 @@ export default function ChatPage() {
 
               <div className="rounded-2xl border-2 border-indigo-200 bg-indigo-50/60 p-5">
                 <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
                     <h3 className="text-xl font-semibold text-gray-900">Pro</h3>
-                    <span className="text-[11px] font-semibold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">새학기 특가 할인!</span>
+                    <span className="inline-flex flex-col items-center justify-center bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full shrink-0 leading-[1.05]">
+                      <span className="text-[10px] sm:text-[11px] font-semibold whitespace-nowrap">새학기</span>
+                      <span className="text-[10px] sm:text-[11px] font-semibold whitespace-nowrap">특가할인!</span>
+                    </span>
                   </div>
-                  <div className="flex items-end gap-2">
+                  <div className="flex items-end gap-1.5 shrink-0 whitespace-nowrap">
                     <span className="text-sm text-gray-400 line-through">25,900원</span>
-                    <span className="text-lg font-bold text-gray-900">2,900원/월</span>
+                    <span className="text-lg font-bold text-gray-900 whitespace-nowrap">7,900원/월</span>
                   </div>
                 </div>
                 <ul className="space-y-2 text-sm text-gray-700">
@@ -4537,16 +4615,63 @@ export default function ChatPage() {
             {/* 결제 버튼 */}
             <div className="px-6 sm:px-7 pb-6">
               <button
-                onClick={goToGumroadCheckout}
-                className="w-full py-3.5 bg-gray-900 text-white rounded-xl font-semibold hover:bg-black transition-colors"
-              >
-                Pro 요금제 시작하기 (카드결제)
-              </button>
-              <button
                 onClick={subscribeByBankTransfer}
-                className="w-full mt-3 py-3.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
+                className="w-full py-3.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
               >
                 무통장입금으로 구독하기
+              </button>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <button
+                  onClick={applyReferralCode}
+                  className="w-full py-3.5 border border-indigo-300 text-indigo-700 rounded-xl font-semibold hover:bg-indigo-50 transition-colors"
+                >
+                  추천인코드
+                </button>
+                <button
+                  onClick={openApprovalWidgetChoice}
+                  className="w-full py-3.5 border border-indigo-300 text-indigo-700 rounded-xl font-semibold hover:bg-indigo-50 transition-colors"
+                >
+                  <span className="inline-flex flex-col items-center leading-tight">
+                    <span>결제위젯</span>
+                    <span className="text-[10px] sm:text-xs whitespace-nowrap">(심사중, 결제되지 않음)</span>
+                  </span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 승인용 결제위젯 선택 모달 */}
+      {!isAppBuild() && isApprovalWidgetChoiceOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-gray-200">
+            <div className="p-5 border-b border-gray-100 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">결제 방식 선택</h3>
+                <p className="text-sm text-gray-600 mt-1">승인용 결제 위젯입니다. 실제 결제는 동작하지 않습니다.</p>
+              </div>
+              <button
+                onClick={() => setIsApprovalWidgetChoiceOpen(false)}
+                className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-5 space-y-3">
+              <button
+                onClick={openApprovalSimplePayWidget}
+                className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700 transition-colors"
+              >
+                간편결제
+              </button>
+              <button
+                onClick={openApprovalBillingWidget}
+                className="w-full py-3.5 border border-indigo-300 text-indigo-700 rounded-xl font-semibold hover:bg-indigo-50 transition-colors"
+              >
+                정기결제
               </button>
             </div>
           </div>
@@ -4576,7 +4701,7 @@ export default function ChatPage() {
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
                 <p className="text-gray-600">가격</p>
                 <p className="text-sm text-gray-400 line-through">25,900원</p>
-                <p className="text-lg font-bold text-gray-900">2,900원</p>
+                <p className="text-lg font-bold text-gray-900">7,900원</p>
                 <p className="text-gray-600 mt-3">입금계좌</p>
                 <p className="font-semibold text-gray-900">3333354523620</p>
                 <p className="text-gray-700">카카오뱅크 (김태훈)</p>
