@@ -347,3 +347,130 @@ code {
   letter-spacing: 0.5px;
   box-shadow: 0 2px 4px rgba(238, 90, 90, 0.3);
 }
+
+/* 달리는 캐릭터 로딩 애니메이션 */
+@keyframes running-character {
+  0% {
+    left: 0;
+    transform: scaleX(1);
+  }
+  45% {
+    left: calc(100% - 48px);
+    transform: scaleX(1);
+  }
+  50% {
+    left: calc(100% - 48px);
+    transform: scaleX(-1);
+  }
+  95% {
+    left: 0;
+    transform: scaleX(-1);
+  }
+  100% {
+    left: 0;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes bounce-slight {
+  0%, 100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes arm-left-swing {
+  0%, 100% {
+    transform: rotate(-20deg);
+  }
+  50% {
+    transform: rotate(20deg);
+  }
+}
+
+@keyframes arm-right-swing {
+  0%, 100% {
+    transform: rotate(20deg);
+  }
+  50% {
+    transform: rotate(-20deg);
+  }
+}
+
+@keyframes leg-left-swing {
+  0%, 100% {
+    transform: rotate(-15deg);
+  }
+  50% {
+    transform: rotate(15deg);
+  }
+}
+
+@keyframes leg-right-swing {
+  0%, 100% {
+    transform: rotate(15deg);
+  }
+  50% {
+    transform: rotate(-15deg);
+  }
+}
+
+@keyframes dust-fade {
+  0% {
+    opacity: 0;
+    transform: translateX(0) scale(0.5);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(10px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(20px) scale(0.5);
+  }
+}
+
+.animate-running-character {
+  animation: running-character 4s linear infinite;
+}
+
+.animate-bounce-slight {
+  animation: bounce-slight 0.3s ease-in-out infinite;
+}
+
+.animate-arm-left {
+  animation: arm-left-swing 0.3s ease-in-out infinite;
+  transform-origin: right center;
+}
+
+.animate-arm-right {
+  animation: arm-right-swing 0.3s ease-in-out infinite;
+  transform-origin: left center;
+}
+
+.animate-leg-left {
+  animation: leg-left-swing 0.3s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+.animate-leg-right {
+  animation: leg-right-swing 0.3s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+.animate-dust-1 {
+  animation: dust-fade 0.6s ease-out infinite;
+  animation-delay: 0s;
+}
+
+.animate-dust-2 {
+  animation: dust-fade 0.6s ease-out infinite;
+  animation-delay: 0.2s;
+}
+
+.animate-dust-3 {
+  animation: dust-fade 0.6s ease-out infinite;
+  animation-delay: 0.4s;
+}

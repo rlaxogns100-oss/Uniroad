@@ -1173,15 +1173,50 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
           <div className="mb-4 rounded-[24px] bg-white p-8 shadow-sm">
             {pdfUploading && (
               <div className="w-full">
-                <p className="mb-2 text-sm font-semibold text-[#4E5968]">
-                  {uploadStage === 'processing' ? '텍스트 추출 및 파싱 중...' : `파일 업로드 중 (${uploadProgress}%)`}
-                </p>
-                <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
-                  <div
-                    className="h-full rounded-full bg-[#3182F6] transition-all duration-300"
-                    style={{ width: uploadStage === 'processing' ? '100%' : `${uploadProgress}%` }}
-                  />
-                </div>
+                {uploadStage === 'processing' ? (
+                  <div className="flex flex-col items-center py-4">
+                    {/* 달리는 캐릭터 로딩 애니메이션 */}
+                    <div className="relative h-16 w-full overflow-hidden">
+                      {/* 트랙 라인 */}
+                      <div className="absolute bottom-3 left-0 right-0 h-0.5 bg-gray-200" />
+                      {/* 달리는 캐릭터 */}
+                      <div className="absolute bottom-4 left-0 animate-running-character">
+                        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" className="animate-bounce-slight">
+                          {/* 머리 */}
+                          <circle cx="24" cy="12" r="8" fill="#3182F6" />
+                          {/* 몸통 */}
+                          <rect x="18" y="20" width="12" height="14" rx="2" fill="#1E40AF" />
+                          {/* 팔 (왼쪽) */}
+                          <rect x="8" y="22" width="10" height="4" rx="2" fill="#3182F6" className="animate-arm-left" />
+                          {/* 팔 (오른쪽) */}
+                          <rect x="30" y="22" width="10" height="4" rx="2" fill="#3182F6" className="animate-arm-right" />
+                          {/* 다리 (왼쪽) */}
+                          <rect x="19" y="34" width="4" height="10" rx="1" fill="#1E40AF" className="animate-leg-left" />
+                          {/* 다리 (오른쪽) */}
+                          <rect x="25" y="34" width="4" height="10" rx="1" fill="#1E40AF" className="animate-leg-right" />
+                        </svg>
+                      </div>
+                      {/* 먼지/효과 */}
+                      <div className="absolute bottom-4 left-12 flex space-x-1">
+                        <span className="inline-block h-1 w-1 rounded-full bg-gray-300 animate-dust-1" />
+                        <span className="inline-block h-0.5 w-2 rounded-full bg-gray-200 animate-dust-2" />
+                        <span className="inline-block h-1 w-1 rounded-full bg-gray-300 animate-dust-3" />
+                      </div>
+                    </div>
+                    <p className="mt-4 text-base font-bold text-[#3182F6]">파싱중...</p>
+                    <p className="mt-1 text-sm text-[#6B7684]">최대 40~50초가 소요될 수 있어요</p>
+                  </div>
+                ) : (
+                  <>
+                    <p className="mb-2 text-sm font-semibold text-[#4E5968]">{`파일 업로드 중 (${uploadProgress}%)`}</p>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                      <div
+                        className="h-full rounded-full bg-[#3182F6] transition-all duration-300"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             )}
             {pdfUploadMessage && <p className="mt-2 text-sm font-semibold text-green-700">{pdfUploadMessage}</p>}
