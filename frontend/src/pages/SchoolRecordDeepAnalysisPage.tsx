@@ -1174,33 +1174,33 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
             {pdfUploading && (
               <div className="w-full">
                 {uploadStage === 'processing' ? (
-                  <div className="flex flex-col items-center py-4">
-                    {/* 달리는 캐릭터 로딩 애니메이션 */}
-                    <div className="relative h-16 w-full overflow-hidden">
-                      {/* 트랙 라인 */}
-                      <div className="absolute bottom-3 left-0 right-0 h-0.5 bg-gray-200" />
-                      {/* 달리는 캐릭터 */}
-                      <div className="absolute bottom-4 left-0 animate-running-character">
-                        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" className="animate-bounce-slight">
-                          {/* 머리 */}
-                          <circle cx="24" cy="12" r="8" fill="#3182F6" />
-                          {/* 몸통 */}
-                          <rect x="18" y="20" width="12" height="14" rx="2" fill="#1E40AF" />
-                          {/* 팔 (왼쪽) */}
-                          <rect x="8" y="22" width="10" height="4" rx="2" fill="#3182F6" className="animate-arm-left" />
-                          {/* 팔 (오른쪽) */}
-                          <rect x="30" y="22" width="10" height="4" rx="2" fill="#3182F6" className="animate-arm-right" />
-                          {/* 다리 (왼쪽) */}
-                          <rect x="19" y="34" width="4" height="10" rx="1" fill="#1E40AF" className="animate-leg-left" />
-                          {/* 다리 (오른쪽) */}
-                          <rect x="25" y="34" width="4" height="10" rx="1" fill="#1E40AF" className="animate-leg-right" />
-                        </svg>
-                      </div>
-                      {/* 먼지/효과 */}
-                      <div className="absolute bottom-4 left-12 flex space-x-1">
-                        <span className="inline-block h-1 w-1 rounded-full bg-gray-300 animate-dust-1" />
-                        <span className="inline-block h-0.5 w-2 rounded-full bg-gray-200 animate-dust-2" />
-                        <span className="inline-block h-1 w-1 rounded-full bg-gray-300 animate-dust-3" />
+                  <div className="flex flex-col items-center py-6">
+                    {/* 원형 로딩 스피너 */}
+                    <div className="relative h-24 w-24">
+                      {/* 12개 막대 */}
+                      {[...Array(12)].map((_, i) => (
+                        <div
+                          key={i}
+                          className="absolute left-1/2 top-0 h-3 w-2 -translate-x-1/2 rounded-full"
+                          style={{
+                            transformOrigin: '50% 48px',
+                            transform: `rotate(${i * 30}deg)`,
+                            background: '#E5E7EB',
+                          }}
+                        >
+                          <div
+                            className="h-full w-full rounded-full"
+                            style={{
+                              background: '#3B82F6',
+                              animation: 'spinner-fade 1.2s linear infinite',
+                              animationDelay: `${i * 0.1}s`,
+                            }}
+                          />
+                        </div>
+                      ))}
+                      {/* 중앙 퍼센트 */}
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <span className="text-lg font-bold text-[#3B82F6]">파싱</span>
                       </div>
                     </div>
                     <p className="mt-4 text-base font-bold text-[#3182F6]">파싱중...</p>
