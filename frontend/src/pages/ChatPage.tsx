@@ -1730,20 +1730,22 @@ export default function ChatPage() {
   }, [isSchoolRecordModeUrl])
 
   // 생기부 카드에서 넘어온 질문: 생기부 모드 입력창에만 미리 채우기
+  const initialQuestionHandledRef = useRef<string | null>(null)
   useEffect(() => {
     if (!initialQuestionFromState || !isSchoolRecordModeUrl) return
+    if (initialQuestionHandledRef.current === initialQuestionFromState) return
+    initialQuestionHandledRef.current = initialQuestionFromState
     const question = initialQuestionFromState
-    navigate(location.pathname + '?' + location.search, { replace: true, state: {} })
-    const t = setTimeout(() => {
-      setInput(question)
+    navigate(location.pathname + location.search, { replace: true, state: {} })
+    setInput(question)
+    requestAnimationFrame(() => {
       inputTextareaRef.current?.focus()
       const length = question.length
       if (inputTextareaRef.current) {
         inputTextareaRef.current.selectionStart = length
         inputTextareaRef.current.selectionEnd = length
       }
-    }, 100)
-    return () => clearTimeout(t)
+    })
   }, [initialQuestionFromState, isSchoolRecordModeUrl, location.pathname, location.search, navigate])
 
   const handleSelectScoreSetForPrediction = async (item: { id: string; name: string }) => {
