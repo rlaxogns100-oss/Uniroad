@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react'
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
 import {
   sendMessageStream,
@@ -19,6 +19,7 @@ import {
   getMySchoolGradeInput,
   getProfile,
   getSchoolRecordStatus,
+  uploadSchoolRecordPdf,
   uploadProfileAvatar,
   uploadProfileBanner,
   updateProfile,
@@ -34,10 +35,6 @@ import ScoreSetManagerModal from '../components/ScoreSetManagerModal'
 import SchoolRecordToolStartModal from '../components/SchoolRecordToolStartModal'
 import SchoolGradeInputModal from '../components/SchoolGradeInputModal'
 import SchoolRecordResearchProgress from '../components/SchoolRecordResearchProgress'
-import SchoolRecordDeepAnalysisPageBase from './SchoolRecordDeepAnalysisPage'
-import type { SchoolRecordDeepAnalysisPageProps } from './SchoolRecordDeepAnalysisPage'
-
-const SchoolRecordDeepAnalysisPage = SchoolRecordDeepAnalysisPageBase as React.ComponentType<SchoolRecordDeepAnalysisPageProps>
 import { useAuth } from '../contexts/AuthContext'
 import { useLayoutMode } from '../contexts/LayoutModeContext'
 import { useChat } from '../hooks/useChat'
@@ -46,7 +43,13 @@ import { FrontendTimingLogger } from '../utils/timingLogger'
 import { API_BASE, getApiBaseUrl, isAppBuild, isGalaxyAppSession } from '../config'
 import { addLog } from '../utils/adminLogger'
 import { QUICK_EXAMPLE_RESPONSES } from '../data/quickExampleResponses'
-import { Menu, Search, Plus, FolderOpen, PenLine, Calculator, X, Trash2, GraduationCap, Sparkles, Heart, Copy, ArrowUpRight, Crown, User, Gem, Upload, MessageSquare, BookOpen, Monitor, Smartphone } from 'lucide-react'
+import { getStudentGuideMethods, type GuideMethodId } from '../data/schoolRecordGuide'
+import {
+  ADIGA_CURRICULUM_CATALOG,
+  ADIGA_TRACK_OPTIONS,
+  type AdigaTrackType,
+} from '../data/adigaSchoolGradeCatalog'
+import { Menu, Search, Plus, FolderOpen, PenLine, Calculator, X, Trash2, GraduationCap, Sparkles, Heart, Copy, ArrowUpRight, Crown, User, Gem, Upload, MessageSquare, BookOpen, ChevronLeft, ChevronRight } from 'lucide-react'
 
 interface UsedChunk {
   id: string
@@ -91,6 +94,8 @@ interface Message {
 
 const NAESIN_SEMESTER_KEYS = ['1-1', '1-2', '2-1', '2-2', '3-1', '3-2'] as const
 type NaesinSemesterKey = (typeof NAESIN_SEMESTER_KEYS)[number]
+type GradeKey = '1' | '2' | '3'
+type GradeAverageFieldKey = 'overall' | 'core'
 
 const NAESIN_SEMESTER_LABELS: Record<NaesinSemesterKey, string> = {
   '1-1': '1학년 1학기',
@@ -105,6 +110,41 @@ interface NaesinPreviewGradeSummary {
   overallAverage: string
   coreAverage: string
   semesterAverages: Record<NaesinSemesterKey, { overall: string; core: string }>
+}
+
+interface SemesterRow {
+  id: string
+  trackType: string
+  curriculum: string
+  subject: string
+  credits: string
+  classRank: string
+  rawScore: string
+  avgScore: string
+  stdDev: string
+  studentCount: string
+  achievement: string
+  distA: string
+  distB: string
+  distC: string
+}
+
+interface ExtracurricularAttendanceRow {
+  absence: string
+  tardy: string
+  earlyLeave: string
+  result: string
+}
+
+interface ExtracurricularData {
+  attendance: Record<GradeKey, ExtracurricularAttendanceRow>
+  volunteerHours: Record<GradeKey, string>
+}
+
+interface InlineNaesinDetailData {
+  semesters: Record<NaesinSemesterKey, SemesterRow[]>
+  extracurricular: ExtracurricularData
+  gradeSummary: NaesinPreviewGradeSummary
 }
 
 type ScorePreviewState =
@@ -127,6 +167,12 @@ interface SavedSchoolRecordReport {
   description: string
   question: string
   createdAt: string
+}
+
+interface PredictionUniversityRow {
+  university: string
+  department: string
+  gun?: string
 }
 
 // 로그 메시지를 사용자 친화적으로 변환
@@ -180,10 +226,18 @@ const formatLogMessage = (log: string): string => {
 const MENTION_TOKEN_REGEX = /@내신\s*성적|@[가-힣a-zA-Z0-9_]{1,20}/g
 const MENTION_TOKEN_SPLIT_REGEX = /(@내신\s*성적|@[가-힣a-zA-Z0-9_]{1,20})/g
 const MENTION_TOKEN_FULL_REGEX = /^(@내신\s*성적|@[가-힣a-zA-Z0-9_]{1,20})$/
+const SCHOOL_RECORD_MENTION_REGEX = /@생활기록부/
+const LINKED_NAESIN_TEST_REGEX = /@내신\s*성적|@내신성적(?=$|\s|[으로로은는이가을를와과])|@내성적(?=$|\s|[으로로은는이가을를와과])/
+const LINKED_NAESIN_REPLACE_REGEX = /@내신성적(?=$|\s|[으로로은는이가을를와과])|@내성적(?=$|\s|[으로로은는이가을를와과])/g
+const MOCK_EXAM_TEST_REGEX = /@모의고사(?:성적)?/
+const MOCK_EXAM_REPLACE_REGEX = /@모의고사성적/g
+const MY_SCORE_ALIAS_TEST_REGEX = /@내성적(?=$|\s|[으로로은는이가을를와과])/
+const MY_SCORE_ALIAS_REPLACE_REGEX = /@내성적(?=$|\s|[으로로은는이가을를와과])/g
 
 const extractScoreMentions = (text: string): string[] => {
-  const mentions = text.match(/@[가-힣a-zA-Z0-9_]{1,20}/g) || []
+  const mentions = text.match(/@내신\s*성적|@[가-힣a-zA-Z0-9_]{1,20}/g) || []
   const normalized = mentions
+    .map((m) => m.replace(/\s+/g, ' ').trim())
     .map((m) => m.replace(/(으로|로|은|는|이|가|을|를|와|과)$/u, ''))
     .filter((m) => m.length > 1)
   return Array.from(new Set(normalized))
@@ -245,9 +299,354 @@ const normalizeNaesinGradeSummary = (schoolGradeInput: unknown): NaesinPreviewGr
   return { overallAverage, coreAverage, semesterAverages }
 }
 
+const createEmptyNaesinGradeSummary = (): NaesinPreviewGradeSummary => ({
+  overallAverage: '',
+  coreAverage: '',
+  semesterAverages: {
+    '1-1': { overall: '', core: '' },
+    '1-2': { overall: '', core: '' },
+    '2-1': { overall: '', core: '' },
+    '2-2': { overall: '', core: '' },
+    '3-1': { overall: '', core: '' },
+    '3-2': { overall: '', core: '' },
+  },
+})
+
+const gradeKeys: GradeKey[] = ['1', '2', '3']
+const trackTypeOptions = [...ADIGA_TRACK_OPTIONS]
+const achievementOptions = ['선택', 'A', 'B', 'C', 'D', 'E', 'P', '·']
+const coreCurriculumNames = new Set(['국어', '수학', '영어', '한국사', '과학', '사회(역사/도덕포함)', '통합사회', '통합과학'])
+
+const getCurriculumOptions = (trackType: string): string[] =>
+  ADIGA_CURRICULUM_CATALOG[(trackTypeOptions.includes(trackType as AdigaTrackType) ? trackType : trackTypeOptions[0]) as AdigaTrackType]
+    .map((item) => item.name)
+
+const getSubjectOptions = (trackType: string, curriculum: string): string[] => {
+  const catalog = ADIGA_CURRICULUM_CATALOG[(trackTypeOptions.includes(trackType as AdigaTrackType) ? trackType : trackTypeOptions[0]) as AdigaTrackType]
+  return catalog.find((item) => item.name === curriculum)?.subjects || []
+}
+
+const normalizeTrackType = (value: string): AdigaTrackType =>
+  trackTypeOptions.includes(value as AdigaTrackType) ? (value as AdigaTrackType) : trackTypeOptions[0]
+
+const normalizeCurriculum = (trackType: string, curriculum: string): string => {
+  const options = getCurriculumOptions(trackType)
+  if (options.length === 0) return ''
+  return options.includes(curriculum) ? curriculum : options[0]
+}
+
+const createEmptySemesterRow = (): SemesterRow => ({
+  id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+  trackType: trackTypeOptions[0],
+  curriculum: getCurriculumOptions(trackTypeOptions[0])[0] || '',
+  subject: '',
+  credits: '',
+  classRank: '',
+  rawScore: '',
+  avgScore: '',
+  stdDev: '',
+  studentCount: '',
+  achievement: '선택',
+  distA: '',
+  distB: '',
+  distC: '',
+})
+
+const createEmptyExtracurricularData = (): ExtracurricularData => ({
+  attendance: {
+    '1': { absence: '', tardy: '', earlyLeave: '', result: '' },
+    '2': { absence: '', tardy: '', earlyLeave: '', result: '' },
+    '3': { absence: '', tardy: '', earlyLeave: '', result: '' },
+  },
+  volunteerHours: {
+    '1': '',
+    '2': '',
+    '3': '',
+  },
+})
+
+const createEmptyInlineNaesinDetailData = (): InlineNaesinDetailData => ({
+  semesters: {
+    '1-1': [createEmptySemesterRow()],
+    '1-2': [createEmptySemesterRow()],
+    '2-1': [createEmptySemesterRow()],
+    '2-2': [createEmptySemesterRow()],
+    '3-1': [createEmptySemesterRow()],
+    '3-2': [createEmptySemesterRow()],
+  },
+  extracurricular: createEmptyExtracurricularData(),
+  gradeSummary: createEmptyNaesinGradeSummary(),
+})
+
+const sanitizeGradeNumberInput = (value: string): string => {
+  let cleaned = value.replace(/[^\d.]/g, '')
+  if (!cleaned) return ''
+  const firstDotIndex = cleaned.indexOf('.')
+  if (firstDotIndex >= 0) {
+    cleaned = `${cleaned.slice(0, firstDotIndex + 1)}${cleaned.slice(firstDotIndex + 1).replace(/\./g, '')}`
+  }
+  if (cleaned.startsWith('.')) cleaned = `0${cleaned}`
+  const [intPartRaw, decimalPartRaw] = cleaned.split('.')
+  const intPart = intPartRaw.replace(/^0+(?=\d)/, '')
+  if (decimalPartRaw === undefined) return intPart
+  return `${intPart || '0'}.${decimalPartRaw.slice(0, 2)}`
+}
+
+const parseGradeNumber = (value: string): number | null => {
+  const text = value.trim()
+  if (!text) return null
+  const parsed = Number.parseFloat(text)
+  if (!Number.isFinite(parsed)) return null
+  return parsed
+}
+
+const formatAveragedGrade = (values: string[]): string => {
+  const numericValues = values
+    .map((v) => parseGradeNumber(v))
+    .filter((v): v is number => v !== null)
+  if (numericValues.length === 0) return ''
+  const average = numericValues.reduce((sum, v) => sum + v, 0) / numericValues.length
+  return Number.isInteger(average) ? String(average) : average.toFixed(2).replace(/\.?0+$/, '')
+}
+
+const sanitizeNumberInput = (value: string): string =>
+  value.replace(/[^\d]/g, '')
+
+const sanitizeClassRankInput = (value: string): string => {
+  const digits = value.replace(/[^\d]/g, '')
+  if (!digits) return ''
+  const first = digits.slice(0, 1)
+  const n = Number.parseInt(first, 10)
+  if (n >= 1 && n <= 9) return String(n)
+  return ''
+}
+
+const RAW_SCORE_BY_CLASS_RANK: Record<number, number> = {
+  1: 96, 2: 92, 3: 88, 4: 84, 5: 80, 6: 76, 7: 72, 8: 68, 9: 64,
+}
+
+const getRawScoreByClassRank = (classRank: number): string => {
+  if (classRank >= 1 && classRank <= 9) return String(RAW_SCORE_BY_CLASS_RANK[classRank] ?? '')
+  return ''
+}
+
+const isMeaningfulSemesterRow = (row: SemesterRow): boolean => {
+  if (row.subject.trim()) return true
+  if (row.credits.trim()) return true
+  if (row.classRank.trim()) return true
+  if (row.rawScore.trim()) return true
+  if (row.avgScore.trim()) return true
+  if (row.stdDev.trim()) return true
+  if (row.studentCount.trim()) return true
+  if (row.distA.trim()) return true
+  if (row.distB.trim()) return true
+  if (row.distC.trim()) return true
+  if (row.achievement && row.achievement !== '선택') return true
+  return false
+}
+
+const toNonNegativeInt = (value: string): number => {
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+}
+
+const buildGradeSummaryFromSemesters = (
+  semesters: Record<NaesinSemesterKey, SemesterRow[]>,
+  baseSummary: NaesinPreviewGradeSummary
+): NaesinPreviewGradeSummary => {
+  const nextSemesterAverages: NaesinPreviewGradeSummary['semesterAverages'] = {
+    '1-1': { ...baseSummary.semesterAverages['1-1'] },
+    '1-2': { ...baseSummary.semesterAverages['1-2'] },
+    '2-1': { ...baseSummary.semesterAverages['2-1'] },
+    '2-2': { ...baseSummary.semesterAverages['2-2'] },
+    '3-1': { ...baseSummary.semesterAverages['3-1'] },
+    '3-2': { ...baseSummary.semesterAverages['3-2'] },
+  }
+
+  for (const semesterKey of NAESIN_SEMESTER_KEYS) {
+    const rows = semesters[semesterKey] || []
+    const overallGrades: number[] = []
+    const coreGrades: number[] = []
+    for (const row of rows) {
+      const value = parseGradeNumber(row.classRank)
+      if (value === null) continue
+      overallGrades.push(value)
+      if (coreCurriculumNames.has(row.curriculum)) coreGrades.push(value)
+    }
+
+    nextSemesterAverages[semesterKey] = {
+      overall: formatAveragedGrade(overallGrades.map(String)),
+      core: formatAveragedGrade(coreGrades.map(String)),
+    }
+  }
+
+  return {
+    ...baseSummary,
+    semesterAverages: nextSemesterAverages,
+    overallAverage: formatAveragedGrade(NAESIN_SEMESTER_KEYS.map((key) => nextSemesterAverages[key].overall)),
+    coreAverage: formatAveragedGrade(NAESIN_SEMESTER_KEYS.map((key) => nextSemesterAverages[key].core)),
+  }
+}
+
+const applyClassRanksFromSummary = (
+  semesters: Record<NaesinSemesterKey, SemesterRow[]>,
+  summary: NaesinPreviewGradeSummary
+): Record<NaesinSemesterKey, SemesterRow[]> => {
+  const fallbackOverall = parseGradeNumber(summary.overallAverage)
+  const fallbackCore = parseGradeNumber(summary.coreAverage)
+  if (fallbackOverall === null && fallbackCore === null) return semesters
+
+  const defaultOverall = fallbackOverall ?? fallbackCore ?? 0
+  const defaultCore = fallbackCore ?? fallbackOverall ?? 0
+
+  const allocateGrades = (count: number, targetSum: number): number[] => {
+    if (count <= 0) return []
+    const sum = Math.round(targetSum)
+    const base = Math.max(1, Math.min(9, Math.floor(sum / count)))
+    const remainder = sum - base * count
+    const grades: number[] = []
+    if (remainder > 0 && base < 9) {
+      const high = Math.min(9, base + 1)
+      for (let i = 0; i < remainder; i++) grades.push(high)
+      for (let i = remainder; i < count; i++) grades.push(base)
+      return grades
+    }
+    for (let i = 0; i < count; i++) grades.push(base)
+    return grades
+  }
+
+  const nextSemesters = { ...semesters }
+  for (const semesterKey of NAESIN_SEMESTER_KEYS) {
+    const rows = semesters[semesterKey] || []
+    if (rows.length === 0) continue
+
+    const semOverall = parseGradeNumber(summary.semesterAverages[semesterKey].overall)
+    const semCore = parseGradeNumber(summary.semesterAverages[semesterKey].core)
+    const overall = semOverall ?? defaultOverall
+    const core = semCore ?? defaultCore
+
+    const coreRows = rows.filter((row) => coreCurriculumNames.has(row.curriculum))
+    const nonCoreRows = rows.filter((row) => !coreCurriculumNames.has(row.curriculum))
+    const nCore = coreRows.length
+    const nNonCore = nonCoreRows.length
+    const n = nCore + nNonCore
+    const sumTotal = Math.round(overall * n)
+    const sumCore = Math.round(core * nCore)
+    const sumNonCore = nNonCore > 0 ? sumTotal - sumCore : 0
+
+    const coreGrades = allocateGrades(nCore, nCore > 0 ? sumCore : 0)
+    const nonCoreGrades = allocateGrades(nNonCore, sumNonCore)
+    let coreIdx = 0
+    let nonCoreIdx = 0
+
+    nextSemesters[semesterKey] = rows.map((row) => {
+      const isCore = coreCurriculumNames.has(row.curriculum)
+      const rank = isCore ? coreGrades[coreIdx++] : nonCoreGrades[nonCoreIdx++]
+      const grade = rank >= 1 && rank <= 9 ? rank : 1
+      return { ...row, classRank: String(grade), rawScore: getRawScoreByClassRank(grade) }
+    })
+  }
+
+  return nextSemesters
+}
+
+const normalizeSemesterRows = (rows: unknown): SemesterRow[] => {
+  if (!Array.isArray(rows)) return [createEmptySemesterRow()]
+  const normalized = rows
+    .filter((row) => row && typeof row === 'object')
+    .map((row) => {
+      const r = row as Record<string, unknown>
+      const nextTrackType = normalizeTrackType(String(r.trackType || trackTypeOptions[0]))
+      const nextCurriculum = normalizeCurriculum(nextTrackType, String(r.curriculum || getCurriculumOptions(nextTrackType)[0] || ''))
+      const parsedRank = parseGradeNumber(String(r.classRank || ''))
+      const classRank = parsedRank !== null ? String(Math.min(9, Math.max(1, Math.round(parsedRank)))) : String(r.classRank || '')
+      const rawScore = parsedRank !== null ? (getRawScoreByClassRank(Math.min(9, Math.max(1, Math.round(parsedRank)))) || String(r.rawScore || '')) : String(r.rawScore || '')
+      return {
+        id: String(r.id || createEmptySemesterRow().id),
+        trackType: nextTrackType,
+        curriculum: nextCurriculum,
+        subject: String(r.subject || ''),
+        credits: String(r.credits || ''),
+        classRank,
+        rawScore,
+        avgScore: String(r.avgScore || ''),
+        stdDev: String(r.stdDev || ''),
+        studentCount: String(r.studentCount || ''),
+        achievement: String(r.achievement || '선택'),
+        distA: String(r.distA || ''),
+        distB: String(r.distB || ''),
+        distC: String(r.distC || ''),
+      }
+    })
+  return normalized.length > 0 ? normalized : [createEmptySemesterRow()]
+}
+
+const normalizeInlineNaesinDetailData = (rawData: unknown): InlineNaesinDetailData => {
+  const fallback = createEmptyInlineNaesinDetailData()
+  if (!rawData || typeof rawData !== 'object') return fallback
+
+  const parsed = rawData as Record<string, any>
+  const gradeSummary = normalizeNaesinGradeSummary(parsed) ?? fallback.gradeSummary
+  const extracurricular = parsed.extracurricular && typeof parsed.extracurricular === 'object'
+    ? {
+        attendance: {
+          '1': {
+            absence: String(parsed.extracurricular?.attendance?.['1']?.absence || ''),
+            tardy: String(parsed.extracurricular?.attendance?.['1']?.tardy || ''),
+            earlyLeave: String(parsed.extracurricular?.attendance?.['1']?.earlyLeave || ''),
+            result: String(parsed.extracurricular?.attendance?.['1']?.result || ''),
+          },
+          '2': {
+            absence: String(parsed.extracurricular?.attendance?.['2']?.absence || ''),
+            tardy: String(parsed.extracurricular?.attendance?.['2']?.tardy || ''),
+            earlyLeave: String(parsed.extracurricular?.attendance?.['2']?.earlyLeave || ''),
+            result: String(parsed.extracurricular?.attendance?.['2']?.result || ''),
+          },
+          '3': {
+            absence: String(parsed.extracurricular?.attendance?.['3']?.absence || ''),
+            tardy: String(parsed.extracurricular?.attendance?.['3']?.tardy || ''),
+            earlyLeave: String(parsed.extracurricular?.attendance?.['3']?.earlyLeave || ''),
+            result: String(parsed.extracurricular?.attendance?.['3']?.result || ''),
+          },
+        },
+        volunteerHours: {
+          '1': String(parsed.extracurricular?.volunteerHours?.['1'] || ''),
+          '2': String(parsed.extracurricular?.volunteerHours?.['2'] || ''),
+          '3': String(parsed.extracurricular?.volunteerHours?.['3'] || ''),
+        },
+      }
+    : fallback.extracurricular
+
+  return {
+    semesters: {
+      '1-1': normalizeSemesterRows(parsed.semesters?.['1-1']),
+      '1-2': normalizeSemesterRows(parsed.semesters?.['1-2']),
+      '2-1': normalizeSemesterRows(parsed.semesters?.['2-1']),
+      '2-2': normalizeSemesterRows(parsed.semesters?.['2-2']),
+      '3-1': normalizeSemesterRows(parsed.semesters?.['3-1']),
+      '3-2': normalizeSemesterRows(parsed.semesters?.['3-2']),
+    },
+    extracurricular,
+    gradeSummary,
+  }
+}
+
+const hasAnyNaesinSummaryValue = (summary: NaesinPreviewGradeSummary): boolean =>
+  summary.overallAverage.trim() !== ''
+  || summary.coreAverage.trim() !== ''
+  || NAESIN_SEMESTER_KEYS.some((key) =>
+    summary.semesterAverages[key].overall.trim() !== '' || summary.semesterAverages[key].core.trim() !== ''
+  )
+
 const hasLinkedNaesinData = (schoolGradeInput: Record<string, any> | null | undefined): boolean => {
   return normalizeNaesinGradeSummary(schoolGradeInput) !== null
 }
+
+const BUILTIN_MENTION_SUGGESTIONS: ScoreSetSuggestItem[] = [
+  { id: 'builtin-school-record', name: '생활기록부' },
+  { id: 'builtin-naesin', name: '내신성적' },
+  { id: 'builtin-mock-exam', name: '모의고사성적' },
+]
 
 const getQuickExampleResponse = (question: string): string | undefined => {
   return QUICK_EXAMPLE_RESPONSES[question.trim()]
@@ -265,6 +664,12 @@ interface Announcement {
 }
 
 const SCHOOL_RECORD_MODE_PARAM = 'mode=school-record'
+const SCHOOL_RECORD_PREVIEW_STEPS = [
+  { step: 1, label: '출결상황, 자격증 및 인증 취득상황' },
+  { step: 2, label: '창의적체험활동상황, 봉사활동실적' },
+  { step: 3, label: '교과학습발달상황' },
+  { step: 4, label: '행동특성 및 종합의견' },
+] as const
 
 export default function ChatPage() {
   const navigate = useNavigate()
@@ -290,7 +695,7 @@ export default function ChatPage() {
   const [isLoading, setIsLoading] = useState(false)
   // 트래킹(events)과 동일한 user_session 사용 → 로그인/비로그인 모두 동일 세션으로 연동
   const [sessionId, setSessionId] = useState(() => getSessionId())
-  const { isDesktopLayout, layoutMode, setLayoutMode } = useLayoutMode()
+  const { isDesktopLayout } = useLayoutMode()
   const [isSideNavOpen, setIsSideNavOpen] = useState(() => isDesktopLayout)
   const [isAgentPanelOpen, setIsAgentPanelOpen] = useState(false)
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false)
@@ -345,13 +750,11 @@ export default function ChatPage() {
   const [currentLog, setCurrentLog] = useState<string>('') // 현재 진행 상태 로그
   const [searchQuery, setSearchQuery] = useState<string>('') // 채팅 검색어
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false) // 검색창 열림 상태
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null) // 카테고리 선택 상태
+  const [selectedCategory, setSelectedCategory] = useState<string | null>('합격 예측') // 첫 접속 기본 카테고리
   const [exampleFaqModalIndex, setExampleFaqModalIndex] = useState<number | null>(null) // 예시 질문 모달 (0~12)
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false)
-  const [isLayoutMenuOpen, setIsLayoutMenuOpen] = useState(false)
   const userMenuRef = useRef<HTMLDivElement>(null)
   const userMenuRefMobile = useRef<HTMLDivElement>(null)
-  const layoutMenuRef = useRef<HTMLDivElement>(null)
   const [profileImageUrl, setProfileImageUrl] = useState<string | null>(null)
   const [profileBannerUrl, setProfileBannerUrl] = useState<string | null>(null)
   const [profileDisplayName, setProfileDisplayName] = useState<string | null>(null)
@@ -366,6 +769,7 @@ export default function ChatPage() {
   const [editProfileSaving, setEditProfileSaving] = useState(false)
   const editProfileInputRef = useRef<HTMLInputElement>(null)
   const editBannerInputRef = useRef<HTMLInputElement>(null)
+  const schoolRecordPdfInputRef = useRef<HTMLInputElement>(null)
   const [schoolRecordMenuTab, setSchoolRecordMenuTab] = useState<'school_record' | 'grade' | 'mock_exam'>('school_record')
   const DEFAULT_DESCRIPTION = '생활기록부, 내신 성적, 모의고사 성적을 연동하면 개인 기록 기반으로 더 정밀한 답변을 받을 수 있어요.'
   const profileDisplayNameText = (profileDisplayName ?? user?.name ?? '회원').trim() || '회원'
@@ -474,9 +878,9 @@ export default function ChatPage() {
   const schoolRecordModeRef = useRef(false)
   const [isSchoolRecordToolModalOpen, setIsSchoolRecordToolModalOpen] = useState(false)
   const [isSchoolGradeInputModalOpen, setIsSchoolGradeInputModalOpen] = useState(false)
-  const [autoOpenSavedGradeReport, setAutoOpenSavedGradeReport] = useState(false)
-  /** 오른쪽 패널 전환: 채팅 | 성적입력 | 입시기록 메뉴 | 생기부 연동 (사이드 네비 유지) */
-  const [rightPanelView, setRightPanelView] = useState<'chat' | 'grade_input' | 'school_record_menu' | 'school_record_link' | 'mock_exam_input'>('chat')
+  const [schoolRecordPdfUploading, setSchoolRecordPdfUploading] = useState(false)
+  /** 오른쪽 패널 전환: 채팅 | 입시기록 메뉴 */
+  const [rightPanelView, setRightPanelView] = useState<'chat' | 'school_record_menu'>('chat')
   const [schoolRecordLinked, setSchoolRecordLinked] = useState<boolean | null>(null)
   const [schoolRecordStatusLoading, setSchoolRecordStatusLoading] = useState(false)
   const [savedSchoolRecordReports, setSavedSchoolRecordReports] = useState<SavedSchoolRecordReport[]>([])
@@ -505,18 +909,89 @@ export default function ChatPage() {
   const [scorePredictionScoreSets, setScorePredictionScoreSets] = useState<Array<{ id: string; name: string }>>([])
   const [scorePredictionScoreSetsLoading, setScorePredictionScoreSetsLoading] = useState(false)
   const [scorePredictionNaesinLinked, setScorePredictionNaesinLinked] = useState(false)
+  const [linkedNaesinSummary, setLinkedNaesinSummary] = useState<NaesinPreviewGradeSummary | null>(null)
+  const [linkedNaesinRawInput, setLinkedNaesinRawInput] = useState<Record<string, any> | null>(null)
+  const [inlineNaesinSummary, setInlineNaesinSummary] = useState<NaesinPreviewGradeSummary>(createEmptyNaesinGradeSummary)
+  const [isNaesinCardExpanded, setIsNaesinCardExpanded] = useState(false)
+  const [isMockExamCardExpanded, setIsMockExamCardExpanded] = useState(false)
+  const [inlineNaesinDetailData, setInlineNaesinDetailData] = useState<InlineNaesinDetailData>(createEmptyInlineNaesinDetailData)
+  const [selectedNaesinDetailSemester, setSelectedNaesinDetailSemester] = useState<NaesinSemesterKey>('1-1')
+  const [inlineNaesinDetailView, setInlineNaesinDetailView] = useState<'semester' | 'attendance'>('semester')
+  const [isInlineNaesinDirty, setIsInlineNaesinDirty] = useState(false)
+  const [isInlineNaesinSaving, setIsInlineNaesinSaving] = useState(false)
+  const [floatingNoticeMessage, setFloatingNoticeMessage] = useState<string | null>(null)
+  const [isFloatingNoticeFading, setIsFloatingNoticeFading] = useState(false)
+  const [schoolRecordGuideOpen, setSchoolRecordGuideOpen] = useState(false)
+  const [schoolRecordPreviewOpen, setSchoolRecordPreviewOpen] = useState(false)
+  const [schoolRecordPreviewStep, setSchoolRecordPreviewStep] = useState<number | null>(null)
+  const [schoolRecordParsedPreview, setSchoolRecordParsedPreview] = useState<Record<string, any> | null>(null)
+  const [schoolRecordPreviewLoading, setSchoolRecordPreviewLoading] = useState(false)
+  const [schoolRecordGuideMethodId, setSchoolRecordGuideMethodId] = useState<GuideMethodId>('gov24')
   const [referralPromoExpiresAt, setReferralPromoExpiresAt] = useState<number | null>(null)
   /** 내 점수로 어디 갈 수 있을까 전용 채팅일 때 true (RollingPlaceholder·최근 컨텐츠 숨김) */
   const [scorePredictionMode, setScorePredictionMode] = useState(false)
+  const [scorePredictionBuilderOpen, setScorePredictionBuilderOpen] = useState(false)
+  const [predictionCatalog, setPredictionCatalog] = useState<PredictionUniversityRow[]>([])
+  const [predictionCatalogLoading, setPredictionCatalogLoading] = useState(false)
+  const [predictionSelectedScoreKey, setPredictionSelectedScoreKey] = useState<string>('naesin')
+  const [predictionUniversityQuery, setPredictionUniversityQuery] = useState('')
+  const [predictionMajorQuery, setPredictionMajorQuery] = useState('')
+  const [predictionScoreSelectorOpen, setPredictionScoreSelectorOpen] = useState(false)
+  const [predictionUniversityOpen, setPredictionUniversityOpen] = useState(false)
+  const [predictionMajorOpen, setPredictionMajorOpen] = useState(false)
   const isGalaxySession = isGalaxyAppSession()
   const isReferralPromoActive = !!referralPromoExpiresAt && referralPromoExpiresAt > Date.now()
   const hasProAccess = !!user?.is_premium || isAppBuild() || isReferralPromoActive
   const isInputLocked = sessionLockedByMasking && !isAuthenticated
+  const floatingNoticeFadeTimeoutRef = useRef<number | null>(null)
+  const floatingNoticeHideTimeoutRef = useRef<number | null>(null)
+  const inlineNaesinSaveTimeoutRef = useRef<number | null>(null)
+  const schoolRecordGuideMethods = useMemo(() => getStudentGuideMethods('student'), [])
+  const currentSchoolRecordGuideMethod =
+    schoolRecordGuideMethods.find((method) => method.id === schoolRecordGuideMethodId) || schoolRecordGuideMethods[0]
   const getRequestToken = (): string | undefined => {
     if (accessToken) return accessToken
     return localStorage.getItem('access_token') || undefined
   }
   const runtimeApiBase = getApiBaseUrl() || import.meta.env.VITE_API_URL || 'http://localhost:8000'
+  const predictionScoreOptions = useMemo(() => {
+    const items: Array<{ key: string; label: string; type: 'naesin' | 'score' }> = []
+    if (scorePredictionNaesinLinked) {
+      items.push({ key: 'naesin', label: '내신 성적', type: 'naesin' })
+    }
+    scorePredictionScoreSets.forEach((item) => {
+      items.push({ key: item.id, label: item.name, type: 'score' })
+    })
+    return items
+  }, [scorePredictionNaesinLinked, scorePredictionScoreSets])
+  const predictionUniversitySuggestions = useMemo(() => {
+    const seen = new Set<string>()
+    const query = predictionUniversityQuery.trim().toLowerCase()
+    return predictionCatalog
+      .map((item) => item.university?.trim())
+      .filter((name): name is string => !!name)
+      .filter((name) => {
+        if (seen.has(name)) return false
+        seen.add(name)
+        return query ? name.toLowerCase().includes(query) : true
+      })
+      .slice(0, 8)
+  }, [predictionCatalog, predictionUniversityQuery])
+  const predictionMajorSuggestions = useMemo(() => {
+    const seen = new Set<string>()
+    const query = predictionMajorQuery.trim().toLowerCase()
+    const university = predictionUniversityQuery.trim().toLowerCase()
+    return predictionCatalog
+      .filter((item) => !university || item.university?.trim().toLowerCase() === university)
+      .map((item) => item.department?.trim())
+      .filter((name): name is string => !!name)
+      .filter((name) => {
+        if (seen.has(name)) return false
+        seen.add(name)
+        return query ? name.toLowerCase().includes(query) : true
+      })
+      .slice(0, 8)
+  }, [predictionCatalog, predictionMajorQuery, predictionUniversityQuery])
 
   const openThinkingModeModal = (e: React.MouseEvent) => {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
@@ -530,6 +1005,28 @@ export default function ChatPage() {
   const openProModal = () => {
     if (isGalaxySession) return
     setIsProModalOpen(true)
+  }
+  const handleThinkingModeSelect = () => {
+    if (hasProAccess) {
+      setThinkingMode(true)
+      closeThinkingModeModal()
+      return
+    }
+
+    closeThinkingModeModal()
+
+    if (!isAuthenticated) {
+      trackUserAction('login_modal_open', 'thinking_mode')
+      sessionStorage.setItem('uniroad_login_modal_source', 'thinking_mode')
+      setAuthModalMessage({
+        title: 'Thinking 모드는 로그인 후 사용할 수 있어요',
+        description: '로그인하면 Pro 업그레이드 또는 추천인 혜택 적용 후 바로 사용할 수 있습니다.',
+      })
+      setIsAuthModalOpen(true)
+      return
+    }
+
+    openProModal()
   }
   useEffect(() => {
     try {
@@ -612,17 +1109,530 @@ export default function ChatPage() {
     }
   }
 
+  const clearFloatingNoticeTimers = useCallback(() => {
+    if (floatingNoticeFadeTimeoutRef.current) {
+      window.clearTimeout(floatingNoticeFadeTimeoutRef.current)
+      floatingNoticeFadeTimeoutRef.current = null
+    }
+    if (floatingNoticeHideTimeoutRef.current) {
+      window.clearTimeout(floatingNoticeHideTimeoutRef.current)
+      floatingNoticeHideTimeoutRef.current = null
+    }
+  }, [])
+
+  const triggerFloatingNotice = useCallback((message: string) => {
+    clearFloatingNoticeTimers()
+    setFloatingNoticeMessage(message)
+    setIsFloatingNoticeFading(false)
+    floatingNoticeFadeTimeoutRef.current = window.setTimeout(() => {
+      setIsFloatingNoticeFading(true)
+    }, 1200)
+    floatingNoticeHideTimeoutRef.current = window.setTimeout(() => {
+      setFloatingNoticeMessage(null)
+      setIsFloatingNoticeFading(false)
+    }, 2200)
+  }, [clearFloatingNoticeTimers])
+
+  const refreshLinkedDataState = useCallback(async () => {
+    if (!isAuthenticated) {
+      setSchoolRecordLinked(false)
+      setScorePredictionScoreSets([])
+      setScorePredictionNaesinLinked(false)
+      setLinkedNaesinSummary(null)
+      return {
+        schoolRecordLinked: false,
+        scoreSets: [] as Array<{ id: string; name: string }>,
+        naesinLinked: false,
+      }
+    }
+
+    const token = getRequestToken()
+    if (!token) {
+      setSchoolRecordLinked(false)
+      setScorePredictionScoreSets([])
+      setScorePredictionNaesinLinked(false)
+      setLinkedNaesinSummary(null)
+      return {
+        schoolRecordLinked: false,
+        scoreSets: [] as Array<{ id: string; name: string }>,
+        naesinLinked: false,
+      }
+    }
+
+    const [schoolRecordStatus, items, schoolGradeInput] = await Promise.all([
+      getSchoolRecordStatus(token).catch(() => ({ linked: false })),
+      listScoreSets(sessionId, token).catch(() => []),
+      getMySchoolGradeInput(token).catch(() => ({ school_grade_input: {} as Record<string, any> })),
+    ])
+
+    const nextScoreSets = items.map((item) => ({ id: item.id, name: item.name }))
+    const nextNaesinSummary = normalizeNaesinGradeSummary(schoolGradeInput?.school_grade_input)
+    const nextNaesinLinked = nextNaesinSummary !== null
+    const nextSchoolRecordLinked = schoolRecordStatus.linked === true
+
+    setSchoolRecordLinked(nextSchoolRecordLinked)
+    setScorePredictionScoreSets(nextScoreSets)
+    setScorePredictionNaesinLinked(nextNaesinLinked)
+    setLinkedNaesinSummary(nextNaesinSummary)
+    setLinkedNaesinRawInput(
+      schoolGradeInput?.school_grade_input && typeof schoolGradeInput.school_grade_input === 'object'
+        ? schoolGradeInput.school_grade_input
+        : null
+    )
+
+    return {
+      schoolRecordLinked: nextSchoolRecordLinked,
+      scoreSets: nextScoreSets,
+      naesinLinked: nextNaesinLinked,
+    }
+  }, [isAuthenticated, sessionId, accessToken])
+
+  useEffect(() => {
+    if (!isAuthenticated || !schoolRecordLinked) {
+      setSchoolRecordParsedPreview(null)
+      setSchoolRecordPreviewLoading(false)
+      setSchoolRecordPreviewStep(null)
+      setSchoolRecordPreviewOpen(false)
+      return
+    }
+
+    const token = getRequestToken()
+    if (!token) return
+
+    let cancelled = false
+    setSchoolRecordPreviewLoading(true)
+
+    fetch(`${runtimeApiBase}/api/school-record/forms`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? res.json() : { forms: {} }))
+      .then((data) => {
+        if (cancelled) return
+        const parsed =
+          data?.forms?.parsedSchoolRecord && typeof data.forms.parsedSchoolRecord === 'object'
+            ? data.forms.parsedSchoolRecord
+            : null
+        setSchoolRecordParsedPreview(parsed)
+      })
+      .catch(() => {
+        if (!cancelled) setSchoolRecordParsedPreview(null)
+      })
+      .finally(() => {
+        if (!cancelled) setSchoolRecordPreviewLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [isAuthenticated, schoolRecordLinked, runtimeApiBase, accessToken])
+
+  const handleDirectSchoolRecordPdfUpload = useCallback(async (file: File | null) => {
+    if (!file) return
+
+    if (!isAuthenticated) {
+      setIsAuthModalOpen(true)
+      return
+    }
+
+    if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
+      triggerFloatingNotice('PDF 파일만 업로드할 수 있습니다.')
+      return
+    }
+
+    try {
+      setSchoolRecordPdfUploading(true)
+      await uploadSchoolRecordPdf(file, getRequestToken())
+      await refreshLinkedDataState()
+      triggerFloatingNotice('생활기록부 업로드가 완료되었습니다.')
+    } catch (error: any) {
+      triggerFloatingNotice(error?.message || '생활기록부 업로드에 실패했습니다.')
+    } finally {
+      setSchoolRecordPdfUploading(false)
+    }
+  }, [isAuthenticated, refreshLinkedDataState, triggerFloatingNotice])
+
+  useEffect(() => {
+    if (isInlineNaesinDirty) return
+    setInlineNaesinSummary(linkedNaesinSummary ?? createEmptyNaesinGradeSummary())
+  }, [linkedNaesinSummary, isInlineNaesinDirty])
+
+  useEffect(() => {
+    if (isInlineNaesinDirty) return
+    setInlineNaesinDetailData(normalizeInlineNaesinDetailData(linkedNaesinRawInput))
+  }, [linkedNaesinRawInput, isInlineNaesinDirty])
+
+  const handleInlineNaesinSummaryChange = useCallback((field: 'overallAverage' | 'coreAverage', value: string) => {
+    const sanitized = sanitizeGradeNumberInput(value)
+    const semesterField = field === 'overallAverage' ? 'overall' : 'core'
+    setIsInlineNaesinDirty(true)
+    setInlineNaesinSummary((prev) => {
+      const nextSummary = {
+        ...prev,
+        [field]: sanitized,
+        semesterAverages: NAESIN_SEMESTER_KEYS.reduce<NaesinPreviewGradeSummary['semesterAverages']>((acc, key) => {
+          acc[key] = {
+            ...prev.semesterAverages[key],
+            [semesterField]: sanitized,
+          }
+          return acc
+        }, {} as NaesinPreviewGradeSummary['semesterAverages']),
+      }
+      setInlineNaesinDetailData((detailPrev) => ({
+        ...detailPrev,
+        semesters: applyClassRanksFromSummary(detailPrev.semesters, nextSummary),
+        gradeSummary: nextSummary,
+      }))
+      return nextSummary
+    })
+  }, [])
+
+  const handleInlineNaesinSemesterChange = useCallback((semester: NaesinSemesterKey, field: 'overall' | 'core', value: string) => {
+    const sanitized = sanitizeGradeNumberInput(value)
+    setIsInlineNaesinDirty(true)
+    setInlineNaesinSummary((prev) => {
+      const nextSemesterAverages = {
+        ...prev.semesterAverages,
+        [semester]: {
+          ...prev.semesterAverages[semester],
+          [field]: sanitized,
+        },
+      }
+
+      const nextSummary = {
+        ...prev,
+        semesterAverages: nextSemesterAverages,
+        overallAverage: field === 'overall'
+          ? formatAveragedGrade(NAESIN_SEMESTER_KEYS.map((key) => nextSemesterAverages[key].overall))
+          : prev.overallAverage,
+        coreAverage: field === 'core'
+          ? formatAveragedGrade(NAESIN_SEMESTER_KEYS.map((key) => nextSemesterAverages[key].core))
+          : prev.coreAverage,
+      }
+      setInlineNaesinDetailData((detailPrev) => ({
+        ...detailPrev,
+        semesters: applyClassRanksFromSummary(detailPrev.semesters, nextSummary),
+        gradeSummary: nextSummary,
+      }))
+      return nextSummary
+    })
+  }, [])
+
+  const updateInlineNaesinSemesterRow = useCallback((
+    semester: NaesinSemesterKey,
+    rowId: string,
+    field: keyof Omit<SemesterRow, 'id'>,
+    value: string
+  ) => {
+    setIsInlineNaesinDirty(true)
+    setInlineNaesinDetailData((prev) => {
+      const nextSemesters = {
+        ...prev.semesters,
+        [semester]: prev.semesters[semester].map((row) => {
+          if (row.id !== rowId) return row
+
+          if (field === 'trackType') {
+            const nextTrackType = normalizeTrackType(value)
+            const nextCurriculum = normalizeCurriculum(nextTrackType, row.curriculum)
+            const subjects = getSubjectOptions(nextTrackType, nextCurriculum)
+            const nextSubject = subjects.includes(row.subject) ? row.subject : (subjects[0] || row.subject)
+            return { ...row, trackType: nextTrackType, curriculum: nextCurriculum, subject: nextSubject }
+          }
+
+          if (field === 'curriculum') {
+            const nextCurriculum = normalizeCurriculum(row.trackType, value)
+            const subjects = getSubjectOptions(row.trackType, nextCurriculum)
+            const nextSubject = subjects.includes(row.subject) ? row.subject : (subjects[0] || row.subject)
+            return { ...row, curriculum: nextCurriculum, subject: nextSubject }
+          }
+
+          if (field === 'classRank') {
+            const sanitized = sanitizeClassRankInput(value)
+            const grade = sanitized ? Number.parseInt(sanitized, 10) : null
+            const rawScore = grade != null && grade >= 1 && grade <= 9 ? getRawScoreByClassRank(grade) : row.rawScore
+            return { ...row, classRank: sanitized, rawScore }
+          }
+
+          return { ...row, [field]: value }
+        }),
+      }
+      const nextSummary = buildGradeSummaryFromSemesters(nextSemesters, prev.gradeSummary)
+      setInlineNaesinSummary(nextSummary)
+      return { ...prev, semesters: nextSemesters, gradeSummary: nextSummary }
+    })
+  }, [])
+
+  const updateInlineNaesinAttendanceField = useCallback((grade: GradeKey, field: keyof ExtracurricularAttendanceRow, value: string) => {
+    const sanitized = sanitizeNumberInput(value)
+    setIsInlineNaesinDirty(true)
+    setInlineNaesinDetailData((prev) => ({
+      ...prev,
+      extracurricular: {
+        ...prev.extracurricular,
+        attendance: {
+          ...prev.extracurricular.attendance,
+          [grade]: {
+            ...prev.extracurricular.attendance[grade],
+            [field]: sanitized,
+          },
+        },
+      },
+    }))
+  }, [])
+
+  const updateInlineNaesinVolunteerHours = useCallback((grade: GradeKey, value: string) => {
+    const sanitized = sanitizeNumberInput(value)
+    setIsInlineNaesinDirty(true)
+    setInlineNaesinDetailData((prev) => ({
+      ...prev,
+      extracurricular: {
+        ...prev.extracurricular,
+        volunteerHours: {
+          ...prev.extracurricular.volunteerHours,
+          [grade]: sanitized,
+        },
+      },
+    }))
+  }, [])
+
+  const addInlineNaesinSemesterRow = useCallback((semester: NaesinSemesterKey) => {
+    setIsInlineNaesinDirty(true)
+    setInlineNaesinDetailData((prev) => ({
+      ...prev,
+      semesters: {
+        ...prev.semesters,
+        [semester]: [...prev.semesters[semester], createEmptySemesterRow()],
+      },
+    }))
+  }, [])
+
+  const deleteInlineNaesinSemesterRow = useCallback((semester: NaesinSemesterKey, rowId: string) => {
+    setIsInlineNaesinDirty(true)
+    setInlineNaesinDetailData((prev) => {
+      const filteredRows = prev.semesters[semester].filter((row) => row.id !== rowId)
+      const nextSemesters = {
+        ...prev.semesters,
+        [semester]: filteredRows.length > 0 ? filteredRows : [createEmptySemesterRow()],
+      }
+      const nextSummary = buildGradeSummaryFromSemesters(nextSemesters, prev.gradeSummary)
+      setInlineNaesinSummary(nextSummary)
+      return { ...prev, semesters: nextSemesters, gradeSummary: nextSummary }
+    })
+  }, [])
+
+  const persistInlineNaesinData = useCallback(async (detailData: InlineNaesinDetailData) => {
+    const token = getRequestToken()
+    if (!token) return
+
+    const baseData = linkedNaesinRawInput && typeof linkedNaesinRawInput === 'object' ? linkedNaesinRawInput : {}
+    const nextData = {
+      ...baseData,
+      semesters: detailData.semesters,
+      extracurricular: detailData.extracurricular,
+      gradeSummary: detailData.gradeSummary,
+    }
+
+    setIsInlineNaesinSaving(true)
+    try {
+      const apiBase = getApiBaseUrl()
+      const response = await fetch(`${apiBase ? `${apiBase}/api` : '/api'}/profile/me/school-grade-input`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ school_grade_input: nextData }),
+      })
+
+      if (!response.ok) {
+        throw new Error('내신 성적 저장에 실패했습니다.')
+      }
+
+      const payload = await response.json().catch(() => null)
+      const savedInput =
+        payload?.school_grade_input && typeof payload.school_grade_input === 'object'
+          ? payload.school_grade_input
+          : nextData
+      const savedSummary = normalizeNaesinGradeSummary(savedInput) ?? createEmptyNaesinGradeSummary()
+      const savedDetail = normalizeInlineNaesinDetailData(savedInput)
+
+      setLinkedNaesinRawInput(savedInput)
+      setLinkedNaesinSummary(hasAnyNaesinSummaryValue(savedSummary) ? savedSummary : null)
+      setInlineNaesinSummary(savedSummary)
+      setInlineNaesinDetailData(savedDetail)
+      setScorePredictionNaesinLinked(hasAnyNaesinSummaryValue(savedSummary))
+      setIsInlineNaesinDirty(false)
+      try {
+        localStorage.setItem('uniroad_school_grade_input_v3', JSON.stringify(savedInput))
+      } catch {
+        // ignore localStorage failure
+      }
+    } catch (error: any) {
+      triggerFloatingNotice(error?.message || '내신 성적 저장에 실패했습니다.')
+    } finally {
+      setIsInlineNaesinSaving(false)
+    }
+  }, [linkedNaesinRawInput, triggerFloatingNotice, accessToken])
+
+  useEffect(() => {
+    if (!isInlineNaesinDirty) return
+    if (inlineNaesinSaveTimeoutRef.current) {
+      window.clearTimeout(inlineNaesinSaveTimeoutRef.current)
+    }
+    inlineNaesinSaveTimeoutRef.current = window.setTimeout(() => {
+      void persistInlineNaesinData(inlineNaesinDetailData)
+    }, 500)
+    return () => {
+      if (inlineNaesinSaveTimeoutRef.current) {
+        window.clearTimeout(inlineNaesinSaveTimeoutRef.current)
+        inlineNaesinSaveTimeoutRef.current = null
+      }
+    }
+  }, [inlineNaesinDetailData, isInlineNaesinDirty, persistInlineNaesinData])
+
+  const currentInlineSemesterRows = useMemo(
+    () => inlineNaesinDetailData.semesters[selectedNaesinDetailSemester] || [createEmptySemesterRow()],
+    [inlineNaesinDetailData.semesters, selectedNaesinDetailSemester]
+  )
+
+  const naesinDetailNavigationSequence = [...NAESIN_SEMESTER_KEYS, 'attendance'] as const
+  const selectedNaesinDetailNavigationKey = inlineNaesinDetailView === 'semester' ? selectedNaesinDetailSemester : 'attendance'
+  const selectedNaesinDetailNavigationIndex = naesinDetailNavigationSequence.indexOf(selectedNaesinDetailNavigationKey)
+  const hasPreviousNaesinDetailNavigation = selectedNaesinDetailNavigationIndex > 0
+  const hasNextNaesinDetailNavigation = selectedNaesinDetailNavigationIndex < naesinDetailNavigationSequence.length - 1
+
+  const attendanceTotalsByGrade = useMemo(
+    () =>
+      gradeKeys.reduce<Record<GradeKey, number>>((acc, grade) => {
+        const row = inlineNaesinDetailData.extracurricular.attendance[grade]
+        acc[grade] =
+          toNonNegativeInt(row.absence)
+          + toNonNegativeInt(row.tardy)
+          + toNonNegativeInt(row.earlyLeave)
+          + toNonNegativeInt(row.result)
+        return acc
+      }, { '1': 0, '2': 0, '3': 0 }),
+    [inlineNaesinDetailData.extracurricular.attendance]
+  )
+
+  const attendanceColumnTotals = useMemo(
+    () =>
+      gradeKeys.reduce(
+        (acc, grade) => {
+          const row = inlineNaesinDetailData.extracurricular.attendance[grade]
+          acc.absence += toNonNegativeInt(row.absence)
+          acc.tardy += toNonNegativeInt(row.tardy)
+          acc.earlyLeave += toNonNegativeInt(row.earlyLeave)
+          acc.result += toNonNegativeInt(row.result)
+          return acc
+        },
+        { absence: 0, tardy: 0, earlyLeave: 0, result: 0 }
+      ),
+    [inlineNaesinDetailData.extracurricular.attendance]
+  )
+
+  const attendanceGrandTotal = useMemo(
+    () => gradeKeys.reduce((sum, grade) => sum + attendanceTotalsByGrade[grade], 0),
+    [attendanceTotalsByGrade]
+  )
+
+  const volunteerTotal = useMemo(
+    () => gradeKeys.reduce((sum, grade) => sum + toNonNegativeInt(inlineNaesinDetailData.extracurricular.volunteerHours[grade]), 0),
+    [inlineNaesinDetailData.extracurricular.volunteerHours]
+  )
+
+  const resetScorePredictionBuilder = useCallback((selectedScoreKey?: string) => {
+    const fallbackScoreKey = selectedScoreKey
+      ?? (scorePredictionNaesinLinked ? 'naesin' : scorePredictionScoreSets[0]?.id ?? 'naesin')
+    setPredictionSelectedScoreKey(fallbackScoreKey)
+    setPredictionUniversityQuery('')
+    setPredictionMajorQuery('')
+    setPredictionScoreSelectorOpen(false)
+    setPredictionUniversityOpen(false)
+    setPredictionMajorOpen(false)
+    setScorePredictionBuilderOpen(true)
+  }, [scorePredictionNaesinLinked, scorePredictionScoreSets])
+
+  const activateScorePredictionBuilder = useCallback(async (selectedScoreKey?: string) => {
+    await startNewChat()
+    setSchoolRecordToolEnabled(false)
+    schoolRecordModeRef.current = false
+    setScorePredictionMode(true)
+    setSkipNaesinCardThisSession(true)
+    resetScorePredictionBuilder(selectedScoreKey)
+    setInput('')
+    if (isSchoolRecordModeUrl) navigate('/chat', { replace: true })
+  }, [isSchoolRecordModeUrl, navigate, resetScorePredictionBuilder, startNewChat])
+
+  const buildScorePredictionQuestion = useCallback(() => {
+    const selectedScore = predictionScoreOptions.find((item) => item.key === predictionSelectedScoreKey)
+    if (!selectedScore) return ''
+    const scoreMention = selectedScore.type === 'naesin'
+      ? '@내신 성적'
+      : `@${selectedScore.label.replace(/^@/, '')}`
+    const university = predictionUniversityQuery.trim()
+    const major = predictionMajorQuery.trim()
+    if (university && major) return `${scoreMention}으로 ${university}의 ${major} 갈 수 있을까?`
+    if (university) return `${scoreMention}으로 ${university} 갈 수 있을까?`
+    if (major) return `${scoreMention}으로 ${major} 갈 수 있을까?`
+    return `${scoreMention}으로 갈 수 있는 대학 알려줘`
+  }, [predictionMajorQuery, predictionScoreOptions, predictionSelectedScoreKey, predictionUniversityQuery])
+
   const handleConfirmScorePredictionStart = async () => {
     setIsScorePredictionStartModalOpen(false)
     // 성적이 연동되어 있으면 새 채팅, 없으면 내 프로필(입시 기록) 화면으로 이동
     const hasAnyLinkedScore = scorePredictionScoreSets.length > 0 || scorePredictionNaesinLinked
     if (hasAnyLinkedScore) {
-      await startNewChat()
+      await activateScorePredictionBuilder()
     } else {
       setRightPanelView('school_record_menu')
       setSchoolRecordMenuTab('school_record')
     }
   }
+
+  useEffect(() => {
+    void refreshLinkedDataState()
+  }, [refreshLinkedDataState])
+
+  useEffect(() => {
+    return () => {
+      clearFloatingNoticeTimers()
+    }
+  }, [clearFloatingNoticeTimers])
+
+  useEffect(() => {
+    if (!scorePredictionMode || predictionCatalog.length > 0 || predictionCatalogLoading) return
+    let disposed = false
+    setPredictionCatalogLoading(true)
+    Promise.all(['가', '나', '다'].map(async (gun) => {
+      const response = await fetch(`${runtimeApiBase}/api/calculator/universities?gun=${encodeURIComponent(gun)}`)
+      if (!response.ok) throw new Error('prediction_catalog_fetch_failed')
+      const data = await response.json()
+      return Array.isArray(data) ? data as PredictionUniversityRow[] : []
+    }))
+      .then((groups) => {
+        if (disposed) return
+        const merged = groups.flat()
+        setPredictionCatalog(merged)
+      })
+      .catch(() => {
+        if (disposed) return
+        setPredictionCatalog([])
+      })
+      .finally(() => {
+        if (disposed) return
+        setPredictionCatalogLoading(false)
+      })
+
+    return () => {
+      disposed = true
+    }
+  }, [predictionCatalog.length, predictionCatalogLoading, runtimeApiBase, scorePredictionMode])
+
+  useEffect(() => {
+    if (!schoolRecordGuideMethods.some((method) => method.id === schoolRecordGuideMethodId)) {
+      setSchoolRecordGuideMethodId(schoolRecordGuideMethods[0]?.id ?? 'gov24')
+    }
+  }, [schoolRecordGuideMethods, schoolRecordGuideMethodId])
 
   useEffect(() => {
     if (!isScorePredictionStartModalOpen || !sessionId) return
@@ -680,27 +1690,15 @@ export default function ChatPage() {
 
   const handleSelectScoreSetForPrediction = async (item: { id: string; name: string }) => {
     setIsScorePredictionStartModalOpen(false)
-    const nameForQuery = item.name.startsWith('@') ? item.name : `@${item.name}`
-    await startNewChat()
     setActiveScoreId(item.id)
-    // 점수 예측만 보이게 — 생기부 분석 끄기
-    setSchoolRecordToolEnabled(false)
-    schoolRecordModeRef.current = false
-    setScorePredictionMode(true)
-    setInput(`${nameForQuery}으로 갈 수 있는 대학 알려줘`)
-    if (isSchoolRecordModeUrl) navigate('/chat', { replace: true })
+    await activateScorePredictionBuilder(item.id)
   }
 
   /** 합격 예측 모달에서 내신 성적 클릭 시: 새 채팅 시작 후 입력창에만 해당 문구 넣기 (전송은 사용자가 직접) */
   const handleSelectNaesinForPrediction = () => {
     setIsScorePredictionStartModalOpen(false)
-    startNewChat()
     setActiveScoreId(undefined)
-    setSchoolRecordToolEnabled(false)
-    schoolRecordModeRef.current = false
-    setScorePredictionMode(true)
-    setInput('@내신 성적으로 갈 수 있는 학교 알려줘')
-    if (isSchoolRecordModeUrl) navigate('/chat', { replace: true })
+    void activateScorePredictionBuilder('naesin')
   }
 
   /**
@@ -735,37 +1733,97 @@ export default function ChatPage() {
 
   const handleConfirmSchoolRecordToolStart = async () => {
     setIsSchoolRecordToolModalOpen(false)
+    if (!hasProAccess) {
+      openProModal()
+      return
+    }
     // 모달에서 "새 채팅"이 보인 경우 이미 연동된 상태이므로, 재조회 없이 반드시 생기부 새 채팅으로 이동
     await activateSchoolRecordTool(schoolRecordLinked === true ? true : schoolRecordLinked === false ? false : undefined)
   }
 
-  const handleSchoolRecordShortcut = () => {
+  const handleSelectSchoolRecordStartAction = async (actionId: string) => {
+    const action = schoolRecordStartActions.find((item) => item.id === actionId)
+    if (!action) return
+    setIsSchoolRecordToolModalOpen(false)
+    if (!hasProAccess) {
+      openProModal()
+      return
+    }
+    await activateSchoolRecordTool(schoolRecordLinked === true ? true : schoolRecordLinked === false ? false : undefined)
+    window.setTimeout(() => {
+      void handleSend(action.question)
+    }, 100)
+  }
+
+  const handleSchoolRecordShortcut = async () => {
+    if (!isAuthenticated) {
+      trackUserAction('login_modal_open', 'school_record_analysis')
+      sessionStorage.setItem('uniroad_login_modal_source', 'school_record_analysis')
+      setIsAuthModalOpen(true)
+      if (!isDesktopLayout) setIsSideNavOpen(false)
+      return
+    }
+
+    const linked = schoolRecordLinked === true ? true : await fetchSchoolRecordLinkedStatus()
+    setSchoolRecordLinked(linked)
+    if (!linked) {
+      triggerFloatingNotice('먼저 생활기록부를 연동해 주세요')
+      if (!isDesktopLayout) setIsSideNavOpen(false)
+      return
+    }
+
     if (!hasProAccess) {
       openProModal()
       if (!isDesktopLayout) setIsSideNavOpen(false)
       return
     }
 
+    // 생기부 분석 진입: 연동 여부 확인 후 분석 전용 채팅으로 이동
+    setRightPanelView('chat')
+    setIsSchoolRecordToolModalOpen(true)
+    if (!isDesktopLayout) setIsSideNavOpen(false)
+  }
+
+  const handleToggleSchoolRecordInputMode = async () => {
+    if (schoolRecordToolEnabled) {
+      setSchoolRecordToolEnabled(false)
+      schoolRecordModeRef.current = false
+      if (isSchoolRecordModeUrl) navigate('/chat', { replace: true })
+      return
+    }
+    await handleSchoolRecordShortcut()
+  }
+
+  const handleChatTextareaFocus = () => {
+    if (selectedCategory === '생활기록부' && !hasProAccess) {
+      setSelectedCategory(null)
+    }
+  }
+
+  const handleScorePredictionShortcut = async () => {
     if (!isAuthenticated) {
+      trackUserAction('login_modal_open', 'school_grade_input')
+      sessionStorage.setItem('uniroad_login_modal_source', 'school_grade_input')
       setIsAuthModalOpen(true)
       if (!isDesktopLayout) setIsSideNavOpen(false)
       return
     }
 
-    // 생기부 분석 진입: 연동 여부 확인 후 분석 전용 채팅으로 이동
-    setRightPanelView('chat')
-    if (skipSchoolRecordToolConfirm) {
-      void activateSchoolRecordTool()
-    } else {
-      setSchoolRecordLinked(null)
-      setIsSchoolRecordToolModalOpen(true)
-      setSchoolRecordStatusLoading(true)
-      void fetchSchoolRecordLinkedStatus()
-        .then((linked) => setSchoolRecordLinked(linked))
-        .finally(() => setSchoolRecordStatusLoading(false))
+    const linkedState = await refreshLinkedDataState()
+    const hasAnyLinkedScore = linkedState.scoreSets.length > 0 || linkedState.naesinLinked
+    if (!hasAnyLinkedScore) {
+      triggerFloatingNotice('먼저 성적을 연동해 주세요')
+      if (!isDesktopLayout) setIsSideNavOpen(false)
+      return
     }
+
+    setRightPanelView('chat')
+    const defaultScoreKey = linkedState.naesinLinked ? 'naesin' : linkedState.scoreSets[0]?.id
+    await activateScorePredictionBuilder(defaultScoreKey)
+
     if (!isDesktopLayout) setIsSideNavOpen(false)
   }
+
   const openApprovalPaymentWidget = (fallbackUrl: string) => {
     const widgetUrl = fallbackUrl.trim()
     if (!widgetUrl) {
@@ -780,12 +1838,12 @@ export default function ChatPage() {
     setIsApprovalWidgetChoiceOpen(true)
   }
   const openApprovalSimplePayWidget = () => {
-    const oneTimeWidgetUrl = import.meta.env.VITE_TOSS_WIDGET_APPROVAL_ONETIME_URL || 'http://localhost:3000/payments/checkout.html'
+    const oneTimeWidgetUrl = import.meta.env.VITE_TOSS_WIDGET_APPROVAL_ONETIME_URL || '/payments/checkout.html'
     openApprovalPaymentWidget(oneTimeWidgetUrl)
     setIsApprovalWidgetChoiceOpen(false)
   }
   const openApprovalBillingWidget = () => {
-    const billingWidgetUrl = import.meta.env.VITE_TOSS_WIDGET_APPROVAL_BILLING_URL || 'http://localhost:3000/payments/billing.html'
+    const billingWidgetUrl = import.meta.env.VITE_TOSS_WIDGET_APPROVAL_BILLING_URL || '/payments/billing.html'
     openApprovalPaymentWidget(billingWidgetUrl)
     setIsApprovalWidgetChoiceOpen(false)
   }
@@ -927,19 +1985,7 @@ export default function ChatPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [isUserMenuOpen])
 
-  // 보기 모드 메뉴: 바깥 클릭 시 닫기
-  useEffect(() => {
-    if (!isLayoutMenuOpen) return
-    const handleClickOutside = (e: MouseEvent) => {
-      const target = e.target as Node
-      if (layoutMenuRef.current?.contains(target)) return
-      setIsLayoutMenuOpen(false)
-    }
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [isLayoutMenuOpen])
-
-  // 입시 기록 연동 패널 열릴 때 프로필 + 생기부 연동 상태 조회
+  // 입시 기록 연동 패널 열릴 때 프로필 + 연동 상태 조회
   useEffect(() => {
     if (rightPanelView !== 'school_record_menu' || !isAuthenticated) return
     const token = getRequestToken()
@@ -961,10 +2007,8 @@ export default function ChatPage() {
         setProfileDescription(null)
         setProfileCreatedAt(null)
       })
-    getSchoolRecordStatus(token)
-      .then((res) => setSchoolRecordLinked(res.linked))
-      .catch(() => setSchoolRecordLinked(false))
-  }, [rightPanelView, isAuthenticated])
+    void refreshLinkedDataState()
+  }, [rightPanelView, isAuthenticated, refreshLinkedDataState])
 
   // 모바일 화면 복귀 시 채팅 상태 유지 (sessionStorage 활용)
   useEffect(() => {
@@ -1261,9 +2305,11 @@ export default function ChatPage() {
     }
 
     const query = (mentionCtx.query || '').trim().toLowerCase()
-    const naesinLabel = '내신 성적'
-    const showNaesin = !query || naesinLabel.startsWith(query) || '내신'.startsWith(query)
-    const initialList = showNaesin ? [{ id: 'naesin', name: naesinLabel }] : []
+    const normalizedQuery = query.replace(/\s+/g, '')
+    const initialList = BUILTIN_MENTION_SUGGESTIONS.filter((item) => {
+      if (!normalizedQuery) return true
+      return item.name.toLowerCase().replace(/\s+/g, '').includes(normalizedQuery)
+    })
 
     // 골뱅이 누르면 바로 드롭다운 표시 (Cursor처럼)
     setScoreSuggestItems(initialList)
@@ -1271,12 +2317,16 @@ export default function ChatPage() {
     setIsScoreSuggestOpen(initialList.length > 0)
 
     const timeout = setTimeout(async () => {
+      const token = getRequestToken()
+      if (!token) {
+        setScoreSuggestItems(initialList)
+        setScoreSuggestIndex((prev) => (prev >= initialList.length ? Math.max(0, initialList.length - 1) : prev))
+        setIsScoreSuggestOpen(initialList.length > 0)
+        return
+      }
       try {
-        const token = getRequestToken()
         const items = await suggestScoreSets(mentionCtx.query, sessionId, token || undefined)
-        const list = showNaesin
-          ? [{ id: 'naesin', name: naesinLabel }, ...(items || [])]
-          : (items || [])
+        const list = [...initialList, ...(items || [])]
         setScoreSuggestItems(list)
         setScoreSuggestIndex((prev) => (prev >= list.length ? Math.max(0, list.length - 1) : prev))
         setIsScoreSuggestOpen(list.length > 0)
@@ -1305,7 +2355,11 @@ export default function ChatPage() {
     setInputCaretPos(nextCaret)
     setIsScoreSuggestOpen(false)
     setScoreSuggestItems([])
-    setActiveScoreId(item.id === 'naesin' ? undefined : item.id)
+    setActiveScoreId(
+      item.id === 'builtin-naesin' || item.id === 'builtin-school-record' || item.id === 'builtin-mock-exam'
+        ? undefined
+        : item.id
+    )
 
     requestAnimationFrame(() => {
       if (!textarea) return
@@ -1317,6 +2371,66 @@ export default function ChatPage() {
   const handleInputChange = (value: string, caretPos: number) => {
     setInput(value)
     setInputCaretPos(caretPos)
+  }
+
+  const appendMentionToInput = useCallback((mention: string) => {
+    const normalizedMention = mention.trim()
+    if (!normalizedMention) return
+
+    setInput((prev) => {
+      const base = prev.replace(/\s+$/g, '')
+      const next = base ? `${base} ${normalizedMention} ` : `${normalizedMention} `
+      setInputCaretPos(next.length)
+
+      requestAnimationFrame(() => {
+        const textarea = inputTextareaRef.current
+        if (!textarea) return
+        textarea.focus()
+        textarea.setSelectionRange(next.length, next.length)
+      })
+
+      return next
+    })
+  }, [])
+
+  const getScoreSuggestionMeta = (item: ScoreSetSuggestItem, isSelected: boolean) => {
+    const isBuiltInSchoolRecord = item.id === 'builtin-school-record'
+    const isBuiltInNaesin = item.id === 'builtin-naesin'
+    const isBuiltInMockExam = item.id === 'builtin-mock-exam'
+
+    if (isBuiltInSchoolRecord) {
+      return {
+        iconWrapClass: isSelected ? 'bg-violet-100 text-violet-700' : 'bg-violet-50 text-violet-600',
+        subtitle: '연동된 생활기록부',
+        icon: <BookOpen className="w-3.5 h-3.5" />,
+      }
+    }
+
+    if (isBuiltInNaesin) {
+      return {
+        iconWrapClass: isSelected ? 'bg-amber-100 text-amber-700' : 'bg-amber-50 text-amber-600',
+        subtitle: '연동된 내신성적',
+        icon: <GraduationCap className="w-3.5 h-3.5" />,
+      }
+    }
+
+    if (isBuiltInMockExam) {
+      return {
+        iconWrapClass: isSelected ? 'bg-indigo-100 text-indigo-700' : 'bg-indigo-50 text-indigo-600',
+        subtitle: '모의고사 성적 바로 사용',
+        icon: <Calculator className="w-3.5 h-3.5" />,
+      }
+    }
+
+    return {
+      iconWrapClass: isSelected ? 'bg-blue-100 text-blue-600' : 'bg-emerald-50 text-emerald-500',
+      subtitle: '저장된 모의고사 성적',
+      icon: (
+        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+        </svg>
+      ),
+    }
   }
 
   // 입력 후 React 리렌더 시 커서가 맨 앞으로 밀리는 현상 방지: 저장한 위치로 복원
@@ -1339,7 +2453,7 @@ export default function ChatPage() {
             return (
               <span
                 key={idx}
-                className="rounded-md bg-[#eaf2ff] text-[#2563eb] text-[0.9em] leading-[1.15] [box-shadow:-0.14ch_0_0_#eaf2ff,0.14ch_0_0_#eaf2ff]"
+                className="rounded-md bg-[#eaf2ff] text-[#2563eb]"
               >
                 {part}
               </span>
@@ -1545,8 +2659,54 @@ export default function ChatPage() {
     }, 100)
   }
 
-  const handleSend = async (directMessage?: string) => {
-    const messageToSend = directMessage || input
+  const handleSend = async (directMessage?: string, forcedActiveScoreId?: string) => {
+    const rawMessageToSend = directMessage || input
+    const rawTrimmedMessage = rawMessageToSend.trim()
+    let resolvedActiveScoreId = forcedActiveScoreId ?? activeScoreId
+    const requestsSchoolRecord = SCHOOL_RECORD_MENTION_REGEX.test(rawTrimmedMessage)
+    const requestsLinkedNaesin = LINKED_NAESIN_TEST_REGEX.test(rawTrimmedMessage)
+    const requestsMockExam = MOCK_EXAM_TEST_REGEX.test(rawTrimmedMessage)
+
+    if (requestsSchoolRecord || requestsLinkedNaesin || requestsMockExam || MY_SCORE_ALIAS_TEST_REGEX.test(rawTrimmedMessage)) {
+      try {
+        const linkedState = await refreshLinkedDataState()
+
+        if (requestsSchoolRecord && !linkedState.schoolRecordLinked) {
+          setSchoolRecordLinked(false)
+          setIsSchoolRecordToolModalOpen(true)
+          return
+        }
+
+        if (requestsLinkedNaesin && !linkedState.naesinLinked) {
+          setIsSchoolGradeInputModalOpen(true)
+          return
+        }
+
+        if (requestsMockExam) {
+          if (linkedState.scoreSets.length === 0) {
+            setIsSchoolGradeInputModalOpen(true)
+            return
+          }
+          if (!resolvedActiveScoreId) {
+            resolvedActiveScoreId = linkedState.scoreSets[0]?.id
+            if (resolvedActiveScoreId) setActiveScoreId(resolvedActiveScoreId)
+          }
+        }
+      } catch {
+        if (requestsSchoolRecord) {
+          setSchoolRecordLinked(false)
+          setIsSchoolRecordToolModalOpen(true)
+        } else {
+          setIsSchoolGradeInputModalOpen(true)
+        }
+        return
+      }
+    }
+
+    const messageToSend = rawMessageToSend
+      .replace(LINKED_NAESIN_REPLACE_REGEX, '@내신 성적')
+      .replace(MY_SCORE_ALIAS_REPLACE_REGEX, '@내신 성적')
+      .replace(MOCK_EXAM_REPLACE_REGEX, '@모의고사')
     const trimmedMessage = messageToSend.trim()
     const quickExampleResponse = !selectedImage ? getQuickExampleResponse(trimmedMessage) : undefined
     
@@ -1705,10 +2865,12 @@ export default function ChatPage() {
       let firstLogReceived = false
       let firstChunkReceived = false
       const normalizedUserInput = userInput.replace(/＠/g, '@')
-      const hasLinkedNaesinMention = /@내신(?:\s*성적)?/.test(normalizedUserInput)
+      const hasLinkedNaesinMention = LINKED_NAESIN_TEST_REGEX.test(normalizedUserInput)
+      const hasSchoolRecordMention = SCHOOL_RECORD_MENTION_REGEX.test(normalizedUserInput)
       // 연동 내신 사용 자체는 항상 전달하되,
       // 점수예측 모드에서는 카드 없이 바로 답변하도록 review만 생략한다.
       const useLinkedNaesinForRequest = hasLinkedNaesinMention
+      const useSchoolRecordForRequest = schoolRecordToolEnabled || hasSchoolRecordMention
       const skipReviewForLinkedNaesin = hasLinkedNaesinMention && scorePredictionMode
       const hasCompactNaesinDigits = /(?:^|[^0-9])(?:[1-9](?:[\s,./|-]*[1-9]){4,5})(?:[^0-9]|$)/.test(normalizedUserInput)
       const forceShowNaesinCard = (hasLinkedNaesinMention && !skipReviewForLinkedNaesin) || hasCompactNaesinDigits
@@ -2027,7 +3189,7 @@ export default function ChatPage() {
         }
 
       const hasScoreMention = extractScoreMentions(userInput).length > 0
-      const scoreIdForRequest = hasScoreMention && !hasLinkedNaesinMention ? activeScoreId : undefined
+      const scoreIdForRequest = hasScoreMention && !hasLinkedNaesinMention ? resolvedActiveScoreId : undefined
 
       console.log('[내신 카드 디버그] userInput=', JSON.stringify(userInput?.slice(0, 80)), 'hasLinkedNaesinMention=', hasLinkedNaesinMention)
 
@@ -2046,7 +3208,7 @@ export default function ChatPage() {
           requestToken,
           onScoreReviewRequiredCallback,
           scoreIdForRequest,
-          schoolRecordToolEnabled,
+          useSchoolRecordForRequest,
           onSchoolGradeSavedCallback,
           useLinkedNaesinForRequest,
           skipReviewForLinkedNaesin,
@@ -2064,7 +3226,7 @@ export default function ChatPage() {
           thinkingMode,
           onScoreReviewRequiredCallback,
           scoreIdForRequest,
-          schoolRecordToolEnabled,
+          useSchoolRecordForRequest,
           onSchoolGradeSavedCallback,
           useLinkedNaesinForRequest,
           skipReviewForLinkedNaesin,
@@ -2108,6 +3270,19 @@ export default function ChatPage() {
       }
     }
   }
+
+  const handleSubmitScorePredictionBuilder = useCallback(() => {
+    const selectedScore = predictionScoreOptions.find((item) => item.key === predictionSelectedScoreKey)
+    if (!selectedScore) return
+    if (selectedScore.type === 'naesin') {
+      setActiveScoreId(undefined)
+    } else {
+      setActiveScoreId(selectedScore.key)
+    }
+    const question = buildScorePredictionQuestion()
+    if (!question) return
+    void handleSend(question, selectedScore.type === 'score' ? selectedScore.key : undefined)
+  }, [buildScorePredictionQuestion, predictionScoreOptions, predictionSelectedScoreKey])
   
   // 관리자 전용: 추가 테스트 실행 (백그라운드)
   const runAdditionalTests = async (question: string, count: number, mode: 'sequential' | 'parallel') => {
@@ -2213,6 +3388,313 @@ export default function ChatPage() {
     setPendingReportMessageId(String(report.messageId || ''))
   }
 
+  const handleOpenSchoolRecordSummaryReport = async () => {
+    setRightPanelView('chat')
+    if (savedSchoolRecordReports.length > 0) {
+      await openSavedSchoolRecordReport(savedSchoolRecordReports[0])
+      return
+    }
+
+    const firstDefaultReport = schoolRecordResearchReports[0]
+    if (firstDefaultReport?.question) {
+      startSchoolRecordResearch(firstDefaultReport.question)
+    }
+  }
+
+  const handleDownloadSchoolRecordSummaryReport = useCallback(async () => {
+    if (savedSchoolRecordReports.length === 0) {
+      triggerFloatingNotice('다운로드할 분석 리포트가 없습니다.')
+      return
+    }
+
+    const token = getRequestToken()
+    if (!token) {
+      triggerFloatingNotice('로그인이 필요합니다.')
+      return
+    }
+
+    try {
+      const latestReport = savedSchoolRecordReports[0]
+      const res = await fetch(`${runtimeApiBase}/api/sessions/${latestReport.sessionId}/messages`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) throw new Error('failed_to_load_report')
+
+      const rows = await res.json()
+      const list = Array.isArray(rows) ? rows : []
+      const targetMessage = list.find((row: any) => {
+        const rowId = String(row?.id || row?.message_id || '')
+        return rowId === String(latestReport.messageId)
+      })
+
+      const content = String(targetMessage?.content || '').trim()
+      if (!content) {
+        triggerFloatingNotice('다운로드할 리포트 내용을 찾지 못했습니다.')
+        return
+      }
+
+      const safeTitle = String(latestReport.title || '생활기록부_분석_리포트')
+        .replace(/[\\/:*?"<>|]/g, '_')
+        .replace(/\s+/g, '_')
+        .slice(0, 60)
+      const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${safeTitle || '생활기록부_분석_리포트'}.md`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+      triggerFloatingNotice('분석 리포트를 다운로드했습니다.')
+    } catch {
+      triggerFloatingNotice('분석 리포트 다운로드에 실패했습니다.')
+    }
+  }, [savedSchoolRecordReports, runtimeApiBase])
+
+  const renderSchoolRecordPreviewStepContent = (step: number) => {
+    const parsedSections = (schoolRecordParsedPreview?.sections || {}) as Record<string, any>
+    if (!schoolRecordParsedPreview?.sections) {
+      return (
+        <p className="text-sm text-gray-500">
+          연동된 생기부 상세 데이터를 불러오지 못했습니다.
+        </p>
+      )
+    }
+
+    const attendanceRows = Array.isArray(parsedSections?.attendance?.rows) ? parsedSections.attendance.rows : []
+    const certificateRows = Array.isArray(parsedSections?.certificates?.rows) ? parsedSections.certificates.rows : []
+    const certificateItems = Array.isArray(parsedSections?.certificates?.items) ? parsedSections.certificates.items : []
+    const creativeByGrade = (parsedSections?.creativeActivity?.by_grade || {}) as Record<string, Record<string, string>>
+    const creativeHoursByGrade = (parsedSections?.creativeActivity?.hours_by_grade || {}) as Record<string, Record<string, string>>
+    const volunteerRows = Array.isArray(parsedSections?.volunteerActivity?.rows) ? parsedSections.volunteerActivity.rows : []
+    const academicGeneralElective = (parsedSections?.academicDevelopment?.general_elective || {}) as Record<string, { rows?: any[] }>
+    const academicCareerElective = (parsedSections?.academicDevelopment?.career_elective || {}) as Record<string, { rows?: any[] }>
+    const academicPeArts = (parsedSections?.academicDevelopment?.pe_arts || {}) as Record<string, { rows?: any[] }>
+    const academicByGrade = (parsedSections?.academicDevelopment?.by_grade || {}) as Record<string, Array<{ subject?: string; note?: string }>>
+    const behaviorByGrade = (parsedSections?.behaviorOpinion?.by_grade || {}) as Record<string, string>
+
+    if (step === 1) {
+      return (
+        <div className="space-y-4">
+          <div>
+            <p className="mb-2 text-sm font-bold text-gray-800">출결상황</p>
+            <div className="overflow-x-auto rounded-xl border border-gray-200">
+              <table className="min-w-full border-collapse text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-700">
+                    <th className="border-b border-r border-gray-200 px-3 py-2 text-left font-semibold">학년</th>
+                    <th className="border-b border-r border-gray-200 px-3 py-2 text-left font-semibold">수업일수</th>
+                    <th className="border-b border-r border-gray-200 px-2 py-2 text-left font-semibold">결석</th>
+                    <th className="border-b border-r border-gray-200 px-2 py-2 text-left font-semibold">지각</th>
+                    <th className="border-b border-r border-gray-200 px-2 py-2 text-left font-semibold">조퇴</th>
+                    <th className="border-b border-r border-gray-200 px-2 py-2 text-left font-semibold">결과</th>
+                    <th className="border-b border-gray-200 px-3 py-2 text-left font-semibold">특기사항</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attendanceRows.length > 0 ? (
+                    attendanceRows.map((row: any, idx: number) => (
+                      <tr key={`attendance-${idx}`} className="border-b border-gray-100 align-top last:border-b-0">
+                        <td className="border-r border-gray-200 px-3 py-2 whitespace-nowrap">{row?.grade ? `${row.grade}학년` : '-'}</td>
+                        <td className="border-r border-gray-200 px-3 py-2 whitespace-nowrap">{row?.수업일수 || '-'}</td>
+                        <td className="border-r border-gray-200 px-2 py-2 text-xs text-gray-600">
+                          질병 {row?.결석_질병 || '-'} / 미인정 {row?.결석_미인정 || '-'} / 기타 {row?.결석_기타 || '-'}
+                        </td>
+                        <td className="border-r border-gray-200 px-2 py-2 text-xs text-gray-600">
+                          질병 {row?.지각_질병 || '-'} / 미인정 {row?.지각_미인정 || '-'} / 기타 {row?.지각_기타 || '-'}
+                        </td>
+                        <td className="border-r border-gray-200 px-2 py-2 text-xs text-gray-600">
+                          질병 {row?.조퇴_질병 || '-'} / 미인정 {row?.조퇴_미인정 || '-'} / 기타 {row?.조퇴_기타 || '-'}
+                        </td>
+                        <td className="border-r border-gray-200 px-2 py-2 text-xs text-gray-600">
+                          질병 {row?.결과_질병 || '-'} / 미인정 {row?.결과_미인정 || '-'} / 기타 {row?.결과_기타 || '-'}
+                        </td>
+                        <td className="px-3 py-2 text-gray-700 whitespace-pre-wrap">{row?.특기사항 || '-'}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr><td colSpan={7} className="px-3 py-4 text-center text-sm text-gray-500">해당 사항 없음</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div>
+            <p className="mb-2 text-sm font-bold text-gray-800">자격증 및 인증 취득사항</p>
+            <div className="rounded-xl border border-gray-200 bg-white">
+              {certificateRows.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-gray-50 text-gray-700">
+                        <th className="border-b border-r border-gray-200 px-3 py-2 text-left font-semibold">구분</th>
+                        <th className="border-b border-r border-gray-200 px-3 py-2 text-left font-semibold">명칭 또는 종류</th>
+                        <th className="border-b border-r border-gray-200 px-3 py-2 text-left font-semibold">번호 또는 내용</th>
+                        <th className="border-b border-r border-gray-200 px-3 py-2 text-left font-semibold">취득년월일</th>
+                        <th className="border-b border-gray-200 px-3 py-2 text-left font-semibold">발급기관</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {certificateRows.map((row: any, idx: number) => (
+                        <tr key={`certificate-${idx}`} className="border-b border-gray-100 last:border-b-0">
+                          <td className="border-r border-gray-200 px-3 py-2">{row?.구분 || '-'}</td>
+                          <td className="border-r border-gray-200 px-3 py-2">{row?.명칭또는종류 || '-'}</td>
+                          <td className="border-r border-gray-200 px-3 py-2">{row?.번호또는내용 || '-'}</td>
+                          <td className="border-r border-gray-200 px-3 py-2">{row?.취득년월일 || '-'}</td>
+                          <td className="px-3 py-2">{row?.발급기관 || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : certificateItems.length > 0 ? (
+                <div className="space-y-2 p-4 text-sm text-gray-700">
+                  {certificateItems.map((item: string, idx: number) => <p key={`certificate-item-${idx}`}>{item}</p>)}
+                </div>
+              ) : (
+                <div className="px-3 py-4 text-center text-sm text-gray-500">해당 사항 없음</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    if (step === 2) {
+      return (
+        <div className="space-y-4">
+          {(['1', '2', '3'] as const).map((grade) => (
+            <div key={`creative-${grade}`} className="rounded-xl border border-gray-200 bg-white p-4">
+              <p className="mb-3 text-sm font-bold text-gray-800">{grade}학년 창의적체험활동상황</p>
+              <div className="grid gap-3 md:grid-cols-3">
+                {[
+                  { label: '자율활동', hourKey: 'autonomousHours', noteKey: 'autonomousNotes' },
+                  { label: '동아리활동', hourKey: 'clubHours', noteKey: 'clubNotes' },
+                  { label: '진로활동', hourKey: 'careerHours', noteKey: 'careerNotes' },
+                ].map((item) => (
+                  <div key={`${grade}-${item.label}`} className="rounded-lg bg-gray-50 p-3">
+                    <p className="text-sm font-semibold text-gray-900">{item.label}</p>
+                    <p className="mt-1 text-xs text-gray-500">시간 {creativeHoursByGrade?.[grade]?.[item.hourKey] || '-'}</p>
+                    <p className="mt-2 whitespace-pre-wrap text-sm text-gray-700">{creativeByGrade?.[grade]?.[item.noteKey] || '기록 없음'}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+          <div>
+            <p className="mb-2 text-sm font-bold text-gray-800">봉사활동실적</p>
+            <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
+              <table className="min-w-full border-collapse text-sm">
+                <thead>
+                  <tr className="bg-gray-50 text-gray-700">
+                    <th className="border-b border-r border-gray-200 px-3 py-2 text-left font-semibold">학년</th>
+                    <th className="border-b border-r border-gray-200 px-3 py-2 text-left font-semibold">일자 또는 기간</th>
+                    <th className="border-b border-r border-gray-200 px-3 py-2 text-left font-semibold">장소 또는 주관기관명</th>
+                    <th className="border-b border-r border-gray-200 px-3 py-2 text-left font-semibold">활동내용</th>
+                    <th className="border-b border-gray-200 px-3 py-2 text-left font-semibold">시간</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {volunteerRows.length > 0 ? (
+                    volunteerRows.map((row: any, idx: number) => (
+                      <tr key={`volunteer-${idx}`} className="border-b border-gray-100 last:border-b-0 align-top">
+                        <td className="border-r border-gray-200 px-3 py-2">{row?.grade ? `${row.grade}학년` : '-'}</td>
+                        <td className="border-r border-gray-200 px-3 py-2">{row?.일자또는기간 || '-'}</td>
+                        <td className="border-r border-gray-200 px-3 py-2">{row?.장소또는주관기관명 || '-'}</td>
+                        <td className="border-r border-gray-200 px-3 py-2 whitespace-pre-wrap">{row?.활동내용 || '-'}</td>
+                        <td className="px-3 py-2">{row?.hours || '-'}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr><td colSpan={5} className="px-3 py-4 text-center text-sm text-gray-500">해당 사항 없음</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )
+    }
+
+    if (step === 3) {
+      const academicGroups = [
+        { label: '일반선택과목', data: academicGeneralElective },
+        { label: '진로선택과목', data: academicCareerElective },
+        { label: '예체능/기타', data: academicPeArts },
+      ]
+      return (
+        <div className="space-y-4">
+          {(['1', '2', '3'] as const).map((grade) => (
+            <div key={`academic-${grade}`} className="rounded-xl border border-gray-200 bg-white p-4">
+              <p className="mb-3 text-sm font-bold text-gray-800">{grade}학년 교과학습발달상황</p>
+              <div className="space-y-3">
+                {academicGroups.map((group) => {
+                  const rows = Array.isArray(group.data?.[grade]?.rows) ? group.data[grade].rows : []
+                  return (
+                    <div key={`${grade}-${group.label}`} className="rounded-lg border border-gray-200">
+                      <div className="border-b border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-800">{group.label}</div>
+                      {rows.length > 0 ? (
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full border-collapse text-sm">
+                            <thead>
+                              <tr className="text-gray-700">
+                                {Object.keys(rows[0] || {}).slice(0, 8).map((key) => (
+                                  <th key={key} className="border-b border-r border-gray-200 px-3 py-2 text-left font-semibold last:border-r-0">{key}</th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rows.map((row: any, idx: number) => (
+                                <tr key={`${group.label}-${idx}`} className="border-b border-gray-100 last:border-b-0">
+                                  {Object.keys(rows[0] || {}).slice(0, 8).map((key) => (
+                                    <td key={`${group.label}-${idx}-${key}`} className="border-r border-gray-200 px-3 py-2 last:border-r-0">{String(row?.[key] ?? '-')}</td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <div className="px-3 py-3 text-sm text-gray-500">해당 사항 없음</div>
+                      )}
+                    </div>
+                  )
+                })}
+                <div className="rounded-lg border border-gray-200">
+                  <div className="border-b border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold text-gray-800">세부능력 및 특기사항</div>
+                  <div className="space-y-2 p-3">
+                    {(academicByGrade?.[grade] || []).length > 0 ? (
+                      (academicByGrade?.[grade] || []).map((row: any, idx: number) => (
+                        <div key={`seteuk-${grade}-${idx}`} className="rounded-lg bg-gray-50 p-3">
+                          <p className="text-sm font-semibold text-gray-900">{row?.subject || `과목 ${idx + 1}`}</p>
+                          <p className="mt-1 whitespace-pre-wrap text-sm text-gray-700">{row?.note || '기록 없음'}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-gray-500">세특 정보가 없습니다.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )
+    }
+
+    return (
+      <div className="space-y-3">
+        {(['1', '2', '3'] as const).map((grade) => (
+          <div key={`behavior-${grade}`} className="rounded-xl border border-gray-200 bg-white p-4">
+            <p className="mb-2 text-sm font-bold text-gray-800">{grade}학년 행동특성 및 종합의견</p>
+            <p className="whitespace-pre-wrap text-sm leading-6 text-gray-700">{behaviorByGrade?.[grade] || '기록 없음'}</p>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
   useEffect(() => {
     if (!pendingReportMessageId || messages.length === 0) return
     const target = document.getElementById(`chat-message-${pendingReportMessageId}`)
@@ -2315,6 +3797,27 @@ export default function ChatPage() {
     }
   }, [isAuthenticated, schoolRecordToolEnabled, sessions, messages.length])
 
+  const schoolRecordStartActions = [
+    {
+      id: 'next-activity',
+      title: '다음 활동 추천받기',
+      description: '지금 생기부 흐름에서 다음에 어떤 활동을 더 쌓아야 할지 추천받아 보세요.',
+      question: '내 생활기록부를 바탕으로 다음에 어떤 활동을 하면 좋을지 추천해줘.',
+    },
+    {
+      id: 'core-weakness',
+      title: '핵심 약점 찾아내기',
+      description: '전공 적합성, 활동 밀도, 서류 완성도 기준으로 가장 치명적인 약점을 짚어 드려요.',
+      question: '내 생활기록부에서 핵심 약점을 찾아내고, 왜 약점인지 설명해줘.',
+    },
+    {
+      id: 'compare-winners',
+      title: '합격자 생기부 비교하기',
+      description: '최근 합격자 생기부와 비교해서 부족한 포인트와 강점을 한 번에 확인하세요.',
+      question: '최근 합격자 생기부와 내 생활기록부를 비교해서 차이점을 알려줘.',
+    },
+  ]
+
   /** 생기부 분석 상단 4개 기능 카드 */
   const schoolRecordQuickActions = [
     {
@@ -2408,6 +3911,14 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-screen">
+      {floatingNoticeMessage && (
+        <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-[90] pointer-events-none transition-opacity duration-500 ${isFloatingNoticeFading ? 'opacity-0' : 'opacity-100'}`}>
+          <p className="rounded-2xl bg-gray-900/90 px-7 py-4 text-base sm:text-lg font-semibold text-white backdrop-blur-sm shadow-xl whitespace-nowrap">
+            {floatingNoticeMessage}
+          </p>
+        </div>
+      )}
+
       {/* 전역 이미지 파일 input (숨김) */}
       <input
         ref={imageInputRef}
@@ -2415,6 +3926,17 @@ export default function ChatPage() {
         accept="image/jpeg,image/png,image/gif,image/webp"
         onChange={handleImageSelect}
         className="hidden"
+      />
+      <input
+        ref={schoolRecordPdfInputRef}
+        type="file"
+        accept=".pdf,application/pdf"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0] ?? null
+          void handleDirectSchoolRecordPdfUpload(file)
+          e.target.value = ''
+        }}
       />
       
       {/* Agent 디버그 패널 (좌측) */}
@@ -2443,19 +3965,19 @@ export default function ChatPage() {
         <div className="h-full flex flex-col">
           {/* 상단: 로고 + UNIROAD(왼쪽) + 사이드바 닫기(오른쪽) */}
           <div className="flex items-center justify-between px-4 py-4 bg-white">
-            <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => setIsSideNavOpen(false)}
+              className="order-1 sm:order-2 p-2 mr-4 sm:-mr-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+              title="사이드바 닫기"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <div className="order-2 sm:order-1 flex items-center gap-2.5">
               <div className="flex items-center justify-center w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 shadow-md shrink-0">
                 <GraduationCap className="w-3.5 h-3.5 text-white" strokeWidth={2} />
               </div>
               <span className="text-lg font-extrabold text-black tracking-tighter uppercase">UNIROAD</span>
             </div>
-            <button
-              onClick={() => setIsSideNavOpen(false)}
-              className="p-2 -mr-1 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
-              title="사이드바 닫기"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
           </div>
 
           {/* 메뉴: 새 채팅, 내 입시 기록 연동하기 (깔끔한 리스트 스타일) */}
@@ -2476,7 +3998,6 @@ export default function ChatPage() {
             <button
               onClick={() => {
                 if (!isAuthenticated) {
-                  alert('로그인이 필요합니다.')
                   trackUserAction('login_modal_open', 'school_record_link')
                   sessionStorage.setItem('uniroad_login_modal_source', 'school_record_link')
                   setIsAuthModalOpen(true)
@@ -2499,7 +4020,7 @@ export default function ChatPage() {
               <h2 className="text-xs font-extrabold text-black">분석</h2>
             </div>
             <button
-              onClick={() => handleSchoolRecordShortcut()}
+              onClick={() => { void handleSchoolRecordShortcut() }}
               className="w-full flex items-center justify-start gap-3 pl-0 pr-2 py-3 rounded-lg transition-colors text-left text-gray-800 hover:bg-gray-100/80"
             >
               <span className="flex items-center justify-center w-5 h-5 shrink-0 text-gray-800">
@@ -2508,21 +4029,7 @@ export default function ChatPage() {
               <span className="text-sm font-semibold text-black">내 생활기록부 분석하기</span>
             </button>
             <button
-              onClick={() => {
-                if (!isAuthenticated) {
-                  alert('로그인이 필요합니다.')
-                  trackUserAction('login_modal_open', 'school_grade_input')
-                  sessionStorage.setItem('uniroad_login_modal_source', 'school_grade_input')
-                  setIsAuthModalOpen(true)
-                  return
-                }
-                if (skipScorePredictionConfirm) {
-                  setRightPanelView('grade_input')
-                } else {
-                  setRightPanelView('chat')
-                  setIsScorePredictionStartModalOpen(true)
-                }
-              }}
+              onClick={() => { void handleScorePredictionShortcut() }}
               className="w-full flex items-center justify-start gap-3 pl-0 pr-2 py-3 rounded-lg transition-colors text-left text-gray-800 hover:bg-gray-100/80"
             >
               <span className="flex items-center justify-center w-5 h-5 shrink-0 -ml-0.5 text-gray-800">
@@ -2708,11 +4215,11 @@ export default function ChatPage() {
         <header className="bg-white safe-area-top sticky top-0 z-10">
           {/* 모바일 헤더 */}
           <div className="sm:hidden pl-0 pr-4 py-3 flex justify-between items-center">
-            <div className="flex items-center gap-2 -ml-1">
+            <div className="flex items-center gap-2 ml-2">
             {!isSideNavOpen && (
             <button
                 onClick={() => setIsSideNavOpen(true)}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                className="p-2 mr-4 hover:bg-gray-100 rounded-lg transition-colors"
             >
               <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -2722,34 +4229,6 @@ export default function ChatPage() {
             </div>
             
             <div className="flex items-center gap-2">
-              {/* 보기 모드: 자동 / 데스크톱 / 모바일 */}
-              <div className="relative sm:hidden" ref={layoutMenuRef}>
-                <button
-                  type="button"
-                  onClick={() => setIsLayoutMenuOpen((v) => !v)}
-                  className="inline-flex h-9 w-9 min-w-[36px] min-h-[36px] items-center justify-center rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 active:bg-gray-300 transition-colors touch-manipulation"
-                  title="보기 모드"
-                  aria-expanded={isLayoutMenuOpen}
-                >
-                  {layoutMode === 'mobile' ? <Smartphone className="w-4 h-4" /> : <Monitor className="w-4 h-4" />}
-                </button>
-                {isLayoutMenuOpen && (
-                  <div className="absolute right-0 top-full mt-2 w-44 rounded-xl border border-gray-200 bg-white shadow-xl py-1.5 z-50">
-                    {(['auto', 'desktop', 'mobile'] as const).map((mode) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => { setLayoutMode(mode); setIsLayoutMenuOpen(false) }}
-                        className={`w-full px-4 py-2.5 text-left text-sm flex items-center gap-2 ${layoutMode === mode ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
-                      >
-                        {mode === 'auto' && '자동 (화면 따라감)'}
-                        {mode === 'desktop' && '데스크톱 보기'}
-                        {mode === 'mobile' && '모바일 보기'}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
               {isAuthenticated ? (
                 <div className="relative sm:hidden" ref={userMenuRefMobile}>
                   <button
@@ -2864,34 +4343,6 @@ export default function ChatPage() {
             </div>
             
             <div className="flex items-center gap-3">
-              {/* 보기 모드: 자동 / 데스크톱 / 모바일 */}
-              <div className="relative" ref={layoutMenuRef}>
-                <button
-                  type="button"
-                  onClick={() => setIsLayoutMenuOpen((v) => !v)}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors"
-                  title="보기 모드"
-                  aria-expanded={isLayoutMenuOpen}
-                >
-                  {layoutMode === 'mobile' ? <Smartphone className="w-4 h-4" /> : <Monitor className="w-4 h-4" />}
-                </button>
-                {isLayoutMenuOpen && (
-                  <div className="absolute right-0 top-full mt-2 w-44 rounded-xl border border-gray-200 bg-white shadow-xl py-1.5 z-50">
-                    {(['auto', 'desktop', 'mobile'] as const).map((mode) => (
-                      <button
-                        key={mode}
-                        type="button"
-                        onClick={() => { setLayoutMode(mode); setIsLayoutMenuOpen(false) }}
-                        className={`w-full px-4 py-2.5 text-left text-sm flex items-center gap-2 ${layoutMode === mode ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
-                      >
-                        {mode === 'auto' && '자동 (화면 따라감)'}
-                        {mode === 'desktop' && '데스크톱 보기'}
-                        {mode === 'mobile' && '모바일 보기'}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
               {user?.name === '김도균' && (
                 <>
                   {/* 테스트 설정 */}
@@ -3109,6 +4560,8 @@ export default function ChatPage() {
                           value={input}
                           onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
                           onKeyDown={handleInputKeyDown}
+                          onFocus={handleChatTextareaFocus}
+                          onClick={handleChatTextareaFocus}
                           onScroll={(e) => {
                             const el = e.target as HTMLTextAreaElement
                             if (inputOverlayRef.current) {
@@ -3138,8 +4591,8 @@ export default function ChatPage() {
                             </div>
                             <div className="max-h-[min(260px,45vh)] overflow-y-auto overscroll-contain pr-1">
                             {scoreSuggestItems.map((item, idx) => {
-                              const isNaesin = item.id === 'naesin'
                               const isSelected = idx === scoreSuggestIndex
+                              const meta = getScoreSuggestionMeta(item, isSelected)
                               return (
                                 <button
                                   key={`${item.id}-${item.name}`}
@@ -3153,32 +4606,17 @@ export default function ChatPage() {
                                       : 'hover:bg-gray-50 text-gray-700'
                                   }`}
                                 >
-                                  {/* 아이콘 */}
-                                  <div className={`flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center ${
-                                    isNaesin
-                                      ? (isSelected ? 'bg-blue-100 text-blue-600' : 'bg-indigo-50 text-indigo-500')
-                                      : (isSelected ? 'bg-blue-100 text-blue-600' : 'bg-emerald-50 text-emerald-500')
-                                  }`}>
-                                    {isNaesin ? (
-                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                                      </svg>
-                                    ) : (
-                                      <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                                      </svg>
-                                    )}
+                                  <div className={`flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center ${meta.iconWrapClass}`}>
+                                    {meta.icon}
                                   </div>
-                                  {/* 텍스트 */}
                                   <div className="flex-1 min-w-0">
                                     <div className={`font-medium truncate leading-tight ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
-                                      {isNaesin ? item.name : item.name}
+                                      {item.name}
                                     </div>
                                     <div className="text-[11px] text-gray-400 truncate">
-                                      {isNaesin ? '연동된 내신 성적' : '모의고사 성적'}
+                                      {meta.subtitle}
                                     </div>
                                   </div>
-                                  {/* 선택 표시 */}
                                   {isSelected && (
                                     <svg className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -3193,24 +4631,20 @@ export default function ChatPage() {
                       </div>
                       <div className="flex items-center justify-between mt-2">
                         <div className="flex items-center gap-2">
-                          {schoolRecordToolEnabled && (
-                            <div className="inline-flex items-center gap-1.5 bg-amber-100 text-amber-800 rounded-full px-3 py-1 text-sm font-medium">
-                              <span>생기부 분석</span>
-                              <button
-                                onClick={() => {
-                                  setSchoolRecordToolEnabled(false)
-                                  schoolRecordModeRef.current = false
-                                  if (isSchoolRecordModeUrl) navigate('/chat', { replace: true })
-                                }}
-                                className="hover:bg-amber-200 rounded-full transition-colors"
-                                title="도구 끄기"
-                              >
-                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                                </svg>
-                              </button>
-                            </div>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => { void handleToggleSchoolRecordInputMode() }}
+                            disabled={isLoading || isInputLocked}
+                            className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-semibold transition-all duration-200 disabled:opacity-50 ${
+                              schoolRecordToolEnabled
+                                ? 'border-transparent bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-[0_8px_24px_rgba(139,92,246,0.18)] hover:brightness-105 hover:shadow-[0_12px_28px_rgba(139,92,246,0.32)]'
+                                : 'border-gray-200 bg-white text-gray-600 shadow-sm hover:bg-gray-50 hover:text-gray-800'
+                            }`}
+                            title="생기부 상담 모드"
+                          >
+                            <BookOpen className="h-4 w-4" />
+                            <span>생기부 상담</span>
+                          </button>
                         </div>
                         <div className="flex items-center gap-2 ml-3">
                           <button
@@ -3253,6 +4687,32 @@ export default function ChatPage() {
                       selectedCategory={selectedCategory}
                       onCategorySelect={setSelectedCategory}
                       onCategoryExpand={(firstQuestion) => setInput(firstQuestion)}
+                      schoolRecordLinked={schoolRecordLinked}
+                      naesinLinked={scorePredictionNaesinLinked}
+                      mockExamLinked={scorePredictionScoreSets.length > 0}
+                      onSchoolRecordLinkClick={() => {
+                        if (!isAuthenticated) {
+                          setIsAuthModalOpen(true)
+                          return
+                        }
+                        navigate('/school-record-deep?tab=link')
+                      }}
+                      onNaesinLinkClick={() => {
+                        if (!isAuthenticated) {
+                          setIsAuthModalOpen(true)
+                          return
+                        }
+                        setSchoolRecordMenuTab('grade')
+                        setRightPanelView('school_record_menu')
+                      }}
+                      onMockExamLinkClick={() => {
+                        if (!isAuthenticated) {
+                          setIsAuthModalOpen(true)
+                          return
+                        }
+                        setSchoolRecordMenuTab('mock_exam')
+                        setRightPanelView('school_record_menu')
+                      }}
                       isAuthenticated={isAuthenticated}
                       onLoginRequired={(message) => {
                         setAuthModalMessage(message)
@@ -3262,77 +4722,10 @@ export default function ChatPage() {
                         setShowProfileGuide(true)
                         setIsProfileFormOpen(true)
                       }}
-                      onSchoolRecordClick={handleSchoolRecordShortcut}
                     />
                   </div>
                   )}
                 </div>
-
-                  {/* 예시 질문 카드: 카테고리 선택 시·생기부/점수예측 전용 채팅일 때 숨김 */}
-                  {!selectedCategory && !schoolRecordToolEnabled && !scorePredictionMode && (
-                  <div className="w-full max-w-6xl mx-auto px-2 sm:px-4 mt-4 sm:mt-6 mb-6 sm:mb-8">
-                    <div className="flex items-center gap-3 w-full mb-6">
-                      <span className="flex-1 h-px bg-gradient-to-r from-gray-300 to-gray-100" aria-hidden />
-                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide shrink-0">최근 컨텐츠</span>
-                      <span className="flex-1 h-px bg-gradient-to-l from-gray-300 to-gray-100" aria-hidden />
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-                      {exampleFaqShuffledIndices.map((realIdx) => {
-                        const item = exampleFaqItems[realIdx]
-                        const category = getExampleFaqCategory(realIdx)
-                        const isPremium = category === '생활기록부'
-                        const badgeLabel = isAppBuild() ? 'content' : (isPremium ? 'Premium' : 'Basic')
-                        const duplicateCount = realIdx % 3 === 0 ? 1 : 2
-                        return (
-                          <button
-                            key={realIdx}
-                            type="button"
-                            onClick={() => {
-                              if (category === '생활기록부') {
-                                if (schoolRecordToolEnabled) {
-                                  handleSend(item.question)
-                                } else {
-                                  navigate(`/chat?${SCHOOL_RECORD_MODE_PARAM}`, { replace: true, state: { initialQuestion: item.question } })
-                                }
-                              } else {
-                                handleSend(item.question)
-                              }
-                            }}
-                            className="text-left rounded-2xl border border-gray-200 bg-white hover:border-gray-300 hover:shadow-sm transition-all w-full p-4 min-h-[220px] flex flex-col"
-                          >
-                            <div className="flex items-start justify-between gap-3 mb-3">
-                              <span className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-xs font-semibold shrink-0 ${isAppBuild() ? 'bg-gray-100 text-gray-800' : (isPremium ? 'bg-amber-50 text-amber-700' : 'bg-gray-100 text-gray-800')}`}>
-                                {isAppBuild() ? <Sparkles className="w-3.5 h-3.5 text-blue-500" /> : (isPremium ? <Crown className="w-3.5 h-3.5 text-amber-500" /> : <Sparkles className="w-3.5 h-3.5 text-blue-500" />)}
-                                {badgeLabel}
-                              </span>
-                              <div className="inline-flex items-center gap-3 text-xs text-gray-700 shrink-0">
-                                <span className="inline-flex items-center gap-1">
-                                  <Heart className="w-3.5 h-3.5" />
-                                  0
-                                </span>
-                                <span className="inline-flex items-center gap-1">
-                                  <Copy className="w-3.5 h-3.5" />
-                                  {duplicateCount}
-                                </span>
-                              </div>
-                            </div>
-
-                            <p className="text-sm sm:text-base leading-[1.35] font-semibold text-gray-900 line-clamp-2 mb-2">{item.question}</p>
-                            <p className="text-xs text-gray-600 leading-relaxed line-clamp-3 mb-4">{item.answer}</p>
-
-                            <div className="mt-auto flex items-center justify-between text-sm">
-                              <span className="text-gray-500">@{category.replace(/\s/g, '').toLowerCase()}</span>
-                              <span className="inline-flex items-center gap-1 font-medium">
-                                {isAppBuild() ? <span className="text-gray-700">chat</span> : (isPremium ? <span className="text-amber-600">Premium</span> : <span className="text-gray-700">Free</span>)}
-                                <ArrowUpRight className="w-3.5 h-3.5 text-gray-700" />
-                              </span>
-                            </div>
-                          </button>
-                        )
-                      })}
-                    </div>
-                  </div>
-                  )}
 
                   {schoolRecordToolEnabled && (
                     <div className="w-full mb-6 sm:mb-10 max-w-3xl mx-auto px-2 sm:px-4">
@@ -3464,7 +4857,7 @@ export default function ChatPage() {
                   scoreMentions={msg.scoreMentions}
                   scoreReview={msg.scoreReview}
                   schoolGradeSaved={msg.schoolGradeSaved}
-                  onOpenSchoolGradeInput={() => setRightPanelView('grade_input')}
+                  onOpenSchoolGradeInput={() => setRightPanelView('school_record_menu')}
                   onNaesinConfirm={(edited) => {
                     const messageId = msg.id
                     setMessages((prev) =>
@@ -3858,6 +5251,8 @@ export default function ChatPage() {
                     value={input}
                     onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
                     onKeyDown={handleInputKeyDown}
+                    onFocus={handleChatTextareaFocus}
+                    onClick={handleChatTextareaFocus}
                     onScroll={(e) => {
                       const el = e.target as HTMLTextAreaElement
                       if (inputOverlayRef.current) {
@@ -3887,8 +5282,8 @@ export default function ChatPage() {
                       </div>
                       <div className="max-h-[min(260px,45vh)] overflow-y-auto overscroll-contain pr-1">
                       {scoreSuggestItems.map((item, idx) => {
-                        const isNaesin = item.id === 'naesin'
                         const isSelected = idx === scoreSuggestIndex
+                        const meta = getScoreSuggestionMeta(item, isSelected)
                         return (
                           <button
                             key={`${item.id}-${item.name}`}
@@ -3902,32 +5297,17 @@ export default function ChatPage() {
                                 : 'hover:bg-gray-50 text-gray-700'
                             }`}
                           >
-                            {/* 아이콘 */}
-                            <div className={`flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center ${
-                              isNaesin
-                                ? (isSelected ? 'bg-blue-100 text-blue-600' : 'bg-indigo-50 text-indigo-500')
-                                : (isSelected ? 'bg-blue-100 text-blue-600' : 'bg-emerald-50 text-emerald-500')
-                            }`}>
-                              {isNaesin ? (
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                                </svg>
-                              ) : (
-                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                                </svg>
-                              )}
+                            <div className={`flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center ${meta.iconWrapClass}`}>
+                              {meta.icon}
                             </div>
-                            {/* 텍스트 */}
                             <div className="flex-1 min-w-0">
                               <div className={`font-medium truncate leading-tight ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
                                 {item.name}
                               </div>
                               <div className="text-[11px] text-gray-400 truncate">
-                                {isNaesin ? '연동된 내신 성적' : '모의고사 성적'}
+                                {meta.subtitle}
                               </div>
                             </div>
-                            {/* 선택 표시 */}
                             {isSelected && (
                               <svg className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -3944,6 +5324,20 @@ export default function ChatPage() {
                   {/* 하단 영역: 버튼들 + 전송 버튼 */}
                   <div className="flex items-center justify-between mt-2">
                     <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { void handleToggleSchoolRecordInputMode() }}
+                        disabled={isLoading || isInputLocked}
+                        className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-semibold transition-all duration-200 disabled:opacity-50 ${
+                          schoolRecordToolEnabled
+                            ? 'border-transparent bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-[0_8px_24px_rgba(139,92,246,0.18)] hover:brightness-105 hover:shadow-[0_12px_28px_rgba(139,92,246,0.32)]'
+                            : 'border-gray-200 bg-white text-gray-600 shadow-sm hover:bg-gray-50 hover:text-gray-800'
+                        }`}
+                        title="생기부 상담 모드"
+                      >
+                        <BookOpen className="h-4 w-4" />
+                        <span>생기부 상담</span>
+                      </button>
                     </div>
                     
                     {/* 응답 모드 선택(Auto/Thinking) + 전송 버튼 */}
@@ -3992,82 +5386,31 @@ export default function ChatPage() {
           </>
         ) : (
           <>
-            <div className={`flex-1 overflow-auto min-h-0 flex flex-col ${['school_record_menu', 'school_record_link', 'grade_input', 'mock_exam_input'].includes(rightPanelView) ? 'bg-gray-50 min-h-full' : ''}`}>
-              {/* 노션 스타일: 입시 기록 영역 상단 브레드크럼 (같은 섹션 안에서 전환되는 느낌) */}
-              {['school_record_menu', 'school_record_link', 'grade_input', 'mock_exam_input'].includes(rightPanelView) && (
-                <div className="flex-shrink-0 sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-4 sm:px-6 py-3.5 min-h-[48px] flex items-center gap-2 safe-area-top">
-                  {/* 모바일 전용: 프로필 화면에서도 사이드 네비 열기 버튼 (회색 배경에서 잘 보이도록) */}
-                  <button
-                    type="button"
-                    onClick={() => setIsSideNavOpen(true)}
-                    className="sm:hidden -ml-1 shrink-0 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-gray-700 transition-colors hover:bg-gray-100 active:bg-gray-200 touch-manipulation"
-                    aria-label="메뉴 열기"
-                  >
-                    <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2.2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-                    </svg>
-                  </button>
-                  <nav className="text-sm text-gray-600 flex items-center gap-1.5 truncate min-w-0 flex-1" aria-label="입시 기록 메뉴">
-                    <button
-                      type="button"
-                      onClick={() => setRightPanelView('school_record_menu')}
-                      className="font-medium text-gray-900 hover:text-blue-600 focus:text-blue-600 focus:outline-none active:opacity-80 py-1 -my-1 px-1 -mx-1 rounded min-h-[44px] min-w-[44px] flex items-center touch-manipulation"
-                    >
-                      내 프로필
-                    </button>
-                    {rightPanelView !== 'school_record_menu' && (
-                      <>
-                        <span className="text-gray-300 pointer-events-none">/</span>
-                        <span className="text-gray-700">
-                          {rightPanelView === 'school_record_link' && '생활기록부'}
-                          {rightPanelView === 'grade_input' && '내신 성적'}
-                          {rightPanelView === 'mock_exam_input' && '모의고사'}
-                        </span>
-                      </>
-                    )}
-                  </nav>
-                </div>
-              )}
-              {/* 탭 전환 시 부드러운 페이드 (노션처럼 같은 페이지 내 전환 느낌) */}
-              {rightPanelView === 'grade_input' && (
-                <div key="grade_input" className="animate-panel-fadeIn flex-1 min-h-0 flex flex-col">
-                <SchoolGradeInputModal
-                  embedded
-                  isOpen
-                  autoOpenSavedGradeReport={autoOpenSavedGradeReport}
-                  onAutoOpenSavedGradeReportHandled={() => setAutoOpenSavedGradeReport(false)}
-                  onClose={() => setRightPanelView('school_record_menu')}
-                  onRequireSchoolRecordLink={() => {
-                    setSchoolRecordMenuTab('school_record')
-                    setRightPanelView('school_record_link')
-                  }}
-                  onUseNaesinSuggestion={(mention) => {
-                    setInput((prev) => (prev.trim() ? `${prev} ${mention} ` : `${mention} `))
-                    setRightPanelView('chat')
-                  }}
-                  onOpenMockExamInput={() => setRightPanelView('mock_exam_input')}
-                />
-                </div>
-              )}
-              {rightPanelView === 'mock_exam_input' && (
-                <div key="mock_exam_input" className="animate-panel-fadeIn flex-1 min-h-0 flex flex-col">
-                <ScoreSetManagerModal
-                  embedded
-                  isOpen
-                  onClose={() => setRightPanelView('school_record_menu')}
-                  sessionId={sessionId}
-                  token={getRequestToken()}
-                  onUseScoreSet={(scoreSetId, scoreSetName) => {
-                    setActiveScoreId(scoreSetId)
-                    setInput((prev) => (prev.trim() ? `${prev} ${scoreSetName} ` : `${scoreSetName} `))
-                    setRightPanelView('chat')
-                  }}
-                />
-                </div>
-              )}
+            <div className={`flex-1 overflow-auto min-h-0 flex flex-col ${rightPanelView === 'school_record_menu' ? 'bg-gray-50 min-h-full' : ''}`}>
               {rightPanelView === 'school_record_menu' && (
                 <div key="school_record_menu" className="animate-panel-fadeIn w-full flex-1 min-h-full flex flex-col bg-gray-50">
-                  <div className="w-full flex-1 px-3 pt-6 pb-8-safe overflow-x-hidden sm:mx-auto sm:max-w-4xl sm:px-4 sm:pt-10">
+                  <div className="w-full flex-1 px-3 pt-0 pb-8-safe overflow-x-hidden sm:mx-auto sm:max-w-4xl sm:px-4 sm:pt-0">
+                  <div className="mb-2 flex items-center justify-between gap-3 pt-3">
+                    {!isSideNavOpen ? (
+                      <button
+                        type="button"
+                        onClick={() => setIsSideNavOpen(true)}
+                        className="-ml-1 shrink-0 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-gray-700 transition-colors hover:bg-gray-100 active:bg-gray-200 touch-manipulation"
+                        aria-label="메뉴 열기"
+                      >
+                      <Menu className="h-5 w-5" />
+                      </button>
+                    ) : (
+                      <div />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setRightPanelView('chat')}
+                      className="inline-flex h-9 items-center justify-center rounded-lg border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-100 active:bg-gray-200 touch-manipulation"
+                    >
+                      채팅으로 이동
+                    </button>
+                  </div>
                   <input
                     ref={editProfileInputRef}
                     type="file"
@@ -4201,186 +5544,698 @@ export default function ChatPage() {
                     </section>
 
                     {!isProfileEditMode && (
-                      <section className="rounded-2xl sm:rounded-[28px] border border-gray-100 bg-white p-4 shadow-sm sm:p-6 sm:p-7">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="min-w-0">
-                            <h3 className="text-base sm:text-lg font-bold text-gray-900">내 입시 기록</h3>
-                            <p className="mt-0.5 sm:mt-1 text-xs sm:text-sm text-gray-500">연동된 기록을 확인하고 관리하세요</p>
+                      <div className="space-y-3">
+                        <div
+                          className="group relative w-full rounded-2xl border border-gray-200 bg-white px-4 py-2.5 text-left shadow-sm transition-all duration-200 touch-manipulation min-h-[48px]"
+                        >
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                              <div className={`inline-flex h-10 w-10 items-center justify-center rounded-xl shrink-0 ${
+                                schoolRecordLinked ? 'bg-emerald-100 text-emerald-600' : 'bg-emerald-50 text-emerald-500'
+                              }`}>
+                                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                </svg>
+                              </div>
+                              <div className="min-w-0 flex-1 pt-0.5">
+                                <div className="flex items-center gap-2">
+                                  <p className="text-base font-bold text-gray-900 whitespace-nowrap">생활기록부 연동하기</p>
+                                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                    schoolRecordLinked
+                                      ? 'bg-emerald-100 text-emerald-700'
+                                      : 'bg-red-100 text-red-700 px-3 py-1.5 text-sm font-bold'
+                                  }`}>
+                                    {schoolRecordLinked ? '완료' : '미완료'}
+                                  </span>
+                                </div>
+                                <p className="mt-1 text-sm leading-5 text-gray-500">
+                                  생기부를 업로드하고 무료 요약 리포트를 받아보세요.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="w-full sm:w-auto sm:shrink-0">
+                              <div className="flex w-full items-center gap-2">
+                                {!schoolRecordLinked && (
+                                  <button
+                                    type="button"
+                                    disabled={schoolRecordPdfUploading}
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      schoolRecordPdfInputRef.current?.click()
+                                    }}
+                                    className="inline-flex h-11 flex-1 items-center justify-center whitespace-nowrap rounded-xl border border-gray-200 bg-white px-4 text-[13px] font-extrabold tracking-[-0.01em] text-gray-700 shadow-sm transition hover:bg-gray-50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60 sm:flex-initial"
+                                  >
+                                    {schoolRecordPdfUploading ? '업로드 중...' : '내 파일 선택'}
+                                  </button>
+                                )}
+                                {schoolRecordLinked ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        void handleDownloadSchoolRecordSummaryReport()
+                                      }}
+                                      className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl border border-gray-200 bg-white px-4 text-[13px] font-extrabold tracking-[-0.01em] text-gray-700 shadow-sm transition hover:bg-gray-50 active:scale-[0.99]"
+                                    >
+                                      분석 리포트 다운로드
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        setSchoolRecordPreviewOpen((prev) => !prev)
+                                      }}
+                                      className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl border border-gray-200 bg-white px-4 text-[13px] font-extrabold tracking-[-0.01em] text-gray-700 shadow-sm transition hover:bg-gray-50 active:scale-[0.99]"
+                                    >
+                                      생기부 확인하기
+                                      <svg
+                                        className={`ml-1.5 h-4 w-4 shrink-0 transition-transform ${schoolRecordPreviewOpen ? 'rotate-180' : ''}`}
+                                        fill="none"
+                                        stroke="currentColor"
+                                        viewBox="0 0 24 24"
+                                      >
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                      </svg>
+                                    </button>
+                                  </>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setSchoolRecordGuideOpen((prev) => !prev)
+                                    }}
+                                    className="inline-flex h-11 flex-1 items-center justify-center whitespace-nowrap rounded-xl border border-gray-200 bg-white px-4 text-[13px] font-extrabold tracking-[-0.01em] text-gray-700 shadow-sm transition hover:bg-gray-50 active:scale-[0.99] sm:flex-initial"
+                                  >
+                                    생활기록부 다운로드 방법 보기
+                                    <svg
+                                      className={`ml-1.5 h-4 w-4 shrink-0 transition-transform ${schoolRecordGuideOpen ? 'rotate-180' : ''}`}
+                                      fill="none"
+                                      stroke="currentColor"
+                                      viewBox="0 0 24 24"
+                                    >
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                    </svg>
+                                  </button>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                          <div className="shrink-0 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-600">
-                            {schoolRecordLinked ? '연동됨' : '미연동'}
-                          </div>
+                          {schoolRecordLinked && schoolRecordPreviewOpen && (
+                            <div
+                              className="mt-3 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div>
+                                {schoolRecordPreviewLoading ? (
+                                  <div className="px-4 py-6 text-sm text-gray-500">생기부 내용을 불러오는 중...</div>
+                                ) : (
+                                  SCHOOL_RECORD_PREVIEW_STEPS.map(({ step, label }) => {
+                                    const isOpen = schoolRecordPreviewStep === step
+                                    return (
+                                      <div key={step} className="border-b border-gray-200 last:border-b-0">
+                                        <button
+                                          type="button"
+                                          onClick={() => setSchoolRecordPreviewStep(isOpen ? null : step)}
+                                          className="flex w-full items-center gap-4 px-2 py-5 text-left transition-colors hover:bg-gray-50 sm:px-4"
+                                        >
+                                          <span className="shrink-0 rounded-full bg-[#0e6093] px-4 py-2 text-sm font-extrabold tracking-wide text-white">
+                                            STEP {String(step).padStart(2, '0')}
+                                          </span>
+                                          <span className="flex-1 text-base font-semibold text-gray-900">{label}</span>
+                                          <svg
+                                            className={`h-6 w-6 shrink-0 text-[#0e6093] transition-transform ${isOpen ? 'rotate-180' : ''}`}
+                                            fill="none"
+                                            stroke="currentColor"
+                                            viewBox="0 0 24 24"
+                                          >
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                          </svg>
+                                        </button>
+                                        {isOpen && (
+                                          <div className="border-t border-gray-200 bg-[#f7f9fc] px-2 py-4 sm:px-4">
+                                            {renderSchoolRecordPreviewStepContent(step)}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )
+                                  })
+                                )}
+                              </div>
+                            </div>
+                          )}
+                          {!schoolRecordLinked && schoolRecordGuideOpen && (
+                            <div
+                              className="mt-3 space-y-3 rounded-2xl bg-white p-4 shadow-sm"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div className="flex flex-wrap gap-2">
+                                {schoolRecordGuideMethods.map((method) => {
+                                  const active = method.id === schoolRecordGuideMethodId
+                                  return (
+                                    <button
+                                      key={method.id}
+                                      type="button"
+                                      onClick={() => setSchoolRecordGuideMethodId(method.id)}
+                                      className={`rounded-xl px-3 py-2 text-sm font-bold transition ${
+                                        active ? 'bg-[#191F28] text-white' : 'bg-[#F2F4F6] text-[#4E5968] hover:bg-[#E9EDF2]'
+                                      }`}
+                                    >
+                                      {method.label}
+                                    </button>
+                                  )
+                                })}
+                              </div>
+
+                              {currentSchoolRecordGuideMethod && (
+                                <div className="rounded-2xl border border-[#EEF1F4] bg-[#F9FAFB] p-4">
+                                  <p className="text-base font-extrabold text-[#191F28]">{currentSchoolRecordGuideMethod.label} 다운로드 방법</p>
+                                  {currentSchoolRecordGuideMethod.links && currentSchoolRecordGuideMethod.links.length > 0 && (
+                                    <div className="mt-2 flex flex-wrap gap-2">
+                                      {currentSchoolRecordGuideMethod.links.map((item) => (
+                                        <a
+                                          key={item.href}
+                                          href={item.href}
+                                          target="_blank"
+                                          rel="noreferrer"
+                                          className="inline-flex h-8 items-center justify-center rounded-lg border border-[#D9E2EC] bg-white px-2.5 text-xs font-bold text-[#3182F6] transition hover:bg-[#F4F8FF]"
+                                        >
+                                          {item.label}
+                                        </a>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  <div className="mt-4 space-y-4">
+                                    {currentSchoolRecordGuideMethod.sections.map((section) => (
+                                      <section key={section.title} className="rounded-xl bg-white p-3">
+                                        <p className="text-sm font-extrabold text-[#191F28]">{section.title}</p>
+                                        {section.summary && <p className="mt-1 text-xs font-medium text-[#6B7684]">{section.summary}</p>}
+                                        <ol className="mt-3 space-y-3">
+                                          {section.steps.map((step, index) => (
+                                            <li key={`${section.title}-${step.title}-${index}`} className="rounded-lg border border-[#EEF1F4] bg-[#FBFCFD] p-3">
+                                              <div className="mb-2 flex items-center gap-2">
+                                                <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#E8F1FF] text-xs font-extrabold text-[#3182F6]">
+                                                  {index + 1}
+                                                </span>
+                                                <p className="text-sm font-bold text-[#191F28]">{step.title}</p>
+                                              </div>
+                                              <p className="text-xs font-medium leading-5 text-[#4E5968]">{step.description}</p>
+                                              {step.image && (
+                                                <div className="mt-2 overflow-hidden rounded-lg border border-[#EEF1F4] bg-white p-1.5">
+                                                  <img src={step.image} alt={step.title} className="h-auto w-full rounded-md" loading="lazy" />
+                                                </div>
+                                              )}
+                                            </li>
+                                          ))}
+                                        </ol>
+                                      </section>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
 
-                        <div className="mt-4 sm:mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-3">
-                          {/* 생활기록부 카드 */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSchoolRecordMenuTab('school_record')
-                              setRightPanelView('school_record_link')
-                            }}
-                            className={`group relative rounded-2xl p-4 sm:p-4 text-left transition-all duration-200 active:scale-[0.98] touch-manipulation min-h-[72px] sm:min-h-0 ${
-                              schoolRecordLinked
-                                ? 'bg-emerald-50/80 ring-1 ring-emerald-200 hover:bg-emerald-50'
-                                : 'bg-gray-50 ring-1 ring-gray-200 hover:bg-gray-100'
-                            }`}
+                        <div
+                          className={`group relative w-full rounded-2xl border border-gray-200 bg-white px-4 text-left shadow-sm touch-manipulation min-h-[48px] ${
+                            isNaesinCardExpanded ? 'pb-3' : 'h-[73px] overflow-hidden'
+                          }`}
+                        >
+                          <div
+                            onClick={() => setIsNaesinCardExpanded((prev) => !prev)}
+                            className="flex h-[73px] cursor-pointer items-center gap-4 overflow-hidden"
                           >
-                            <div className={`inline-flex h-10 w-10 items-center justify-center rounded-xl ${
-                              schoolRecordLinked ? 'bg-emerald-100 text-emerald-600' : 'bg-gray-200 text-gray-500'
-                            }`}>
-                              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                              </svg>
-                            </div>
-                            <p className="mt-3 text-sm font-semibold text-gray-900">생활기록부</p>
-                            <p className="mt-1 text-xs text-gray-500">
-                              {schoolRecordLinked ? '연동 완료' : '연동하기'}
-                            </p>
-                            {schoolRecordLinked && (
-                              <span className="absolute right-3 top-3 flex h-2 w-2">
-                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-                                <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500"></span>
-                              </span>
-                            )}
-                          </button>
-
-                          {/* 내신 성적 카드 */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSchoolRecordMenuTab('grade')
-                              setRightPanelView('grade_input')
-                            }}
-                            className="group relative rounded-2xl bg-gray-50 p-4 text-left ring-1 ring-gray-200 transition-all duration-200 hover:bg-gray-100 active:scale-[0.98] touch-manipulation min-h-[72px] sm:min-h-0"
-                          >
-                            <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-blue-100 text-blue-600">
+                            <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-blue-50 text-blue-600">
                               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                               </svg>
                             </div>
-                            <p className="mt-3 text-sm font-semibold text-gray-900">내신 성적</p>
-                            <p className="mt-1 text-xs text-gray-500">입력하기</p>
-                          </button>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <p className="text-base font-bold text-gray-900">내신 성적 입력하기</p>
+                                <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                  scorePredictionNaesinLinked
+                                    ? 'bg-blue-50 text-blue-600'
+                                    : 'bg-red-50 text-red-600 px-3 py-1.5 text-sm font-bold'
+                                }`}>
+                                  {scorePredictionNaesinLinked ? '완료' : '미완료'}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-sm leading-5 text-gray-500">
+                                생활기록부 연동하면 자동으로 채워져요.
+                              </p>
+                            </div>
+                            <div className="shrink-0">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setIsNaesinCardExpanded((prev) => !prev)
+                                }}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition active:scale-95"
+                              >
+                                <svg
+                                  className={`h-5 w-5 transition-transform ${isNaesinCardExpanded ? 'rotate-180' : ''}`}
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                          {isNaesinCardExpanded && (
+                            <>
+                            <div className="mt-3 rounded-2xl border border-gray-200 bg-[#F9FAFB] px-3 py-3">
+                              <div className="overflow-x-auto">
+                                <div className="flex w-full min-w-0 gap-0.5">
+                                  <div className="w-fit shrink-0 pr-0.5 py-2">
+                                    <div className="flex h-[24px] items-center text-[20px] font-black leading-none tracking-[-0.04em] text-gray-700">간단 입력</div>
+                                    <div className="mt-2 h-8 flex items-center whitespace-nowrap text-[11px] font-semibold leading-snug tracking-[-0.02em] text-gray-500">평균 내신(전체)</div>
+                                    <div className="mt-1.5 h-8 flex items-center whitespace-nowrap text-[11px] font-semibold leading-snug tracking-[-0.02em] text-gray-500">평균 내신(국영수탐)</div>
+                                  </div>
+                                  <div className="w-[84px] shrink-0 rounded-xl px-1 py-1.5 transition bg-gray-100">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="w-full rounded-lg px-1 py-1 text-center text-[12px] font-extrabold text-gray-700"
+                                    >
+                                      전체
+                                    </button>
+                                    <input
+                                      value={inlineNaesinSummary.overallAverage}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onFocus={() => setIsNaesinCardExpanded(true)}
+                                      onChange={(e) => handleInlineNaesinSummaryChange('overallAverage', e.target.value)}
+                                      className="mt-1.5 h-8 w-full rounded-lg border border-gray-200 bg-white px-1 text-center text-sm font-semibold text-gray-800 outline-none focus:border-blue-400 focus:bg-white"
+                                    />
+                                    <input
+                                      value={inlineNaesinSummary.coreAverage}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onFocus={() => setIsNaesinCardExpanded(true)}
+                                      onChange={(e) => handleInlineNaesinSummaryChange('coreAverage', e.target.value)}
+                                      className="mt-1.5 h-8 w-full rounded-lg border border-gray-200 bg-white px-1 text-center text-sm font-semibold text-gray-800 outline-none focus:border-blue-400 focus:bg-white"
+                                    />
+                                  </div>
+                                  <div className="mx-1.5 my-2 w-px shrink-0 self-stretch bg-gray-200" aria-hidden="true" />
+                                  {NAESIN_SEMESTER_KEYS.map((semesterKey) => {
+                                    const isSelected = inlineNaesinDetailView === 'semester' && selectedNaesinDetailSemester === semesterKey
+                                    return (
+                                      <div
+                                        key={semesterKey}
+                                        onClick={(e) => {
+                                          e.stopPropagation()
+                                          setSelectedNaesinDetailSemester(semesterKey)
+                                          setInlineNaesinDetailView('semester')
+                                        }}
+                                        className={`w-[84px] shrink-0 rounded-xl px-1 py-1.5 transition ${
+                                          isSelected
+                                            ? 'bg-gray-100'
+                                            : 'bg-gray-100 hover:bg-gray-200/70'
+                                        }`}
+                                      >
+                                        <button
+                                          type="button"
+                                          className={`w-full rounded-lg px-1 py-1 text-center text-[12px] font-extrabold transition ${
+                                            isSelected
+                                              ? 'bg-transparent text-gray-700'
+                                              : 'bg-transparent text-gray-600 hover:bg-gray-200/70'
+                                          }`}
+                                        >
+                                          {NAESIN_SEMESTER_LABELS[semesterKey]}
+                                        </button>
+                                        <input
+                                          value={inlineNaesinSummary.semesterAverages[semesterKey].overall}
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            setSelectedNaesinDetailSemester(semesterKey)
+                                            setInlineNaesinDetailView('semester')
+                                          }}
+                                          onChange={(e) => handleInlineNaesinSemesterChange(semesterKey, 'overall', e.target.value)}
+                                          className="mt-1.5 h-8 w-full rounded-lg border border-gray-200 bg-white px-1 text-center text-sm font-semibold text-gray-800 outline-none focus:border-blue-400 focus:bg-white"
+                                        />
+                                        <input
+                                          value={inlineNaesinSummary.semesterAverages[semesterKey].core}
+                                          onClick={(e) => {
+                                            e.stopPropagation()
+                                            setSelectedNaesinDetailSemester(semesterKey)
+                                            setInlineNaesinDetailView('semester')
+                                          }}
+                                          onChange={(e) => handleInlineNaesinSemesterChange(semesterKey, 'core', e.target.value)}
+                                          className="mt-1.5 h-8 w-full rounded-lg border border-gray-200 bg-white px-1 text-center text-sm font-semibold text-gray-800 outline-none focus:border-blue-400 focus:bg-white"
+                                        />
+                                      </div>
+                                    )
+                                  })}
+                                  <div
+                                    onClick={(e) => {
+                                      e.stopPropagation()
+                                      setInlineNaesinDetailView('attendance')
+                                    }}
+                                    className={`w-[84px] shrink-0 rounded-xl px-1 py-1.5 transition cursor-pointer flex items-center justify-center ${
+                                      inlineNaesinDetailView === 'attendance'
+                                        ? 'bg-gray-100'
+                                        : 'bg-gray-100 hover:bg-gray-200/70'
+                                    }`}
+                                  >
+                                    <div className={`w-full rounded-lg px-1 py-1 text-center text-[13px] font-extrabold transition ${
+                                      inlineNaesinDetailView === 'attendance'
+                                        ? 'bg-transparent text-gray-700'
+                                        : 'bg-transparent text-gray-600 hover:bg-gray-200/70'
+                                    }`}>
+                                      출결/봉사
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                              <div className="mt-3 rounded-2xl border border-gray-200 bg-[#F3F4F6] p-4">
+                                <div className="mb-3 flex items-center justify-between gap-3">
+                                  {inlineNaesinDetailView === 'semester' ? (
+                                    <p className="text-[24px] font-extrabold leading-none tracking-[-0.03em] text-gray-500">{NAESIN_SEMESTER_LABELS[selectedNaesinDetailSemester]} 상세 입력</p>
+                                  ) : (
+                                    <p className="text-[24px] font-extrabold leading-none tracking-[-0.03em] text-gray-500">출결사항과 봉사활동 상세 입력</p>
+                                  )}
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        if (!hasPreviousNaesinDetailNavigation) return
+                                        const previousKey = naesinDetailNavigationSequence[selectedNaesinDetailNavigationIndex - 1]
+                                        if (previousKey === 'attendance') {
+                                          setInlineNaesinDetailView('attendance')
+                                          return
+                                        }
+                                        setInlineNaesinDetailView('semester')
+                                        setSelectedNaesinDetailSemester(previousKey)
+                                      }}
+                                      disabled={!hasPreviousNaesinDetailNavigation}
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                      aria-label="이전 학기"
+                                    >
+                                      <ChevronLeft className="h-4 w-4" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        if (!hasNextNaesinDetailNavigation) return
+                                        const nextKey = naesinDetailNavigationSequence[selectedNaesinDetailNavigationIndex + 1]
+                                        if (nextKey === 'attendance') {
+                                          setInlineNaesinDetailView('attendance')
+                                          return
+                                        }
+                                        setInlineNaesinDetailView('semester')
+                                        setSelectedNaesinDetailSemester(nextKey)
+                                      }}
+                                      disabled={!hasNextNaesinDetailNavigation}
+                                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 shadow-sm transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                      aria-label="다음 학기"
+                                    >
+                                      <ChevronRight className="h-4 w-4" />
+                                    </button>
+                                  </div>
+                                </div>
+                                {inlineNaesinDetailView === 'semester' ? (
+                                  <div className="overflow-x-auto rounded-xl border border-gray-200">
+                                    <table className="min-w-[860px] w-full table-fixed border-collapse bg-white">
+                                      <colgroup>
+                                        <col style={{ width: '26px' }} />
+                                        <col style={{ width: '30px' }} />
+                                        <col style={{ width: '64px' }} />
+                                        <col style={{ width: '64px' }} />
+                                        <col style={{ width: '82px' }} />
+                                        <col style={{ width: '36px' }} />
+                                        <col style={{ width: '38px' }} />
+                                        <col style={{ width: '42px' }} />
+                                        <col style={{ width: '46px' }} />
+                                        <col style={{ width: '46px' }} />
+                                        <col style={{ width: '42px' }} />
+                                        <col style={{ width: '40px' }} />
+                                        <col style={{ width: '30px' }} />
+                                        <col style={{ width: '30px' }} />
+                                        <col style={{ width: '30px' }} />
+                                      </colgroup>
+                                      <thead>
+                                        <tr className="bg-gray-50 text-center text-[11px] font-bold leading-[1.02] text-gray-700">
+                                          <th className="border border-gray-200 px-0.5 py-0.5 align-middle" rowSpan={2}></th>
+                                          <th className="border border-gray-200 px-0.5 py-0.5 align-middle" rowSpan={2}>번호</th>
+                                          <th className="border border-gray-200 px-0.5 py-0.5 align-middle" rowSpan={2}>
+                                            <span className="block whitespace-normal break-keep leading-[1.02]">교과종류 구분</span>
+                                          </th>
+                                          <th className="border border-gray-200 px-0.5 py-0.5 align-middle" rowSpan={2}>교과</th>
+                                          <th className="border border-gray-200 px-0.5 py-0.5 align-middle" rowSpan={2}>과목</th>
+                                          <th className="border border-gray-200 px-0.5 py-0.5 align-middle" rowSpan={2}>
+                                            <span className="block whitespace-normal break-keep leading-[1.02]">단위수</span>
+                                          </th>
+                                          <th className="border border-gray-200 px-0.5 py-0.5 align-middle" rowSpan={2}>
+                                            <span className="block whitespace-normal break-keep leading-[1.02]">석차등급</span>
+                                          </th>
+                                          <th className="border border-gray-200 px-0.5 py-0.5 align-middle" rowSpan={2}>
+                                            <span className="block whitespace-normal break-keep leading-[1.02]">원점수</span>
+                                          </th>
+                                          <th className="border border-gray-200 px-0.5 py-0.5 align-middle" rowSpan={2}>
+                                            <span className="block whitespace-normal break-keep leading-[1.02]">과목평균</span>
+                                          </th>
+                                          <th className="border border-gray-200 px-0.5 py-0.5 align-middle" rowSpan={2}>
+                                            <span className="block whitespace-normal break-keep leading-[1.02]">표준편차</span>
+                                          </th>
+                                          <th className="border border-gray-200 px-0.5 py-0.5 align-middle" rowSpan={2}>
+                                            <span className="block whitespace-normal break-keep leading-[1.02]">수강자수</span>
+                                          </th>
+                                          <th className="border border-gray-200 px-0.5 py-0.5 align-middle" rowSpan={2}>성취도</th>
+                                          <th className="border border-gray-200 px-0.5 py-0.5 align-middle" colSpan={3}>
+                                            <span className="block whitespace-normal break-keep leading-[1.02]">성취도별 분포</span>
+                                          </th>
+                                        </tr>
+                                        <tr className="bg-gray-50 text-center text-[11px] font-bold leading-none text-gray-700">
+                                          <th className="border border-gray-200 px-0.5 py-0.5">A</th>
+                                          <th className="border border-gray-200 px-0.5 py-0.5">B</th>
+                                          <th className="border border-gray-200 px-0.5 py-0.5">C</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody>
+                                        {currentInlineSemesterRows.map((row, index) => {
+                                          const curriculumOptions = getCurriculumOptions(row.trackType)
+                                          const subjectOptions = getSubjectOptions(row.trackType, row.curriculum)
+                                          const isLastRow = index === currentInlineSemesterRows.length - 1
+                                          return (
+                                            <tr key={row.id} className="text-[11px] text-gray-800">
+                                              <td className="border border-gray-200 px-1 py-1 text-center">
+                                                {isLastRow ? (
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation()
+                                                      addInlineNaesinSemesterRow(selectedNaesinDetailSemester)
+                                                    }}
+                                                    className="inline-flex h-5 w-5 items-center justify-center rounded-md text-gray-500 transition hover:bg-blue-50 hover:text-blue-600"
+                                                    aria-label="행 추가"
+                                                  >
+                                                    <Plus className="h-3.5 w-3.5" />
+                                                  </button>
+                                                ) : (
+                                                  <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                      e.stopPropagation()
+                                                      deleteInlineNaesinSemesterRow(selectedNaesinDetailSemester, row.id)
+                                                    }}
+                                                    className="inline-flex h-5 w-5 items-center justify-center rounded-md text-gray-400 transition hover:bg-red-50 hover:text-red-500"
+                                                    aria-label="행 삭제"
+                                                  >
+                                                    <Trash2 className="h-3.5 w-3.5" />
+                                                  </button>
+                                                )}
+                                              </td>
+                                              <td className="border border-gray-200 px-1 py-1 text-center">{index + 1}</td>
+                                              <td className="border border-gray-200 px-1 py-1">
+                                                <select value={row.trackType} onChange={(e) => updateInlineNaesinSemesterRow(selectedNaesinDetailSemester, row.id, 'trackType', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-0.5 text-[11px]">
+                                                  {trackTypeOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                                                </select>
+                                              </td>
+                                              <td className="border border-gray-200 px-1 py-1">
+                                                <select value={row.curriculum} onChange={(e) => updateInlineNaesinSemesterRow(selectedNaesinDetailSemester, row.id, 'curriculum', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-0.5 text-[11px]">
+                                                  {curriculumOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                                                </select>
+                                              </td>
+                                              <td className="border border-gray-200 px-1 py-1">
+                                                <select value={row.subject} onChange={(e) => updateInlineNaesinSemesterRow(selectedNaesinDetailSemester, row.id, 'subject', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-0.5 text-[11px]">
+                                                  <option value="">선택</option>
+                                                  {subjectOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                                                </select>
+                                              </td>
+                                              <td className="border border-gray-200 px-1 py-1"><input value={row.credits} onChange={(e) => updateInlineNaesinSemesterRow(selectedNaesinDetailSemester, row.id, 'credits', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-0.5 text-[11px]" /></td>
+                                              <td className="border border-gray-200 px-1 py-1"><input value={row.classRank} onChange={(e) => updateInlineNaesinSemesterRow(selectedNaesinDetailSemester, row.id, 'classRank', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-0.5 text-[11px]" /></td>
+                                              <td className="border border-gray-200 px-1 py-1"><input value={row.rawScore} onChange={(e) => updateInlineNaesinSemesterRow(selectedNaesinDetailSemester, row.id, 'rawScore', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-0.5 text-[11px]" /></td>
+                                              <td className="border border-gray-200 px-1 py-1"><input value={row.avgScore} onChange={(e) => updateInlineNaesinSemesterRow(selectedNaesinDetailSemester, row.id, 'avgScore', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-0.5 text-[11px]" /></td>
+                                              <td className="border border-gray-200 px-1 py-1"><input value={row.stdDev} onChange={(e) => updateInlineNaesinSemesterRow(selectedNaesinDetailSemester, row.id, 'stdDev', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-0.5 text-[11px]" /></td>
+                                              <td className="border border-gray-200 px-1 py-1"><input value={row.studentCount} onChange={(e) => updateInlineNaesinSemesterRow(selectedNaesinDetailSemester, row.id, 'studentCount', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-0.5 text-[11px]" /></td>
+                                              <td className="border border-gray-200 px-1 py-1">
+                                                <select value={row.achievement} onChange={(e) => updateInlineNaesinSemesterRow(selectedNaesinDetailSemester, row.id, 'achievement', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-0.5 text-[11px]">
+                                                  {achievementOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+                                                </select>
+                                              </td>
+                                              <td className="border border-gray-200 px-1 py-1"><input value={row.distA} onChange={(e) => updateInlineNaesinSemesterRow(selectedNaesinDetailSemester, row.id, 'distA', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-0.5 text-[11px]" /></td>
+                                              <td className="border border-gray-200 px-1 py-1"><input value={row.distB} onChange={(e) => updateInlineNaesinSemesterRow(selectedNaesinDetailSemester, row.id, 'distB', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-0.5 text-[11px]" /></td>
+                                              <td className="border border-gray-200 px-1 py-1"><input value={row.distC} onChange={(e) => updateInlineNaesinSemesterRow(selectedNaesinDetailSemester, row.id, 'distC', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-0.5 text-[11px]" /></td>
+                                            </tr>
+                                          )
+                                        })}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                ) : (
+                                  <div className="grid grid-cols-[minmax(0,1fr)_220px] gap-2 items-start">
+                                    <div className="overflow-hidden rounded-xl border border-gray-200">
+                                      <table className="w-full table-fixed border-collapse bg-white text-xs">
+                                        <colgroup>
+                                          <col style={{ width: '56px' }} />
+                                          <col style={{ width: '98px' }} />
+                                          <col style={{ width: '98px' }} />
+                                          <col style={{ width: '98px' }} />
+                                          <col style={{ width: '98px' }} />
+                                          <col style={{ width: '42px' }} />
+                                        </colgroup>
+                                        <thead>
+                                          <tr className="bg-[#f2f4f7] text-center text-[12px] font-bold text-gray-800">
+                                            <th className="border border-gray-200 px-1 py-1.5">학년</th>
+                                            <th className="border border-gray-200 px-1 py-1.5">무단 결석</th>
+                                            <th className="border border-gray-200 px-1 py-1.5">무단 지각</th>
+                                            <th className="border border-gray-200 px-1 py-1.5">무단 조퇴</th>
+                                            <th className="border border-gray-200 px-1 py-1.5">무단 결과</th>
+                                            <th className="border border-gray-200 px-1 py-1.5">합계</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {gradeKeys.map((grade) => (
+                                            <tr key={`attendance-${grade}`} className="text-center text-[12px] text-gray-800">
+                                              <td className="border border-gray-200 px-1 py-1.5 whitespace-nowrap text-sm font-bold">{grade}학년</td>
+                                              <td className="border border-gray-200 px-1 py-1"><input value={inlineNaesinDetailData.extracurricular.attendance[grade].absence} onChange={(e) => updateInlineNaesinAttendanceField(grade, 'absence', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-1 text-center text-[12px] font-semibold" /></td>
+                                              <td className="border border-gray-200 px-1 py-1"><input value={inlineNaesinDetailData.extracurricular.attendance[grade].tardy} onChange={(e) => updateInlineNaesinAttendanceField(grade, 'tardy', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-1 text-center text-[12px] font-semibold" /></td>
+                                              <td className="border border-gray-200 px-1 py-1"><input value={inlineNaesinDetailData.extracurricular.attendance[grade].earlyLeave} onChange={(e) => updateInlineNaesinAttendanceField(grade, 'earlyLeave', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-1 text-center text-[12px] font-semibold" /></td>
+                                              <td className="border border-gray-200 px-1 py-1"><input value={inlineNaesinDetailData.extracurricular.attendance[grade].result} onChange={(e) => updateInlineNaesinAttendanceField(grade, 'result', e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-1 text-center text-[12px] font-semibold" /></td>
+                                              <td className="border border-gray-200 px-1 py-1.5 text-base font-bold">{attendanceTotalsByGrade[grade]}</td>
+                                            </tr>
+                                          ))}
+                                          <tr className="bg-[#F8FAFC] text-center text-[12px] font-bold text-gray-800">
+                                            <td className="border border-gray-200 px-1 py-1.5">총합</td>
+                                            <td className="border border-gray-200 px-1 py-1.5 text-base">{attendanceColumnTotals.absence}</td>
+                                            <td className="border border-gray-200 px-1 py-1.5 text-base">{attendanceColumnTotals.tardy}</td>
+                                            <td className="border border-gray-200 px-1 py-1.5 text-base">{attendanceColumnTotals.earlyLeave}</td>
+                                            <td className="border border-gray-200 px-1 py-1.5 text-base">{attendanceColumnTotals.result}</td>
+                                            <td className="border border-gray-200 px-1 py-1.5 text-base">{attendanceGrandTotal}</td>
+                                          </tr>
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                    <div className="overflow-hidden rounded-xl border border-gray-200">
+                                      <table className="w-full table-fixed border-collapse bg-white text-xs">
+                                        <colgroup>
+                                          <col style={{ width: '62px' }} />
+                                          <col style={{ width: '158px' }} />
+                                        </colgroup>
+                                        <thead>
+                                          <tr className="bg-[#f2f4f7] text-center text-[12px] font-bold text-gray-800">
+                                            <th className="border border-gray-200 px-1 py-1.5">학년</th>
+                                            <th className="border border-gray-200 px-1 py-1.5">봉사시간</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody>
+                                          {gradeKeys.map((grade) => (
+                                            <tr key={`volunteer-${grade}`} className="text-center text-[12px] text-gray-800">
+                                              <td className="border border-gray-200 px-1 py-1.5 whitespace-nowrap text-sm font-bold">{grade}학년</td>
+                                              <td className="border border-gray-200 px-1 py-1"><input value={inlineNaesinDetailData.extracurricular.volunteerHours[grade]} onChange={(e) => updateInlineNaesinVolunteerHours(grade, e.target.value)} className="h-7 w-full rounded-md border border-gray-200 px-1 text-center text-[12px] font-semibold" /></td>
+                                            </tr>
+                                          ))}
+                                          <tr className="bg-[#F8FAFC] text-center text-[12px] font-bold text-gray-800">
+                                            <td className="border border-gray-200 px-1 py-1.5">총합</td>
+                                            <td className="border border-gray-200 px-1 py-1.5 text-base">{volunteerTotal}</td>
+                                          </tr>
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </>
+                          )}
+                        </div>
 
-                          {/* 모의고사 카드 */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSchoolRecordMenuTab('mock_exam')
-                              setRightPanelView('mock_exam_input')
-                            }}
-                            className="group relative rounded-2xl bg-gray-50 p-4 text-left ring-1 ring-gray-200 transition-all duration-200 hover:bg-gray-100 active:scale-[0.98] touch-manipulation min-h-[72px] sm:min-h-0"
-                          >
-                            <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-purple-100 text-purple-600">
+                        <div
+                          className={`group relative w-full rounded-2xl border border-gray-200 bg-white px-4 py-2.5 text-left shadow-sm touch-manipulation min-h-[48px] ${
+                            isMockExamCardExpanded ? 'pb-3' : ''
+                          }`}
+                        >
+                          <div className="flex items-start gap-4">
+                            <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-purple-100 text-purple-600 shrink-0">
                               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z" />
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z" />
                               </svg>
                             </div>
-                            <p className="mt-3 text-sm font-semibold text-gray-900">모의고사</p>
-                            <p className="mt-1 text-xs text-gray-500">점수 관리</p>
-                          </button>
-                        </div>
-
-                        {/* 다음 행동 안내 */}
-                        {schoolRecordLinked && (
-                          <div className="mt-4 rounded-xl bg-blue-50/50 p-3 sm:p-4">
-                            <p className="text-xs sm:text-sm text-blue-800 leading-relaxed">
-                              <span className="font-semibold">💡 팁:</span> 채팅에서{' '}
-                              <span className="rounded bg-blue-100 px-1.5 py-0.5 font-medium">@내신 성적</span> 또는{' '}
-                              <span className="rounded bg-blue-100 px-1.5 py-0.5 font-medium">@모의고사</span>를
-                              입력하면 연동된 기록을 기반으로 학교 추천을 받을 수 있어요!
-                            </p>
+                            <div className="min-w-0 flex-1 pt-0.5">
+                              <div className="flex items-center gap-2">
+                                <p className="text-base font-bold text-gray-900">모의고사 점수 관리</p>
+                                <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                  scorePredictionScoreSets.length > 0
+                                    ? 'bg-purple-100 text-purple-700'
+                                    : 'bg-red-100 text-red-700 px-3 py-1.5 text-sm font-bold'
+                                }`}>
+                                  {scorePredictionScoreSets.length > 0 ? '완료' : '미완료'}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-sm text-gray-500">
+                                여러가지 성적을 저장해 두고 질문하세요!
+                              </p>
+                            </div>
+                            <div className="shrink-0">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setIsMockExamCardExpanded((prev) => !prev)
+                                }}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition active:scale-95"
+                              >
+                                <svg
+                                  className={`h-5 w-5 transition-transform ${isMockExamCardExpanded ? 'rotate-180' : ''}`}
+                                  fill="none"
+                                  stroke="currentColor"
+                                  viewBox="0 0 24 24"
+                                >
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                                </svg>
+                              </button>
+                            </div>
                           </div>
-                        )}
-                      </section>
-                    )}
-
-                    {!isProfileEditMode && (
-                      <section className="rounded-2xl sm:rounded-[28px] border border-gray-100 bg-white p-4 shadow-sm sm:p-6 sm:p-7">
-                        <h3 className="text-base sm:text-lg font-bold text-gray-900">바로가기</h3>
-                        <p className="mt-0.5 sm:mt-1 text-xs sm:text-sm text-gray-500">자주 사용하는 기능을 빠르게 접근하세요</p>
-
-                        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-3">
-                          {/* 생활기록부 분석 */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setRightPanelView('chat')
-                              if (skipSchoolRecordToolConfirm) {
-                                void activateSchoolRecordTool()
-                              } else {
-                                setSchoolRecordLinked(null)
-                                setIsSchoolRecordToolModalOpen(true)
-                                setSchoolRecordStatusLoading(true)
-                                void fetchSchoolRecordLinkedStatus()
-                                  .then((linked) => setSchoolRecordLinked(linked))
-                                  .finally(() => setSchoolRecordStatusLoading(false))
-                              }
-                            }}
-                            className="group flex flex-col items-center justify-center gap-2 rounded-2xl bg-gray-50 p-4 sm:p-4 text-center ring-1 ring-gray-200 transition-all duration-200 hover:bg-gray-100 active:scale-[0.98] touch-manipulation min-h-[88px] sm:min-h-0"
-                          >
-                            <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-100 to-emerald-50 text-emerald-600">
-                              <Sparkles className="h-5 w-5" />
+                          {isMockExamCardExpanded && (
+                            <div className="mt-3">
+                              <ScoreSetManagerModal
+                                isOpen
+                                embedded
+                                embeddedStartInInput
+                                onClose={() => setIsMockExamCardExpanded(false)}
+                                sessionId={sessionId}
+                                token={getRequestToken()}
+                                onUseScoreSet={(scoreSetId, scoreSetName) => {
+                                  setActiveScoreId(scoreSetId)
+                                  appendMentionToInput(scoreSetName)
+                                  setIsMockExamCardExpanded(false)
+                                }}
+                              />
                             </div>
-                            <span className="text-xs font-medium text-gray-700">생기부 분석</span>
-                          </button>
-
-                          {/* 합격 예측 */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (skipScorePredictionConfirm) {
-                                setRightPanelView('grade_input')
-                              } else {
-                                setIsScorePredictionStartModalOpen(true)
-                              }
-                            }}
-                            className="group flex flex-col items-center justify-center gap-2 rounded-2xl bg-gray-50 p-4 text-center ring-1 ring-gray-200 transition-all duration-200 hover:bg-gray-100 active:scale-[0.98] touch-manipulation min-h-[88px] sm:min-h-0"
-                          >
-                            <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-100 to-blue-50 text-blue-600">
-                              <Calculator className="h-5 w-5" />
-                            </div>
-                            <span className="text-xs font-medium text-gray-700">합격 예측</span>
-                          </button>
-
-                          {/* 새 채팅 */}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setRightPanelView('chat')
-                              handleNewChat()
-                            }}
-                            className="group flex flex-col items-center justify-center gap-2 rounded-2xl bg-gray-50 p-4 text-center ring-1 ring-gray-200 transition-all duration-200 hover:bg-gray-100 active:scale-[0.98] touch-manipulation min-h-[88px] sm:min-h-0"
-                          >
-                            <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-purple-100 to-purple-50 text-purple-600">
-                              <MessageSquare className="h-5 w-5" />
-                            </div>
-                            <span className="text-xs font-medium text-gray-700">새 채팅</span>
-                          </button>
-
-                          {/* 가이드 */}
-                          <button
-                            type="button"
-                            onClick={() => navigate('/guide')}
-                            className="group flex flex-col items-center justify-center gap-2 rounded-2xl bg-gray-50 p-4 text-center ring-1 ring-gray-200 transition-all duration-200 hover:bg-gray-100 active:scale-[0.98] touch-manipulation min-h-[88px] sm:min-h-0"
-                          >
-                            <div className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-amber-100 to-amber-50 text-amber-600">
-                              <BookOpen className="h-5 w-5" />
-                            </div>
-                            <span className="text-xs font-medium text-gray-700">가이드</span>
-                          </button>
+                          )}
                         </div>
-                      </section>
+                      </div>
                     )}
                   </div>
                   </div>
-                </div>
-              )}
-              {rightPanelView === 'school_record_link' && (
-                <div key="school_record_link" className="animate-panel-fadeIn flex-1 min-h-0 overflow-auto">
-                  <SchoolRecordDeepAnalysisPage onBack={() => setRightPanelView('school_record_menu')} />
                 </div>
               )}
             </div>
@@ -4423,13 +6278,7 @@ export default function ChatPage() {
               </button>
               <button
                 onClick={() => {
-                  if (hasProAccess) {
-                    setThinkingMode(true)
-                    closeThinkingModeModal()
-                  } else {
-                    closeThinkingModeModal()
-                    openProModal()
-                  }
+                  handleThinkingModeSelect()
                 }}
                 className="w-full flex items-center justify-between gap-3 px-3 py-3 hover:bg-gray-50 rounded-lg transition-colors text-left"
               >
@@ -4616,20 +6465,20 @@ export default function ChatPage() {
             <div className="px-6 sm:px-7 pb-6">
               <button
                 onClick={subscribeByBankTransfer}
-                className="w-full py-3.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
+                className="w-full min-h-[72px] px-4 py-4 border border-indigo-300 text-indigo-700 rounded-xl font-semibold hover:bg-indigo-50 transition-colors"
               >
                 무통장입금으로 구독하기
               </button>
               <div className="mt-3 grid grid-cols-2 gap-3">
                 <button
                   onClick={applyReferralCode}
-                  className="w-full py-3.5 border border-indigo-300 text-indigo-700 rounded-xl font-semibold hover:bg-indigo-50 transition-colors"
+                  className="w-full min-h-[40px] px-4 py-2.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
                 >
                   추천인코드
                 </button>
                 <button
                   onClick={openApprovalWidgetChoice}
-                  className="w-full py-3.5 border border-indigo-300 text-indigo-700 rounded-xl font-semibold hover:bg-indigo-50 transition-colors"
+                  className="w-full min-h-[40px] px-4 py-2.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
                 >
                   <span className="inline-flex flex-col items-center leading-tight">
                     <span>결제위젯</span>
@@ -4712,7 +6561,7 @@ export default function ChatPage() {
                 <input
                   value={bankTransferName}
                   onChange={(e) => setBankTransferName(e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="입금자명"
                 />
               </div>
@@ -4722,7 +6571,7 @@ export default function ChatPage() {
                 <input
                   value={bankTransferPhone}
                   onChange={(e) => setBankTransferPhone(e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                   placeholder="01012345678"
                 />
               </div>
@@ -4984,7 +6833,7 @@ export default function ChatPage() {
                       value={announcementForm.title}
                       onChange={(e) => setAnnouncementForm({ ...announcementForm, title: e.target.value })}
                       placeholder="공지사항 제목을 입력하세요"
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
                   </div>
 
@@ -4997,7 +6846,7 @@ export default function ChatPage() {
                       onChange={(e) => setAnnouncementForm({ ...announcementForm, content: e.target.value })}
                       placeholder="공지사항 내용을 입력하세요"
                       rows={10}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                      className="w-full px-4 py-2 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
                     />
                   </div>
 
@@ -5020,7 +6869,7 @@ export default function ChatPage() {
                         setIsAnnouncementModalOpen(false)
                         setEditingAnnouncementId(null)
                       }}
-                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-[#DEE2E6] transition-colors"
+                      className="flex-1 px-4 py-2 border border-gray-200 text-gray-700 rounded-lg hover:bg-[#DEE2E6] transition-colors"
                     >
                       취소
                     </button>
@@ -5045,6 +6894,8 @@ export default function ChatPage() {
         loading={schoolRecordStatusLoading}
         dontAskAgain={skipSchoolRecordToolConfirm}
         confirmLabel={schoolRecordLinked === true ? '새 채팅' : '생기부 연동하기'}
+        quickActions={schoolRecordStartActions}
+        onSelectQuickAction={(actionId) => { void handleSelectSchoolRecordStartAction(actionId) }}
         onToggleDontAskAgain={setSkipSchoolRecordConfirm}
         onClose={() => setIsSchoolRecordToolModalOpen(false)}
         onConfirm={() => { void handleConfirmSchoolRecordToolStart() }}
@@ -5080,6 +6931,220 @@ export default function ChatPage() {
         onConfirm={() => { void handleConfirmScorePredictionStart() }}
       />
 
+      {scorePredictionBuilderOpen && (
+        <div className="fixed inset-0 z-[65] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
+            onClick={() => setScorePredictionBuilderOpen(false)}
+            aria-hidden
+          />
+          <div
+            className="relative w-full max-w-2xl rounded-2xl border border-gray-200 bg-white shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+          >
+            <button
+              type="button"
+              onClick={() => setScorePredictionBuilderOpen(false)}
+              className="absolute right-4 top-4 rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+              aria-label="닫기"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <div className="px-6 py-6 sm:px-8">
+              <h2 className="text-xl font-bold text-gray-900">내 점수로 어디 갈 수 있을까?</h2>
+              <p className="mt-2 text-sm text-gray-600">저장된 성적과 대학/학과를 선택하면 바로 질문을 만들어 드려요.</p>
+
+              <div className="mt-5 space-y-4 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <span className="shrink-0 text-sm font-semibold text-gray-700">내 성적</span>
+                  <div className="relative min-w-0 flex-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPredictionUniversityOpen(false)
+                        setPredictionMajorOpen(false)
+                        setPredictionScoreSelectorOpen((prev) => !prev)
+                      }}
+                      className="flex h-11 w-full items-center justify-between rounded-2xl border border-violet-200 bg-gradient-to-r from-white to-violet-50 px-4 text-left text-sm font-semibold text-violet-900 shadow-[0_10px_28px_rgba(99,102,241,0.18)] transition-all duration-200 hover:shadow-[0_14px_32px_rgba(99,102,241,0.24)]"
+                    >
+                      <span className="truncate">
+                        {(() => {
+                          const selected = predictionScoreOptions.find((item) => item.key === predictionSelectedScoreKey)
+                          if (!selected) return '성적을 선택해 주세요'
+                          return selected.type === 'naesin' ? selected.label : `@${selected.label.replace(/^@/, '')}`
+                        })()}
+                      </span>
+                      <svg
+                        className={`ml-2 h-4 w-4 shrink-0 text-gray-400 transition-transform ${predictionScoreSelectorOpen ? 'rotate-180' : ''}`}
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    {predictionScoreSelectorOpen && (
+                      <div className="absolute left-0 top-full mt-2 z-20 w-full overflow-hidden rounded-xl border border-gray-200 bg-white py-2 shadow-[0_8px_30px_rgba(0,0,0,0.12)]">
+                        <div className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
+                          성적 선택
+                        </div>
+                        <div className="max-h-[min(260px,45vh)] overflow-y-auto overscroll-contain pr-1">
+                        {predictionScoreOptions.map((item) => {
+                          const isSelected = item.key === predictionSelectedScoreKey
+                          const isNaesin = item.type === 'naesin'
+                          const displayLabel = isNaesin ? item.label : `@${item.label.replace(/^@/, '')}`
+                          const subtitle = isNaesin ? '연동된 내신성적' : '저장된 모의고사 성적'
+                          const iconWrapClass = isNaesin
+                            ? (isSelected ? 'bg-amber-100 text-amber-700' : 'bg-amber-50 text-amber-600')
+                            : (isSelected ? 'bg-blue-100 text-blue-600' : 'bg-emerald-50 text-emerald-500')
+                          return (
+                            <button
+                              key={item.key}
+                              type="button"
+                              onClick={() => {
+                                setPredictionSelectedScoreKey(item.key)
+                                setPredictionScoreSelectorOpen(false)
+                              }}
+                              className={`mx-1 flex min-h-[44px] w-[calc(100%-8px)] items-center gap-2.5 rounded-lg px-3 py-2 text-left transition-all ${
+                                isSelected ? 'bg-blue-50 text-blue-700' : 'text-gray-700 hover:bg-gray-50'
+                              }`}
+                            >
+                              <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${iconWrapClass}`}>
+                                {isNaesin ? (
+                                  <GraduationCap className="h-3.5 w-3.5" />
+                                ) : (
+                                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                                  </svg>
+                                )}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className={`truncate text-[13px] font-medium leading-tight ${isSelected ? 'text-blue-700' : 'text-gray-800'}`}>
+                                  {displayLabel}
+                                </div>
+                                <div className="truncate text-[11px] text-gray-400">
+                                  {subtitle}
+                                </div>
+                              </div>
+                              {isSelected && (
+                                <svg className="h-3.5 w-3.5 shrink-0 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                            </button>
+                          )
+                        })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-sm font-bold text-violet-700">으로</span>
+                </div>
+
+                <div className="text-sm text-gray-800">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="relative min-w-0 flex-1">
+                      <input
+                        value={predictionUniversityQuery}
+                        onChange={(e) => {
+                          setPredictionUniversityQuery(e.target.value)
+                          setPredictionScoreSelectorOpen(false)
+                          setPredictionUniversityOpen(true)
+                        }}
+                        onFocus={() => {
+                          setPredictionScoreSelectorOpen(false)
+                          setPredictionUniversityOpen(true)
+                        }}
+                        placeholder="학교명 입력"
+                        className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-900 outline-none transition focus:border-[#3182F6] focus:ring-2 focus:ring-[#3182F6]/15"
+                      />
+                      {predictionUniversityOpen && predictionUniversitySuggestions.length > 0 && (
+                        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg">
+                          {predictionUniversitySuggestions.map((item) => (
+                            <button
+                              key={item}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                setPredictionUniversityQuery(item)
+                                setPredictionUniversityOpen(false)
+                              }}
+                              className="block w-full px-3 py-2 text-left text-sm font-medium text-gray-800 transition hover:bg-gray-50"
+                            >
+                              {item}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <span className="shrink-0 text-sm font-semibold text-gray-600">의</span>
+                    <div className="relative min-w-0 flex-1">
+                      <input
+                        value={predictionMajorQuery}
+                        onChange={(e) => {
+                          setPredictionMajorQuery(e.target.value)
+                          setPredictionScoreSelectorOpen(false)
+                          setPredictionMajorOpen(true)
+                        }}
+                        onFocus={() => {
+                          setPredictionScoreSelectorOpen(false)
+                          setPredictionMajorOpen(true)
+                        }}
+                        placeholder="학과명 입력"
+                        className="h-11 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm font-medium text-gray-900 outline-none transition focus:border-[#3182F6] focus:ring-2 focus:ring-[#3182F6]/15"
+                      />
+                      {predictionMajorOpen && predictionMajorSuggestions.length > 0 && (
+                        <div className="absolute left-0 right-0 top-[calc(100%+6px)] z-20 overflow-hidden rounded-xl border border-gray-200 bg-white shadow-lg">
+                          {predictionMajorSuggestions.map((item) => (
+                            <button
+                              key={item}
+                              type="button"
+                              onMouseDown={(e) => e.preventDefault()}
+                              onClick={() => {
+                                setPredictionMajorQuery(item)
+                                setPredictionMajorOpen(false)
+                              }}
+                              className="block w-full px-3 py-2 text-left text-sm font-medium text-gray-800 transition hover:bg-gray-50"
+                            >
+                              {item}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <span className="shrink-0 text-sm font-semibold text-gray-600">갈 수 있을까?</span>
+                  </div>
+                </div>
+
+              </div>
+
+              <div className="mt-5 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setScorePredictionBuilderOpen(false)}
+                  className="inline-flex h-10 items-center justify-center rounded-xl border border-gray-200 bg-white px-4 text-sm font-semibold text-gray-700 transition hover:bg-gray-50"
+                >
+                  닫기
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleSubmitScorePredictionBuilder()
+                    setScorePredictionBuilderOpen(false)
+                  }}
+                  disabled={predictionScoreOptions.length === 0}
+                  className="inline-flex h-10 items-center justify-center rounded-xl bg-[#2B4C7E] px-4 text-sm font-semibold text-white transition hover:brightness-105 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  질문 시작
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <SchoolGradeInputModal
         isOpen={isSchoolGradeInputModalOpen}
         onClose={() => setIsSchoolGradeInputModalOpen(false)}
@@ -5089,7 +7154,7 @@ export default function ChatPage() {
         }}
         onUseNaesinSuggestion={(mention) => {
           setIsSchoolGradeInputModalOpen(false)
-          setInput((prev) => (prev.trim() ? `${prev} ${mention} ` : `${mention} `))
+          appendMentionToInput(mention)
         }}
         onOpenMockExamInput={() => {
           setIsSchoolGradeInputModalOpen(false)
@@ -5117,7 +7182,7 @@ export default function ChatPage() {
         token={getRequestToken()}
         onUseScoreSet={(scoreSetId, scoreSetName) => {
           setActiveScoreId(scoreSetId)
-          setInput((prev) => (prev.trim() ? `${prev} ${scoreSetName} ` : `${scoreSetName} `))
+          appendMentionToInput(scoreSetName)
           setIsScoreSetManagerOpen(false)
         }}
       />
@@ -5169,8 +7234,7 @@ export default function ChatPage() {
                       type="button"
                       onClick={() => {
                         setScorePreview(null)
-                        setAutoOpenSavedGradeReport(true)
-                        setRightPanelView('grade_input')
+                        setRightPanelView('school_record_menu')
                       }}
                       className="w-full rounded-xl bg-[#2B4C7E] px-4 py-3 text-sm font-bold text-white transition-all hover:brightness-105 active:scale-[0.99]"
                     >

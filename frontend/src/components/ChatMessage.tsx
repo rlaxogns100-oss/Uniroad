@@ -353,12 +353,13 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
   // 【】 타이틀 + 마크다운 ## ### #### 헤딩 파싱 + 숫자-숫자 소주제
   const parseTitles = (text: string) => {
     const rawLines = text.split('\n')
-    // 구분선 바로 앞/뒤의 빈 줄은 제거해서 과도한 간격을 막는다.
+    // 연속된 빈 줄만 하나로 합침 (구분선 인접 빈 줄은 제거하지 않음)
     const lines = rawLines.filter((rawLine, idx) => {
       if (rawLine.trim().length > 0) return true
+      // 바로 앞 줄도 빈 줄이면 중복 제거
       const prev = rawLines[idx - 1]?.trim() || ''
-      const next = rawLines[idx + 1]?.trim() || ''
-      return prev !== '___DIVIDER___' && next !== '___DIVIDER___'
+      if (prev.length === 0) return false
+      return true
     })
     const lineNodes: React.ReactNode[] = []
     let keyIndex = 0
@@ -372,6 +373,7 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i].trim() // 앞뒤 공백 제거
       const normalizedLine = line.replace(/^[\s]*[•\-\*]\s+/, '')
+      const previousWasDivider = (lines[i - 1]?.trim() || '') === '___DIVIDER___'
       if (!line) {
         lineNodes.push(<span key={`empty-${keyIndex++}`}></span>)
         if (i < lines.length - 1) lineNodes.push('\n')
@@ -379,11 +381,12 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
       }
       if (normalizedLine === '___DIVIDER___') {
         lineNodes.push(
-          <hr
-            key={`section-divider-${keyIndex++}`}
-            className="section-divider"
-            aria-hidden="true"
-          />
+          <div key={`section-divider-${keyIndex++}`} className="section-divider-block" aria-hidden="true">
+            <hr
+              className="section-divider"
+              aria-hidden="true"
+            />
+          </div>
         )
         continue
       }
@@ -396,12 +399,12 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
         const content = headingMatch[2]
         const headingClass =
           level === 1
-            ? 'text-2xl font-bold block mt-4 mb-1'
+            ? `text-2xl font-bold block ${previousWasDivider ? 'mt-0' : 'mt-4'} mb-1`
             : level === 2
-              ? 'text-xl font-bold block mt-3 mb-1'
+              ? `text-xl font-bold block ${previousWasDivider ? 'mt-0' : 'mt-3'} mb-1`
               : level === 3
-                ? 'text-lg font-bold block mt-2 mb-0.5'
-                : 'text-base font-bold block mt-2 mb-0.5'
+                ? `text-lg font-bold block ${previousWasDivider ? 'mt-0' : 'mt-2'} mb-0.5`
+                : `text-base font-bold block ${previousWasDivider ? 'mt-0' : 'mt-2'} mb-0.5`
         lineNodes.push(
           <span key={`md-h-${keyIndex++}`} className={headingClass}>
             {parseBold(content)}
@@ -412,7 +415,10 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
         const numberPart = subsectionMatch[1]
         const content = subsectionMatch[2]
         lineNodes.push(
-          <span key={`sub-${keyIndex++}`} className="text-lg font-bold block mt-3 mb-1 text-slate-900">
+          <span
+            key={`sub-${keyIndex++}`}
+            className={`text-lg font-bold block ${previousWasDivider ? 'mt-0' : 'mt-3'} mb-1 text-slate-900`}
+          >
             {numberPart}{parseBold(content)}
           </span>
         )
@@ -421,7 +427,10 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
         const numberPart = numberedMatch[1]
         const content = numberedMatch[2]
         lineNodes.push(
-          <span key={`num-${keyIndex++}`} className="text-base font-bold block mt-2 mb-0.5 text-slate-900">
+          <span
+            key={`num-${keyIndex++}`}
+            className={`text-base font-bold block ${previousWasDivider ? 'mt-0' : 'mt-2'} mb-0.5 text-slate-900`}
+          >
             {numberPart}{parseBold(content)}
           </span>
         )
@@ -519,11 +528,13 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
       parts.forEach((part, idx) => {
         if (idx > 0) {
           result.push(
-            <hr
-              key={`divider-${idx}`}
-              className="section-divider"
-              aria-hidden="true"
-            />
+            <div key={`divider-block-${idx}`} className="section-divider-block" aria-hidden="true">
+              <hr
+                key={`divider-${idx}`}
+                className="section-divider"
+                aria-hidden="true"
+              />
+            </div>
           )
         }
         if (part) {
@@ -589,7 +600,8 @@ export default function ChatMessage({ message, isUser, scoreMentions, sources, s
     cleanedMessage = cleanedMessage.replace(/===SECTION_(START|END)(:[^=]+)?===/g, '')
     
     // --- 구분선을 ___DIVIDER___ 마커로 변환 (백엔드에서 보내는 형식)
-    // 줄바꿈은 유지하면서 ---만 마커로 변환 (모바일에서 빈 줄 1개만 표시되도록)
+    // 주변 줄바꿈을 모두 소비해 정확히 \n___DIVIDER___\n 형태로 정규화
+    // (parseTitles 루프에서 구분선 위아래로 빈 줄 1개씩 추가)
     cleanedMessage = cleanedMessage.replace(/\n*---\n*/g, '\n___DIVIDER___\n')
 
     // 섹션/문단 줄바꿈 보정 + 연속 줄바꿈 정리

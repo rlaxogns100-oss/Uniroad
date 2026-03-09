@@ -6,11 +6,6 @@ const BREAKPOINT = 640
 export type LayoutMode = 'auto' | 'desktop' | 'mobile'
 
 function loadLayoutMode(): LayoutMode {
-  if (typeof window === 'undefined') return 'auto'
-  try {
-    const v = localStorage.getItem(STORAGE_KEY)
-    if (v === 'desktop' || v === 'mobile' || v === 'auto') return v
-  } catch (_) {}
   return 'auto'
 }
 
@@ -31,9 +26,6 @@ export function LayoutModeProvider({ children }: { children: React.ReactNode }) 
 
   const setLayoutMode = useCallback((mode: LayoutMode) => {
     setLayoutModeState(mode)
-    try {
-      localStorage.setItem(STORAGE_KEY, mode)
-    } catch (_) {}
   }, [])
 
   const isDesktopLayout = useMemo(() => {
@@ -47,6 +39,13 @@ export function LayoutModeProvider({ children }: { children: React.ReactNode }) 
     const update = () => setViewportWidth(window.innerWidth)
     window.addEventListener('resize', update)
     return () => window.removeEventListener('resize', update)
+  }, [])
+
+  useEffect(() => {
+    // 과거 강제 보기 모드(localStorage)로 레이아웃이 고정되는 문제를 방지한다.
+    try {
+      localStorage.removeItem(STORAGE_KEY)
+    } catch (_) {}
   }, [])
 
   useEffect(() => {

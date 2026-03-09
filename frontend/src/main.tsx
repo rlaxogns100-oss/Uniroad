@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import axios from 'axios'
+import { PostHogProvider } from '@posthog/react'
 import App from './App.tsx'
 import { getApiBaseUrl, isCapacitorApp } from './config'
 import { setupAxiosAuth } from './utils/setupAxiosAuth'
@@ -31,8 +32,29 @@ if (isCapacitorApp()) {
   }).catch(() => {})
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+const posthogKey = import.meta.env.VITE_PUBLIC_POSTHOG_KEY
+const posthogApiHost = '/ingest'
+const posthogUiHost = 'https://us.posthog.com'
+
+const app = (
   <React.StrictMode>
     <App />
-  </React.StrictMode>,
+  </React.StrictMode>
+)
+
+ReactDOM.createRoot(document.getElementById('root')!).render(
+  posthogKey ? (
+    <PostHogProvider
+      apiKey={posthogKey}
+      options={{
+        api_host: posthogApiHost,
+        ui_host: posthogUiHost,
+        defaults: '2026-01-30',
+      }}
+    >
+      {app}
+    </PostHogProvider>
+  ) : (
+    app
+  ),
 )

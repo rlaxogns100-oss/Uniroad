@@ -150,12 +150,18 @@ code {
   font-weight: 600;
 }
 
+.ai-response .section-divider-block {
+  display: block;
+  margin: 0.5em 0;
+  line-height: 0;
+}
+
 .ai-response .section-divider {
   display: block;
   width: 100%;
   border: none;
   border-top: 1px solid #cfd7e3;
-  margin: 0.6rem 0 0.45rem;
+  margin: 0;
 }
 
 /* 보기 모드 강제: 데스크톱/모바일 토글 시 Tailwind sm: breakpoint 오버라이드 */

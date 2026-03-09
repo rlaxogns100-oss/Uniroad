@@ -6,6 +6,7 @@
  */
 
 import { v4 as uuidv4 } from 'uuid'
+import posthog from 'posthog-js'
 import { API_BASE } from '../config'
 
 // 세션 ID 관리
@@ -90,6 +91,15 @@ export function getPageType(pathname: string): string {
 let previousPageTimestamp: number | null = null
 let previousPagePath: string | null = null
 
+function capturePostHogEvent(eventName: string, properties?: Record<string, any>): void {
+  try {
+    if (typeof window === 'undefined') return
+    posthog.capture(eventName, properties)
+  } catch {
+    // PostHog 추적 실패는 무시
+  }
+}
+
 // 페이지 뷰 추적
 export async function trackPageView(
   pagePath: string,
@@ -121,6 +131,8 @@ export async function trackPageView(
       time_on_page: timeOnPage,
       ...customData
     }
+
+    capturePostHogEvent('$pageview', data)
     
     // 토큰 가져오기 (있으면)
     const token = localStorage.getItem('access_token')
@@ -164,6 +176,8 @@ export async function trackUserAction(
       element_text: options?.elementText,
       ...options?.customData
     }
+
+    capturePostHogEvent(actionName, data)
     
     // 토큰 가져오기 (있으면)
     const token = localStorage.getItem('access_token')
@@ -206,6 +220,10 @@ export function initializeTracking(): void {
   setEntryUrlIfEmpty()
   // UTM 파라미터 저장
   saveUTMParams()
+  capturePostHogEvent('app_initialized', {
+    page_path: window.location.pathname,
+    page_title: document.title
+  })
   
   // 현재 페이지 추적
   trackPageView(window.location.pathname)

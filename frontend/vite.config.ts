@@ -10,6 +10,16 @@ export default defineConfig(({ mode }) => ({
     port: 8150,
     allowedHosts: true, // 같은 와이파이에서 로컬 IP(192.168.x.x 등)로 접속 허용
     proxy: {
+      '/ingest/static/': {
+        target: 'https://us-assets.i.posthog.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ingest\/static/, '/static'),
+      },
+      '/ingest/': {
+        target: 'https://us.i.posthog.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ingest/, ''),
+      },
       '/api': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,

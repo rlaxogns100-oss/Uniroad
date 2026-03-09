@@ -1380,6 +1380,32 @@ export const getSchoolRecordStatus = async (token: string): Promise<{ linked: bo
   return response.data
 }
 
+export const uploadSchoolRecordPdf = async (
+  file: File,
+  token?: string
+): Promise<Record<string, any>> => {
+  const formData = new FormData()
+  formData.append('file', file, file.name)
+
+  const apiUrl = getEffectiveApiBaseUrl()
+  const response = await fetchWithAuthRetry(
+    `${apiUrl}/school-record/forms/upload-pdf`,
+    {
+      method: 'POST',
+      body: formData,
+    },
+    apiUrl,
+    token
+  )
+
+  const data = await response.json().catch(() => ({}))
+  if (!response.ok || !data?.ok) {
+    throw new Error(data?.detail || data?.error || 'PDF 업로드에 실패했습니다.')
+  }
+
+  return data
+}
+
 export const getMySchoolGradeInput = async (
   token: string
 ): Promise<{ school_grade_input: Record<string, any> }> => {

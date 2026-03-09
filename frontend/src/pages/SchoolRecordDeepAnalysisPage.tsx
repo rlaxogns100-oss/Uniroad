@@ -54,6 +54,8 @@ const INNER_SCHOOL_RECORD_TABS: Array<{ id: string; label: string }> = [
 
 export interface SchoolRecordDeepAnalysisPageProps {
   onBack?: () => void
+  autoOpenRegisterModal?: boolean
+  onAutoOpenRegisterModalHandled?: () => void
 }
 
 /**
@@ -61,7 +63,7 @@ export interface SchoolRecordDeepAnalysisPageProps {
  * - PDF 업로드 → 파싱 결과 확인/수정 → 저장
  */
 function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) {
-  const { onBack } = props
+  const { onBack, autoOpenRegisterModal = false, onAutoOpenRegisterModalHandled } = props
   const { isAuthenticated, accessToken } = useAuth()
   const [innerSchoolRecordTab, setInnerSchoolRecordTab] = useState(0)
   const [formsSaveStatus, setFormsSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'err'>('idle')
@@ -80,8 +82,6 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
   const [parsedPreview, setParsedPreview] = useState<ParsedSchoolRecordPreview | null>(null)
   /** 비교 보기에서 저장 후 변경 컬럼만 노출 */
   const [showChangedOnly, setShowChangedOnly] = useState(false)
-  /** 전용 뷰: 학교생활기록부 등록 모달 */
-  const [registerModalOpen, setRegisterModalOpen] = useState(false)
   /** 전용 뷰: 파싱 결과 직접 수정 모드 */
   const [standaloneEditMode, setStandaloneEditMode] = useState(false)
   /** 전용 뷰: STEP 아코디언 열림 (0~3 = STEP 01~04) */
@@ -92,6 +92,15 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
   const [pdfGuideOpen, setPdfGuideOpen] = useState(false)
   const [pdfGuideMethodId, setPdfGuideMethodId] = useState<GuideMethodId>('gov24')
   const pdfFileInputRef = React.useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (!autoOpenRegisterModal) return
+    const frame = window.requestAnimationFrame(() => {
+      pdfFileInputRef.current?.click()
+      onAutoOpenRegisterModalHandled?.()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [autoOpenRegisterModal, onAutoOpenRegisterModalHandled])
   const getApiPrefix = React.useCallback(() => {
     const apiBase = getApiBaseUrl()
     return apiBase ? `${apiBase}/api` : '/api'
@@ -359,7 +368,6 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
             : null
       )
       setPdfFile(null)
-      setRegisterModalOpen(false)
       setPdfUploading(false)
       setUploadProgress(0)
       setUploadStage('uploading')
@@ -424,10 +432,6 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
     setShowChangedOnly(false)
     setStandaloneEditMode(false)
   }, [parsedPreview])
-
-  const handleFileUploadFromModal = () => {
-    void handleUploadSchoolRecordPdf(pdfFile ?? undefined)
-  }
 
   const parsedSections = (parsedPreview?.sections || {}) as Record<string, any>
   const attendanceRows = (
@@ -1186,104 +1190,7 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
           </div>
         )}
 
-        {!hasParsedData ? (
-          <div className="flex min-h-[58vh] items-center justify-center">
-            <div className="w-full max-w-3xl text-center">
-              <p className="text-[40px] font-bold leading-tight tracking-[-0.02em] text-[#191F28] sm:text-[46px]">아직 생기부 데이터가 없어요</p>
-              <p className="mt-3 text-lg font-medium leading-8 text-[#6B7684]">정부24 또는 카카오톡 전자문서지갑에서 저장한 PDF를 업로드해 주세요.</p>
-              <p className="mt-2 text-sm font-semibold text-[#8B95A1]">스캔본(이미지 PDF)은 현재 지원하지 않아요.</p>
-
-              <div className="mt-6 text-left">
-                <button
-                  type="button"
-                  onClick={() => setPdfGuideOpen((prev) => !prev)}
-                  className="flex w-full items-center justify-between rounded-[24px] bg-white px-6 py-5 text-[#191F28] shadow-sm"
-                >
-                  <span className="text-base font-bold sm:text-lg">PDF 다운로드 방법 보기</span>
-                  <svg
-                    className={`h-5 w-5 text-[#6B7684] transition-transform ${pdfGuideOpen ? 'rotate-180' : ''}`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-
-                {pdfGuideOpen && (
-                  <div className="mt-3 space-y-3 rounded-2xl bg-white p-4 shadow-sm">
-                    <div className="flex flex-wrap gap-2">
-                      {quickGuideMethods.map((method) => {
-                        const active = method.id === pdfGuideMethodId
-                        return (
-                          <button
-                            key={method.id}
-                            type="button"
-                            onClick={() => setPdfGuideMethodId(method.id)}
-                            className={`rounded-xl px-3 py-2 text-sm font-bold transition ${
-                              active ? 'bg-[#191F28] text-white' : 'bg-[#F2F4F6] text-[#4E5968] hover:bg-[#E9EDF2]'
-                            }`}
-                          >
-                            {method.label}
-                          </button>
-                        )
-                      })}
-                    </div>
-
-                    {currentPdfGuideMethod && (
-                      <div className="rounded-2xl border border-[#EEF1F4] bg-[#F9FAFB] p-4">
-                        <p className="text-base font-extrabold text-[#191F28]">{currentPdfGuideMethod.label} 다운로드 방법</p>
-                        {currentPdfGuideMethod.links && currentPdfGuideMethod.links.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {currentPdfGuideMethod.links.map((item) => (
-                              <a
-                                key={item.href}
-                                href={item.href}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex h-8 items-center justify-center rounded-lg border border-[#D9E2EC] bg-white px-2.5 text-xs font-bold text-[#3182F6] transition hover:bg-[#F4F8FF]"
-                              >
-                                {item.label}
-                              </a>
-                            ))}
-                          </div>
-                        )}
-
-                        <div className="mt-4 space-y-4">
-                          {currentPdfGuideMethod.sections.map((section) => (
-                            <section key={section.title} className="rounded-xl bg-white p-3">
-                              <p className="text-sm font-extrabold text-[#191F28]">{section.title}</p>
-                              {section.summary && <p className="mt-1 text-xs font-medium text-[#6B7684]">{section.summary}</p>}
-                              <ol className="mt-3 space-y-3">
-                                {section.steps.map((step, index) => (
-                                  <li key={`${section.title}-${step.title}-${index}`} className="rounded-lg border border-[#EEF1F4] bg-[#FBFCFD] p-3">
-                                    <div className="mb-2 flex items-center gap-2">
-                                      <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-[#E8F1FF] text-xs font-extrabold text-[#3182F6]">
-                                        {index + 1}
-                                      </span>
-                                      <p className="text-sm font-bold text-[#191F28]">{step.title}</p>
-                                    </div>
-                                    <p className="text-xs font-medium leading-5 text-[#4E5968]">{step.description}</p>
-                                    {step.image && (
-                                      <div className="mt-2 overflow-hidden rounded-lg border border-[#EEF1F4] bg-white p-1.5">
-                                        <img src={step.image} alt={step.title} className="h-auto w-full rounded-md" loading="lazy" />
-                                      </div>
-                                    )}
-                                  </li>
-                                ))}
-                              </ol>
-                            </section>
-                          ))}
-                        </div>
-
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        ) : (
+        {!hasParsedData ? null : (
           <div className="space-y-6">
             <div className="rounded-[24px] bg-white p-8 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1348,11 +1255,28 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
         )}
       </div>
 
+      <input
+        ref={pdfFileInputRef}
+        type="file"
+        accept=".pdf,application/pdf"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0] ?? null
+          setPdfUploadError(null)
+          setPdfUploadMessage(null)
+          setPdfFile(file)
+          if (file) {
+            void handleUploadSchoolRecordPdf(file)
+          }
+          e.target.value = ''
+        }}
+      />
+
       <div className="fixed bottom-0 left-0 right-0 z-20 border-t border-[#E5E8EB] bg-white/95 backdrop-blur">
         <div className="mx-auto w-full max-w-5xl px-4 py-4 sm:px-6">
           <button
             type="button"
-            onClick={() => setRegisterModalOpen(true)}
+            onClick={() => pdfFileInputRef.current?.click()}
             disabled={pdfUploading}
             className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-[#3182F6] text-lg font-bold text-white shadow-sm transition hover:bg-[#1f6fe2] disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -1360,69 +1284,6 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
           </button>
         </div>
       </div>
-
-      {registerModalOpen && (
-        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-[20px] bg-white p-6 shadow-sm">
-            <p className="text-2xl font-extrabold text-[#191F28]">PDF 파일 불러오기</p>
-            <p className="mt-2 text-sm font-medium text-[#6B7684]">학교생활기록부 PDF 파일을 선택해 주세요.</p>
-            <div className="mt-4 rounded-2xl border border-[#D7E6FF] bg-[#F4F8FF] p-4">
-              <p className="text-sm font-extrabold text-[#1D4ED8]">지원 파일 안내</p>
-              <div className="mt-2 space-y-2">
-                <p className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-[#1E40AF]">지원: 정부24/카카오톡 전자문서지갑 원본 PDF</p>
-                <p className="rounded-xl bg-white px-3 py-2 text-xs font-semibold text-[#B45309]">미지원: 스캔본/사진 PDF</p>
-              </div>
-            </div>
-
-            <div className="mt-5 rounded-2xl border border-dashed border-[#D1D6DB] bg-[#F9FAFB] p-4">
-              <input
-                ref={pdfFileInputRef}
-                type="file"
-                accept=".pdf,application/pdf"
-                className="hidden"
-                onChange={(e) => {
-                  setPdfUploadError(null)
-                  setPdfUploadMessage(null)
-                  setPdfFile(e.target.files?.[0] ?? null)
-                }}
-              />
-              <p className="text-xs font-semibold text-[#6B7684]">1. 아래 버튼을 눌러 파일을 선택하세요.</p>
-              <div className="mt-3 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => pdfFileInputRef.current?.click()}
-                  className="inline-flex h-10 items-center justify-center rounded-lg bg-[#191F28] px-4 text-sm font-bold text-white transition hover:bg-[#111827]"
-                >
-                  파일 선택
-                </button>
-                <p className="line-clamp-1 min-w-0 flex-1 rounded-lg border border-[#E5E8EB] bg-white px-3 py-2 text-sm font-semibold text-[#4E5968]">
-                  {pdfFile ? pdfFile.name : '선택된 파일 없음'}
-                </p>
-              </div>
-              <p className="mt-2 text-xs font-medium text-[#8B95A1]">2. 파일이 보이면 아래 불러오기를 눌러 주세요.</p>
-            </div>
-            {pdfUploadError && <p className="mt-3 text-sm font-semibold text-red-600">{pdfUploadError}</p>}
-
-            <div className="mt-5 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setRegisterModalOpen(false)}
-                className="inline-flex h-11 items-center justify-center rounded-xl bg-gray-100 px-4 text-sm font-semibold text-[#4E5968] transition hover:bg-gray-200"
-              >
-                취소
-              </button>
-              <button
-                type="button"
-                onClick={handleFileUploadFromModal}
-                disabled={pdfUploading || !pdfFile}
-                className="inline-flex h-11 items-center justify-center rounded-xl bg-[#3182F6] px-5 text-sm font-bold text-white transition hover:bg-[#1f6fe2] disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {pdfUploading ? '업로드 중...' : '불러오기'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {detailSheet && detailSheetPayload && (
         <div className="fixed inset-0 z-40 bg-black/35" onClick={() => setDetailSheet(null)}>
