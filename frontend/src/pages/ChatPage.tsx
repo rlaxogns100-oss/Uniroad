@@ -5552,6 +5552,11 @@ export default function ChatPage() {
                       <div className="space-y-3">
                         {(schoolRecordPdfUploading || visualReportDownloadPhase !== 'idle') && (
                           <div className="overflow-hidden rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-2.5">
+                            {visualReportDownloadPhase !== 'idle' && !schoolRecordPdfUploading && (
+                              <p className="mb-2 text-[11px] leading-4 text-blue-500">
+                                AI가 생활기록부를 분석하여 리포트를 작성합니다. 보통 <strong>1~2분</strong> 정도 소요됩니다.
+                              </p>
+                            )}
                             <div className="mb-1.5 flex items-center justify-between">
                               <span className="text-xs font-semibold text-blue-700">
                                 {schoolRecordPdfUploading
