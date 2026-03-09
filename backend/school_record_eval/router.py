@@ -10,6 +10,7 @@ import time
 from datetime import datetime, timezone
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Header, Depends, Body, UploadFile, File
+from fastapi.responses import StreamingResponse
 
 from middleware.auth import optional_auth, get_current_user
 from services.supabase_client import SupabaseService
@@ -450,3 +451,49 @@ async def upload_school_record_pdf(
             "total_ms": total_ms,
         },
     }
+
+
+@router.delete("/reset")
+async def reset_school_record(user: dict = Depends(get_current_user)):
+    user_id = user.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User id not found")
+    ok = await SupabaseService.update_user_profile_school_record(user_id, {})
+    if not ok:
+        raise HTTPException(status_code=500, detail="초기화 실패")
+    return {"ok": True}
+
+
+@router.post("/generate-visual-report")
+async def generate_visual_report(user: dict = Depends(get_current_user)):
+    """
+    생기부 시각 보고서 생성 (SSE 스트리밍).
+    진행 로그 + 최종 JSON 데이터를 event-stream으로 반환.
+    """
+    from .visual_report_agent import generate_visual_report_stream
+
+    user_id = user.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User id not found")
+
+    school_loaded = await SupabaseService.get_user_profile_school_record(user_id)
+    if school_loaded is None:
+        raise HTTPException(status_code=500, detail="Profile load failed")
+
+    school = dict(school_loaded or {})
+    if not has_meaningful_school_record(school):
+        raise HTTPException(status_code=400, detail="연동된 생기부가 없습니다. 먼저 생활기록부를 업로드해 주세요.")
+
+    def event_generator():
+        for event in generate_visual_report_stream(school):
+            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )

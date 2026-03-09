@@ -20,6 +20,8 @@ import SharedChatPage from './pages/SharedChatPage'
 import OAuthCallbackPage from './pages/OAuthCallbackPage'
 import SchoolRecordEvalPage from './pages/SchoolRecordEvalPage'
 import SchoolRecordDeepAnalysisPage from './pages/SchoolRecordDeepAnalysisPage'
+import SchoolRecordOneTimeReportPage from './pages/SchoolRecordOneTimeReportPage'
+import ReportKimMinseop from './pages/ReportKimMinseop'
 import SchoolGradeInputPage from './pages/SchoolGradeInputPage'
 import SchoolRecordGuidePage from './pages/SchoolRecordGuidePage'
 import AdminChatReviewPage from './pages/AdminChatReviewPage'
@@ -150,6 +152,8 @@ function App() {
             {/* 생기부 세특 평가 */}
             <Route path="/school-record" element={<SchoolRecordEvalPage />} />
             <Route path="/school-record-deep" element={<SchoolRecordDeepAnalysisPage />} />
+            <Route path="/school-record-report-preview" element={<SchoolRecordOneTimeReportPage />} />
+            <Route path="/report-kim-minseop" element={<ReportKimMinseop />} />
             <Route path="/school-grade-input" element={<SchoolGradeInputPage />} />
             <Route path="/guide" element={<SchoolRecordGuidePage />} />
             

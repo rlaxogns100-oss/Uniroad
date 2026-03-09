@@ -35,6 +35,7 @@ import ScoreSetManagerModal from '../components/ScoreSetManagerModal'
 import SchoolRecordToolStartModal from '../components/SchoolRecordToolStartModal'
 import SchoolGradeInputModal from '../components/SchoolGradeInputModal'
 import SchoolRecordResearchProgress from '../components/SchoolRecordResearchProgress'
+import SchoolRecordPdfDownloadRunner from '../components/SchoolRecordPdfDownloadRunner'
 import { useAuth } from '../contexts/AuthContext'
 import { useLayoutMode } from '../contexts/LayoutModeContext'
 import { useChat } from '../hooks/useChat'
@@ -885,6 +886,9 @@ export default function ChatPage() {
   const [schoolRecordStatusLoading, setSchoolRecordStatusLoading] = useState(false)
   const [savedSchoolRecordReports, setSavedSchoolRecordReports] = useState<SavedSchoolRecordReport[]>([])
   const [savedSchoolRecordReportsLoading, setSavedSchoolRecordReportsLoading] = useState(false)
+  const [visualReportDownloadRequestId, setVisualReportDownloadRequestId] = useState(0)
+  const [visualReportDownloadActive, setVisualReportDownloadActive] = useState(false)
+  const [visualReportDownloadPhase, setVisualReportDownloadPhase] = useState<'idle' | 'generating' | 'rendering'>('idle')
   const [showAllReports, setShowAllReports] = useState(false)
   const [reportPage, setReportPage] = useState(0)
   const [pendingReportMessageId, setPendingReportMessageId] = useState<string | null>(null)
@@ -3402,8 +3406,7 @@ export default function ChatPage() {
   }
 
   const handleDownloadSchoolRecordSummaryReport = useCallback(async () => {
-    if (savedSchoolRecordReports.length === 0) {
-      triggerFloatingNotice('다운로드할 분석 리포트가 없습니다.')
+    if (visualReportDownloadActive || visualReportDownloadPhase !== 'idle') {
       return
     }
 
@@ -3413,44 +3416,10 @@ export default function ChatPage() {
       return
     }
 
-    try {
-      const latestReport = savedSchoolRecordReports[0]
-      const res = await fetch(`${runtimeApiBase}/api/sessions/${latestReport.sessionId}/messages`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!res.ok) throw new Error('failed_to_load_report')
-
-      const rows = await res.json()
-      const list = Array.isArray(rows) ? rows : []
-      const targetMessage = list.find((row: any) => {
-        const rowId = String(row?.id || row?.message_id || '')
-        return rowId === String(latestReport.messageId)
-      })
-
-      const content = String(targetMessage?.content || '').trim()
-      if (!content) {
-        triggerFloatingNotice('다운로드할 리포트 내용을 찾지 못했습니다.')
-        return
-      }
-
-      const safeTitle = String(latestReport.title || '생활기록부_분석_리포트')
-        .replace(/[\\/:*?"<>|]/g, '_')
-        .replace(/\s+/g, '_')
-        .slice(0, 60)
-      const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${safeTitle || '생활기록부_분석_리포트'}.md`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.URL.revokeObjectURL(url)
-      triggerFloatingNotice('분석 리포트를 다운로드했습니다.')
-    } catch {
-      triggerFloatingNotice('분석 리포트 다운로드에 실패했습니다.')
-    }
-  }, [savedSchoolRecordReports, runtimeApiBase])
+    setVisualReportDownloadPhase('generating')
+    setVisualReportDownloadActive(true)
+    setVisualReportDownloadRequestId((prev) => prev + 1)
+  }, [visualReportDownloadActive, visualReportDownloadPhase])
 
   const renderSchoolRecordPreviewStepContent = (step: number) => {
     const parsedSections = (schoolRecordParsedPreview?.sections || {}) as Record<string, any>
@@ -5545,6 +5514,31 @@ export default function ChatPage() {
 
                     {!isProfileEditMode && (
                       <div className="space-y-3">
+                        {/* ── 진행상태 표시줄 ── */}
+                        {(schoolRecordPdfUploading || visualReportDownloadPhase !== 'idle') && (
+                          <div className="overflow-hidden rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-2.5">
+                            <div className="mb-1.5 flex items-center justify-between">
+                              <span className="text-xs font-semibold text-blue-700">
+                                {schoolRecordPdfUploading
+                                  ? '생활기록부 업로드 중...'
+                                  : visualReportDownloadPhase === 'generating'
+                                    ? '분석 리포트 생성 중...'
+                                    : 'PDF 변환 중...'}
+                              </span>
+                              <span className="text-[10px] text-blue-400">잠시만 기다려 주세요</span>
+                            </div>
+                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-blue-100">
+                              <div
+                                className="h-full rounded-full bg-blue-500"
+                                style={{
+                                  animation: 'progressIndeterminate 1.8s ease-in-out infinite',
+                                  width: '40%',
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                        <style>{`@keyframes progressIndeterminate{0%{margin-left:-40%}100%{margin-left:100%}}`}</style>
                         <div
                           className="group relative w-full rounded-2xl border border-gray-200 bg-white px-4 py-2.5 text-left shadow-sm transition-all duration-200 touch-manipulation min-h-[48px]"
                         >
@@ -5560,11 +5554,29 @@ export default function ChatPage() {
                               <div className="min-w-0 flex-1 pt-0.5">
                                 <div className="flex items-center gap-2">
                                   <p className="text-base font-bold text-gray-900 whitespace-nowrap">생활기록부 연동하기</p>
-                                  <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                                    schoolRecordLinked
-                                      ? 'bg-emerald-100 text-emerald-700'
-                                      : 'bg-red-100 text-red-700 px-3 py-1.5 text-sm font-bold'
-                                  }`}>
+                                  <span
+                                    className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold select-none ${
+                                      schoolRecordLinked
+                                        ? 'bg-emerald-100 text-emerald-700'
+                                        : 'bg-red-100 text-red-700 px-3 py-1.5 text-sm font-bold'
+                                    }`}
+                                    onDoubleClick={schoolRecordLinked ? async (e) => {
+                                      e.stopPropagation()
+                                      try {
+                                        const token = getRequestToken()
+                                        if (!token) return
+                                        const res = await fetch(`${runtimeApiBase}/api/school-record/reset`, {
+                                          method: 'DELETE',
+                                          headers: { Authorization: `Bearer ${token}` },
+                                        })
+                                        if (!res.ok) throw new Error()
+                                        await refreshLinkedDataState()
+                                        triggerFloatingNotice('생활기록부가 초기화되었습니다.')
+                                      } catch {
+                                        triggerFloatingNotice('초기화에 실패했습니다.')
+                                      }
+                                    } : undefined}
+                                  >
                                     {schoolRecordLinked ? '완료' : '미완료'}
                                   </span>
                                 </div>
@@ -5596,9 +5608,14 @@ export default function ChatPage() {
                                         e.stopPropagation()
                                         void handleDownloadSchoolRecordSummaryReport()
                                       }}
-                                      className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl border border-gray-200 bg-white px-4 text-[13px] font-extrabold tracking-[-0.01em] text-gray-700 shadow-sm transition hover:bg-gray-50 active:scale-[0.99]"
+                                      disabled={visualReportDownloadPhase !== 'idle'}
+                                      className={`inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl border px-4 text-[13px] font-extrabold tracking-[-0.01em] shadow-sm transition ${
+                                        visualReportDownloadPhase !== 'idle'
+                                          ? 'cursor-wait border-blue-200 bg-blue-50 text-blue-600'
+                                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 active:scale-[0.99]'
+                                      }`}
                                     >
-                                      분석 리포트 다운로드
+                                      {visualReportDownloadPhase === 'idle' ? '분석 리포트 다운로드' : '분석 리포트 생성 중'}
                                     </button>
                                     <button
                                       type="button"
@@ -7333,6 +7350,23 @@ export default function ChatPage() {
         </div>
       )}
       </div>
+
+      <SchoolRecordPdfDownloadRunner
+        active={visualReportDownloadActive}
+        requestId={visualReportDownloadRequestId}
+        token={getRequestToken() ?? null}
+        onPhaseChange={(phase) => setVisualReportDownloadPhase(phase)}
+        onSuccess={() => {
+          setVisualReportDownloadActive(false)
+          setVisualReportDownloadPhase('idle')
+          triggerFloatingNotice('분석 리포트를 다운로드했습니다.')
+        }}
+        onError={(message) => {
+          setVisualReportDownloadActive(false)
+          setVisualReportDownloadPhase('idle')
+          triggerFloatingNotice(message || '분석 리포트 다운로드에 실패했습니다.')
+        }}
+      />
     </div>
   )
 }
