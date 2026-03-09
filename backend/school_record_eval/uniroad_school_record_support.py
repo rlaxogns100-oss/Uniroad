@@ -2969,9 +2969,12 @@ def _build_forms_from_pdf_text(extracted_text: str) -> Dict[str, Any]:
     academic_unified = academic_from_section
     section_score = _academic_parse_score(academic_from_section)
     full_score = _academic_parse_score(academic_from_full)
-    if section_score <= 0 and full_score > 0:
+    # 학업 구간이 분리되어 있으면 해당 구간만 신뢰한다.
+    # 전체 문서 폴백은 뒤쪽 행동특성/종합의견 문장이 세특으로 섞이는 오염을 만들 수 있다.
+    has_academic_section_text = bool(str(academic_section_text or "").strip())
+    if not has_academic_section_text and section_score <= 0 and full_score > 0:
         academic_unified = academic_from_full
-    elif section_score < 5000 and full_score > (section_score * 2):
+    elif not has_academic_section_text and section_score < 5000 and full_score > (section_score * 2):
         academic_unified = academic_from_full
     academic_parsed = {"by_grade": academic_unified["by_grade"], "raw_by_grade": academic_unified["raw_by_grade"]}
     academic_tables_parsed = {"general_elective": academic_unified["general_elective"], "career_elective": academic_unified["career_elective"], "pe_arts": academic_unified["pe_arts"]}

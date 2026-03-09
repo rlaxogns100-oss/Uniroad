@@ -30,8 +30,8 @@ from utils.school_record_context import build_school_record_context_text
 from school_record_eval.report_context import build_school_record_report_context_text
 from school_record_eval.report_agent import (
     generate_school_record_report,
-    generate_school_record_report_stream,
 )
+from routers.school_record_deep_chat import generate_deep_school_record_stream
 from utils.timing_logger import TimingLogger
 from utils.admin_filter import should_skip_logging
 from middleware.auth import optional_auth, optional_auth_with_state
@@ -852,6 +852,7 @@ async def chat_stream_v2_with_image(
         sources = []
         source_urls = []
         used_chunks = []
+        structured_report = None
         active_score_id = score_id
         
         try:
@@ -973,12 +974,11 @@ async def chat_stream_v2_with_image(
 
             # 4단계: 멀티에이전트 or 생기부 전용 에이전트 실행
             event_iter = (
-                generate_school_record_report_stream(
+                generate_deep_school_record_stream(
                     message=enhanced_message,
                     history=history,
+                    school_record=dict(school_profile or {}),
                     school_record_context=school_record_report_context,
-                    school_record=school_profile,
-                    user_id=user_id,
                 )
                 if use_school_record
                 else run_orchestration_agent_stream(
@@ -992,6 +992,14 @@ async def chat_stream_v2_with_image(
                 event_type = event.get("type")
                 
                 if event_type == "status":
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                
+                elif event_type == "sources":
+                    sources = event.get("sources", [])
+                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                
+                elif event_type == "report":
+                    structured_report = event.get("report")
                     yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                 
                 elif event_type == "chunk":
@@ -1047,6 +1055,7 @@ async def chat_stream_v2_with_image(
                 "sources": sources,
                 "source_urls": source_urls,
                 "used_chunks": used_chunks,
+                "report": structured_report,
                 "require_login": require_login,  # 비로그인 3회째 질문 시 True
                 "score_id": active_score_id,
             }
@@ -1166,6 +1175,7 @@ async def chat_stream_v2(
         sources = []
         source_urls = []
         used_chunks = []
+        structured_report = None
         active_score_id = request.score_id
         message_for_pipeline = message
         
@@ -1244,16 +1254,23 @@ async def chat_stream_v2(
                     yield f"data: {json.dumps({'type': 'error', 'message': '연동된 생기부 데이터가 없습니다. 먼저 생활기록부를 연동해 주세요.'}, ensure_ascii=False)}\n\n"
                     return
 
-                for event in generate_school_record_report_stream(
+                for event in generate_deep_school_record_stream(
                     message=message,
                     history=history,
+                    school_record=dict(school_profile or {}),
                     school_record_context=school_record_report_context,
-                    school_record=school_profile,
-                    user_id=user_id,
                 ):
                     event_type = event.get("type")
 
                     if event_type == "status":
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    elif event_type == "sources":
+                        sources = event.get("sources", [])
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    elif event_type in {"answer_plan", "section_outline", "section"}:
+                        yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    elif event_type == "report":
+                        structured_report = event.get("report")
                         yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
                     elif event_type == "chunk":
                         full_response += event.get("text", "")
@@ -1618,6 +1635,7 @@ async def chat_stream_v2(
                 "sources": sources,
                 "source_urls": source_urls,
                 "used_chunks": used_chunks,
+                "report": structured_report,
                 "thinking_mode": thinking_mode,
                 "require_login": require_login,  # 비로그인 3회째 질문 시 True
                 "score_id": active_score_id,

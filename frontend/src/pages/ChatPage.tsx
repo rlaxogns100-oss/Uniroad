@@ -26,7 +26,9 @@ import {
 } from '../api/client'
 import ChatMessage, { type NaesinEditedData } from '../components/ChatMessage'
 import ThinkingProcess from '../components/ThinkingProcess'
+import SchoolRecordResearchProgress from '../components/SchoolRecordResearchProgress'
 import AgentPanel from '../components/AgentPanel'
+import SchoolRecordPdfDownloadRunner from '../components/SchoolRecordPdfDownloadRunner'
 import AuthModal from '../components/AuthModal'
 import PreregisterModal from '../components/PreregisterModal'
 import RollingPlaceholder from '../components/RollingPlaceholder'
@@ -34,7 +36,10 @@ import ProfileForm from '../components/ProfileForm'
 import ScoreSetManagerModal from '../components/ScoreSetManagerModal'
 import SchoolRecordToolStartModal from '../components/SchoolRecordToolStartModal'
 import SchoolGradeInputModal from '../components/SchoolGradeInputModal'
-import SchoolRecordResearchProgress from '../components/SchoolRecordResearchProgress'
+import {
+  SchoolRecordDeepResearchReportView,
+  type StructuredReport,
+} from './SchoolRecordDeepChatPage'
 import { useAuth } from '../contexts/AuthContext'
 import { useLayoutMode } from '../contexts/LayoutModeContext'
 import { useChat } from '../hooks/useChat'
@@ -60,6 +65,32 @@ interface UsedChunk {
   metadata?: Record<string, any>
 }
 
+interface SourceMeta {
+  document_id?: string
+  source_title: string
+  chapter: string
+  part: string
+  sub_section?: string
+  chunk_index: number
+  similarity: number
+  rerank_score?: number
+  chunk_title?: string
+  chunk_summary?: string
+  chunk_role?: string
+  chunk_keywords?: string[]
+  heading_path?: string[]
+  document_summary?: string
+  raw_content?: string
+  source_type?: string
+  school_name?: string
+  file_url?: string
+}
+
+type MessageSource = string | SourceMeta
+
+const isSourceMeta = (source: MessageSource | undefined): source is SourceMeta =>
+  Boolean(source && typeof source === 'object' && 'source_title' in source && 'chunk_index' in source)
+
 interface Message {
   id: string
   text: string
@@ -76,9 +107,10 @@ interface Message {
     coreAverage: number
     semesterAverages?: Record<string, { overall: string; core: string }>
   }
-  sources?: string[]
+  sources?: MessageSource[]
   source_urls?: string[]
   used_chunks?: UsedChunk[]
+  report?: StructuredReport
   isStreaming?: boolean  // 스트리밍 중인지 여부
   imageUrl?: string  // 이미지 첨부 시 미리보기 URL
   isMasked?: boolean  // 마스킹 여부 (비로그인 3회째 질문)
@@ -748,6 +780,7 @@ export default function ChatPage() {
   })
   const [selectedAgentData, setSelectedAgentData] = useState<AgentData | null>(null) // 선택된 메시지의 Agent 데이터
   const [currentLog, setCurrentLog] = useState<string>('') // 현재 진행 상태 로그
+  const [pendingSchoolRecordResearchQuery, setPendingSchoolRecordResearchQuery] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState<string>('') // 채팅 검색어
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false) // 검색창 열림 상태
   const [selectedCategory, setSelectedCategory] = useState<string | null>('합격 예측') // 첫 접속 기본 카테고리
@@ -783,6 +816,19 @@ export default function ChatPage() {
     if (Number.isNaN(joinedAt.getTime())) return fallback
     return `${joinedAt.getFullYear()}년 ${joinedAt.getMonth() + 1}월 가입`
   }, [profileCreatedAt])
+  const getSourceMetaList = useCallback((sources?: MessageSource[]) => {
+    if (!Array.isArray(sources)) return []
+    return sources.filter(isSourceMeta)
+  }, [])
+  const getStringSources = useCallback((sources?: MessageSource[]) => {
+    if (!Array.isArray(sources) || sources.length === 0) return undefined
+    return sources.every((source) => typeof source === 'string') ? (sources as string[]) : undefined
+  }, [])
+  const getSourcePath = useCallback((src: SourceMeta) => {
+    const path = src.heading_path?.filter(Boolean).join(' > ')
+    if (path) return path
+    return [src.chapter, src.part, src.sub_section].filter(Boolean).join(' > ')
+  }, [])
 
   // 4개 카테고리 모달에 있는 질문 전부 + 하드코딩 답변 (합격예측 3, 생활기록부 3, 모집요강 4, 대학정보 3)
   const exampleFaqItems: { question: string; answer: string }[] = [
@@ -877,16 +923,22 @@ export default function ChatPage() {
   // 생활기록부 분석하기에서 시작된 채팅 모드 추적 (새 채팅 시에도 유지)
   const schoolRecordModeRef = useRef(false)
   const [isSchoolRecordToolModalOpen, setIsSchoolRecordToolModalOpen] = useState(false)
+  const [isSchoolRecordStartPrepared, setIsSchoolRecordStartPrepared] = useState(false)
   const [isSchoolGradeInputModalOpen, setIsSchoolGradeInputModalOpen] = useState(false)
   const [schoolRecordPdfUploading, setSchoolRecordPdfUploading] = useState(false)
   /** 오른쪽 패널 전환: 채팅 | 입시기록 메뉴 */
   const [rightPanelView, setRightPanelView] = useState<'chat' | 'school_record_menu'>('chat')
+  const canShowAdminAnalysisPanel = isAdmin && isDesktopLayout && rightPanelView === 'chat'
+  const [isAdminAnalysisPanelOpen, setIsAdminAnalysisPanelOpen] = useState(false)
+  const [selectedAdminAnalysisMsgIndex, setSelectedAdminAnalysisMsgIndex] = useState<number | null>(null)
+  const [expandedAdminChunks, setExpandedAdminChunks] = useState<Set<number>>(new Set())
   const [schoolRecordLinked, setSchoolRecordLinked] = useState<boolean | null>(null)
   const [schoolRecordStatusLoading, setSchoolRecordStatusLoading] = useState(false)
   const [savedSchoolRecordReports, setSavedSchoolRecordReports] = useState<SavedSchoolRecordReport[]>([])
   const [savedSchoolRecordReportsLoading, setSavedSchoolRecordReportsLoading] = useState(false)
-  const [showAllReports, setShowAllReports] = useState(false)
-  const [reportPage, setReportPage] = useState(0)
+  const [visualReportDownloadRequestId, setVisualReportDownloadRequestId] = useState(0)
+  const [visualReportDownloadActive, setVisualReportDownloadActive] = useState(false)
+  const [visualReportDownloadPhase, setVisualReportDownloadPhase] = useState<'idle' | 'generating' | 'rendering'>('idle')
   const [pendingReportMessageId, setPendingReportMessageId] = useState<string | null>(null)
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null)
   const [skipSchoolRecordToolConfirm, setSkipSchoolRecordToolConfirm] = useState<boolean>(() => {
@@ -1677,16 +1729,22 @@ export default function ChatPage() {
     }
   }, [isSchoolRecordModeUrl])
 
-  // 생기부 카드에서 넘어온 질문: 생기부 모드로 전환 후 자동 전송
+  // 생기부 카드에서 넘어온 질문: 생기부 모드 입력창에만 미리 채우기
   useEffect(() => {
     if (!initialQuestionFromState || !isSchoolRecordModeUrl) return
     const question = initialQuestionFromState
     navigate(location.pathname + '?' + location.search, { replace: true, state: {} })
     const t = setTimeout(() => {
-      handleSend(question)
+      setInput(question)
+      inputTextareaRef.current?.focus()
+      const length = question.length
+      if (inputTextareaRef.current) {
+        inputTextareaRef.current.selectionStart = length
+        inputTextareaRef.current.selectionEnd = length
+      }
     }, 100)
     return () => clearTimeout(t)
-  }, [initialQuestionFromState, isSchoolRecordModeUrl])
+  }, [initialQuestionFromState, isSchoolRecordModeUrl, location.pathname, location.search, navigate])
 
   const handleSelectScoreSetForPrediction = async (item: { id: string; name: string }) => {
     setIsScorePredictionStartModalOpen(false)
@@ -1705,7 +1763,7 @@ export default function ChatPage() {
    * 생기부 분석 전용 새 채팅으로 전환.
    * @param confirmedLinked - 모달에서 이미 연동 여부를 확인한 경우: true면 연동됨(생기부 새 채팅), false면 미연동(연동 페이지로), undefined면 재조회 후 결정
    */
-  const activateSchoolRecordTool = async (confirmedLinked?: boolean) => {
+  const activateSchoolRecordTool = async (confirmedLinked?: boolean, initialQuestion?: string) => {
     let linked: boolean
     if (confirmedLinked === undefined) {
       setSchoolRecordStatusLoading(true)
@@ -1728,11 +1786,19 @@ export default function ChatPage() {
     setSchoolRecordToolEnabled(true)
     schoolRecordModeRef.current = true
     // 생기부 채팅 전용 URL로 이동 (새 채팅 눌러도 이 모드 유지)
-    navigate(`/chat?${SCHOOL_RECORD_MODE_PARAM}`, { replace: true })
+    navigate(`/chat?${SCHOOL_RECORD_MODE_PARAM}`, {
+      replace: true,
+      state: initialQuestion ? { initialQuestion } : {},
+    })
   }
 
   const handleConfirmSchoolRecordToolStart = async () => {
     setIsSchoolRecordToolModalOpen(false)
+    if (isSchoolRecordStartPrepared) {
+      setIsSchoolRecordStartPrepared(false)
+      requestAnimationFrame(() => inputTextareaRef.current?.focus())
+      return
+    }
     if (!hasProAccess) {
       openProModal()
       return
@@ -1746,13 +1812,15 @@ export default function ChatPage() {
     if (!action) return
     setIsSchoolRecordToolModalOpen(false)
     if (!hasProAccess) {
+      setIsSchoolRecordStartPrepared(false)
       openProModal()
       return
     }
-    await activateSchoolRecordTool(schoolRecordLinked === true ? true : schoolRecordLinked === false ? false : undefined)
-    window.setTimeout(() => {
-      void handleSend(action.question)
-    }, 100)
+    await activateSchoolRecordTool(
+      schoolRecordLinked === true ? true : schoolRecordLinked === false ? false : undefined,
+      action.question
+    )
+    setIsSchoolRecordStartPrepared(false)
   }
 
   const handleSchoolRecordShortcut = async () => {
@@ -1779,7 +1847,8 @@ export default function ChatPage() {
     }
 
     // 생기부 분석 진입: 연동 여부 확인 후 분석 전용 채팅으로 이동
-    setRightPanelView('chat')
+    await activateSchoolRecordTool(true)
+    setIsSchoolRecordStartPrepared(true)
     setIsSchoolRecordToolModalOpen(true)
     if (!isDesktopLayout) setIsSideNavOpen(false)
   }
@@ -1905,6 +1974,7 @@ export default function ChatPage() {
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const chatScrollContainerRef = useRef<HTMLDivElement>(null)
+  const lastAdminAnalysisMessageIdRef = useRef<string | null>(null)
   const sendingRef = useRef(false) // 중복 전송 방지
   const abortControllerRef = useRef<AbortController | null>(null) // 스트리밍 취소용
   const searchContainerRef = useRef<HTMLDivElement>(null) // 검색창 외부 클릭 감지용
@@ -2042,9 +2112,9 @@ export default function ChatPage() {
     }
   }, [])
 
-  // savedMessages가 변경되면 로컬 messages 상태에 동기화
+  // savedMessages가 변경되면 현재 선택된 세션의 메시지만 로컬 상태에 동기화
   useEffect(() => {
-    if (savedMessages && savedMessages.length > 0) {
+    if (currentSessionId && savedMessages && savedMessages.length > 0) {
       const convertedMessages: Message[] = savedMessages.map(msg => ({
         id: msg.id,
         text: msg.content,
@@ -2057,6 +2127,37 @@ export default function ChatPage() {
       setMessages([])
     }
   }, [savedMessages, currentSessionId])
+
+  useEffect(() => {
+    if (canShowAdminAnalysisPanel) return
+    setIsAdminAnalysisPanelOpen(false)
+    setSelectedAdminAnalysisMsgIndex(null)
+    setExpandedAdminChunks(new Set())
+    lastAdminAnalysisMessageIdRef.current = null
+  }, [canShowAdminAnalysisPanel])
+
+  useEffect(() => {
+    if (!canShowAdminAnalysisPanel) return
+
+    const latestAnalysisIndex = [...messages]
+      .map((message, index) => ({ message, index }))
+      .reverse()
+      .find(({ message }) => !message.isUser && getSourceMetaList(message.sources).length > 0)?.index
+
+    if (latestAnalysisIndex === undefined) return
+
+    const latestMessage = messages[latestAnalysisIndex]
+    if (selectedAdminAnalysisMsgIndex === null) {
+      setSelectedAdminAnalysisMsgIndex(latestAnalysisIndex)
+    }
+
+    if (lastAdminAnalysisMessageIdRef.current !== latestMessage.id) {
+      lastAdminAnalysisMessageIdRef.current = latestMessage.id
+      setSelectedAdminAnalysisMsgIndex(latestAnalysisIndex)
+      setExpandedAdminChunks(new Set())
+      setIsAdminAnalysisPanelOpen(true)
+    }
+  }, [messages, canShowAdminAnalysisPanel, selectedAdminAnalysisMsgIndex, getSourceMetaList])
 
   const fetchAnnouncements = async () => {
     try {
@@ -2874,6 +2975,7 @@ export default function ChatPage() {
       const skipReviewForLinkedNaesin = hasLinkedNaesinMention && scorePredictionMode
       const hasCompactNaesinDigits = /(?:^|[^0-9])(?:[1-9](?:[\s,./|-]*[1-9]){4,5})(?:[^0-9]|$)/.test(normalizedUserInput)
       const forceShowNaesinCard = (hasLinkedNaesinMention && !skipReviewForLinkedNaesin) || hasCompactNaesinDigits
+      setPendingSchoolRecordResearchQuery(useSchoolRecordForRequest ? userInput : null)
       
       // 공통 콜백 함수들 정의
       const onLogCallback = (log: string) => {
@@ -2936,6 +3038,7 @@ export default function ChatPage() {
                   sources: response.sources,
                   source_urls: response.source_urls,
                   used_chunks: response.used_chunks,
+                  report: response.report as StructuredReport | undefined,
                   isStreaming: false,  // 스트리밍 완료
                   isMasked: shouldMask,  // 마스킹 여부
                   agentData: currentAgentData,  // Agent 디버그 데이터 저장
@@ -2995,6 +3098,11 @@ export default function ChatPage() {
             elapsedTime: elapsedMs,
             timing: response.metadata?.timing || undefined,
           })
+
+          if (useSchoolRecordForRequest) {
+            setPendingSchoolRecordResearchQuery(null)
+          }
+
         }
       
       const onErrorCallback = (error: string) => {
@@ -3004,6 +3112,7 @@ export default function ChatPage() {
           // 인증 토큰 만료/검증 실패 - 로그인 모달 즉시 표시
           if (error === '__AUTH_REQUIRED__') {
             setMessages((prev) => prev.filter(msg => msg.id !== userMessage.id && msg.id !== streamingBotMessageId))
+            setPendingSchoolRecordResearchQuery(null)
             setLockReason('auth_expired')
             setSessionLockedByMasking(false)
             setAuthModalMessage({
@@ -3019,6 +3128,7 @@ export default function ChatPage() {
           // 비로그인 사용자 Rate Limit 초과 - 로그인 유도
           if (error === '__RATE_LIMIT_GUEST__') {
             setMessages((prev) => prev.filter(msg => msg.id !== streamingBotMessageId))
+            setPendingSchoolRecordResearchQuery(null)
             setLockReason('guest_masked')
             setSessionLockedByMasking(true)
             setAuthModalMessage({
@@ -3037,6 +3147,9 @@ export default function ChatPage() {
               ? { ...msg, text: error }
               : msg
           ))
+          if (useSchoolRecordForRequest) {
+            setPendingSchoolRecordResearchQuery(null)
+          }
         }
       
       // onChunk 콜백 - 실시간 텍스트 스트리밍
@@ -3061,7 +3174,7 @@ export default function ChatPage() {
           // 자동 스크롤
           scrollToBottom()
         }
-      
+
       const onScoreReviewRequiredCallback = (payload: ScoreReviewRequiredEvent) => {
           if (abortController.signal.aborted) return
 
@@ -3130,6 +3243,7 @@ export default function ChatPage() {
                             sources: result.sources,
                             source_urls: result.source_urls,
                             used_chunks: result.used_chunks,
+                                  report: result.report as StructuredReport | undefined,
                             isStreaming: false,
                           }
                         : m
@@ -3259,6 +3373,7 @@ export default function ChatPage() {
         setIsLoading(false)
         setCurrentLog('')
       }
+      setPendingSchoolRecordResearchQuery(null)
       sendingRef.current = false
       isStreamingRef.current = false // 스트리밍 종료
       abortControllerRef.current = null
@@ -3388,22 +3503,8 @@ export default function ChatPage() {
     setPendingReportMessageId(String(report.messageId || ''))
   }
 
-  const handleOpenSchoolRecordSummaryReport = async () => {
-    setRightPanelView('chat')
-    if (savedSchoolRecordReports.length > 0) {
-      await openSavedSchoolRecordReport(savedSchoolRecordReports[0])
-      return
-    }
-
-    const firstDefaultReport = schoolRecordResearchReports[0]
-    if (firstDefaultReport?.question) {
-      startSchoolRecordResearch(firstDefaultReport.question)
-    }
-  }
-
   const handleDownloadSchoolRecordSummaryReport = useCallback(async () => {
-    if (savedSchoolRecordReports.length === 0) {
-      triggerFloatingNotice('다운로드할 분석 리포트가 없습니다.')
+    if (visualReportDownloadActive || visualReportDownloadPhase !== 'idle') {
       return
     }
 
@@ -3413,44 +3514,10 @@ export default function ChatPage() {
       return
     }
 
-    try {
-      const latestReport = savedSchoolRecordReports[0]
-      const res = await fetch(`${runtimeApiBase}/api/sessions/${latestReport.sessionId}/messages`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!res.ok) throw new Error('failed_to_load_report')
-
-      const rows = await res.json()
-      const list = Array.isArray(rows) ? rows : []
-      const targetMessage = list.find((row: any) => {
-        const rowId = String(row?.id || row?.message_id || '')
-        return rowId === String(latestReport.messageId)
-      })
-
-      const content = String(targetMessage?.content || '').trim()
-      if (!content) {
-        triggerFloatingNotice('다운로드할 리포트 내용을 찾지 못했습니다.')
-        return
-      }
-
-      const safeTitle = String(latestReport.title || '생활기록부_분석_리포트')
-        .replace(/[\\/:*?"<>|]/g, '_')
-        .replace(/\s+/g, '_')
-        .slice(0, 60)
-      const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
-      const url = window.URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${safeTitle || '생활기록부_분석_리포트'}.md`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      window.URL.revokeObjectURL(url)
-      triggerFloatingNotice('분석 리포트를 다운로드했습니다.')
-    } catch {
-      triggerFloatingNotice('분석 리포트 다운로드에 실패했습니다.')
-    }
-  }, [savedSchoolRecordReports, runtimeApiBase])
+    setVisualReportDownloadPhase('generating')
+    setVisualReportDownloadActive(true)
+    setVisualReportDownloadRequestId((prev) => prev + 1)
+  }, [visualReportDownloadActive, visualReportDownloadPhase])
 
   const renderSchoolRecordPreviewStepContent = (step: number) => {
     const parsedSections = (schoolRecordParsedPreview?.sections || {}) as Record<string, any>
@@ -3845,54 +3912,6 @@ export default function ChatPage() {
       question: '내 생기부를 분석해서 나에게 적합한 학교를 추천해줘',
     },
   ]
-
-  /** 리포트 기본 데이터 (저장된 리포트가 없을 때 표시) */
-  const schoolRecordResearchReports = [
-    {
-      title: '학생부종합 지원 전략 리포트',
-      description: '교과·비교과·세특을 통합 분석해 지원 가능 대학군과 위험 요소를 정리합니다.',
-      question: '내 생기부를 바탕으로 학생부종합 지원 전략 리포트를 작성해줘. 대학군을 상향/적정/안정으로 나눠줘.',
-    },
-    {
-      title: '세특 기반 면접 대비 리포트',
-      description: '활동 맥락과 전공 연계성을 기준으로 예상 질문과 답변 프레임을 구성합니다.',
-      question: '내 생기부 세특을 기반으로 면접 예상 질문 20개와 답변 포인트를 만들어줘.',
-    },
-    {
-      title: '학년별 성장 스토리 리포트',
-      description: '1~3학년 흐름을 분석해 자기소개서/면접에서 활용 가능한 스토리 라인을 정리합니다.',
-      question: '1학년부터 3학년까지의 성장 흐름을 스토리로 정리하고, 자기소개에 활용할 핵심 문장을 만들어줘.',
-    },
-    {
-      title: '세부능력 및 특기사항 분석 리포트',
-      description: '세특 내용의 강점과 약점을 짚어 개선 방향과 강조 포인트를 제시합니다.',
-      question: '세부능력 및 특기사항을 분석하고 강점과 약점을 짚어줘.',
-    },
-  ]
-
-  /** 표시할 리포트 목록 (저장된 리포트 우선, 없으면 기본 리포트) */
-  const displayReports = useMemo(() => {
-    if (savedSchoolRecordReports.length > 0) {
-      return savedSchoolRecordReports.map(r => ({
-        id: r.id,
-        sessionId: r.sessionId,
-        messageId: r.messageId,
-        title: r.title,
-        description: r.description,
-      }))
-    }
-    return schoolRecordResearchReports.map(r => ({
-      id: null,
-      title: r.title,
-      description: r.description,
-      question: r.question,
-    })) as Array<{ id?: string | null; sessionId?: string; messageId?: string; title: string; description: string; question?: string }>
-  }, [savedSchoolRecordReports])
-
-  const startSchoolRecordResearch = (question: string) => {
-    setSelectedCategory(null)
-    void handleSend(question)
-  }
 
   const openExternalPage = async (url: string) => {
     if (isAppBuild()) {
@@ -4754,55 +4773,6 @@ export default function ChatPage() {
                         ))}
                       </div>
 
-                      {/* 리포트 섹션 */}
-                      <div>
-                        <div className="flex items-center justify-between mb-4">
-                          <h3 className="text-lg font-bold text-gray-900">리포트</h3>
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => setReportPage((p) => Math.max(0, p - 1))}
-                              disabled={reportPage === 0}
-                              className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
-                            >
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                              </svg>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setReportPage((p) => p + 1)}
-                              disabled={(reportPage + 1) * 2 >= displayReports.length}
-                              className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
-                            >
-                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                              </svg>
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* 리포트 카드 그리드 */}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          {displayReports.slice(reportPage * 2, reportPage * 2 + 2).map((report) => (
-                            <button
-                              key={report.id || report.title}
-                              type="button"
-                              onClick={() => {
-                                if ('id' in report && report.id) {
-                                  void openSavedSchoolRecordReport(report as SavedSchoolRecordReport)
-                                } else {
-                                  startSchoolRecordResearch((report as { question?: string }).question!)
-                                }
-                              }}
-                              className="text-left rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 hover:border-blue-300 hover:shadow-sm transition-all"
-                            >
-                              <h4 className="text-sm font-semibold text-gray-900 mb-2 line-clamp-2">{report.title}</h4>
-                              <p className="text-xs text-gray-500 line-clamp-4 leading-relaxed">{report.description}</p>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
                     </div>
                   )}
 
@@ -4834,6 +4804,8 @@ export default function ChatPage() {
             {messages.map((msg, index) => {
               // AI 답변일 경우 직전 사용자 질문 찾기
               let userQuery: string | undefined
+              const textSources = getStringSources(msg.sources)
+              const analysisSources = getSourceMetaList(msg.sources)
               if (!msg.isUser) {
                 for (let i = index - 1; i >= 0; i--) {
                   if (messages[i].isUser) {
@@ -4851,6 +4823,9 @@ export default function ChatPage() {
                     highlightedMessageId === msg.id ? 'bg-blue-50/70' : ''
                   }`}
                 >
+                {!msg.isUser && msg.report?.sections?.length ? (
+                  <SchoolRecordDeepResearchReportView report={msg.report} questionText={userQuery} />
+                ) : (
                 <ChatMessage
                   message={msg.text}
                   isUser={msg.isUser}
@@ -4884,6 +4859,7 @@ export default function ChatPage() {
                                   sources: result.sources,
                                   source_urls: result.source_urls,
                                   used_chunks: result.used_chunks,
+                                  report: result.report as StructuredReport | undefined,
                                   isStreaming: false,
                                 }
                               : m
@@ -4925,7 +4901,7 @@ export default function ChatPage() {
                   }}
                   onNaesinDontAskAgain={() => setSkipNaesinCardThisSession(true)}
                   hideNaesinCard={skipNaesinCardThisSession}
-                  sources={msg.sources}
+                  sources={textSources}
                   source_urls={msg.source_urls}
                   usedChunks={msg.used_chunks}
                   userQuery={userQuery}
@@ -4976,6 +4952,7 @@ export default function ChatPage() {
                                     sources: response.sources,
                                     source_urls: response.source_urls,
                                     used_chunks: response.used_chunks,
+                                    report: response.report as StructuredReport | undefined,
                                     isStreaming: false,
                                     agentData: {
                                       routerOutput: response.router_output || null,
@@ -5050,6 +5027,7 @@ export default function ChatPage() {
                                   sources: response.sources,
                                   source_urls: response.source_urls,
                                   used_chunks: response.used_chunks,
+                                  report: response.report as StructuredReport | undefined,
                                   isStreaming: false,
                                   agentData: {
                                     routerOutput: response.router_output || null,
@@ -5181,14 +5159,39 @@ export default function ChatPage() {
                     }
                   }}
                 />
+                )}
+                {canShowAdminAnalysisPanel && !msg.isUser && analysisSources.length > 0 && (
+                  <div className="mt-2 flex justify-start">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedAdminAnalysisMsgIndex(index)
+                        setExpandedAdminChunks(new Set())
+                        setIsAdminAnalysisPanelOpen(true)
+                      }}
+                      className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-[11px] font-semibold transition ${
+                        selectedAdminAnalysisMsgIndex === index && isAdminAnalysisPanelOpen
+                          ? 'bg-indigo-100 text-indigo-700'
+                          : 'bg-[#F2F4F6] text-[#6B7684] hover:bg-indigo-50 hover:text-indigo-600'
+                      }`}
+                    >
+                      <BookOpen className="h-3 w-3" />
+                      참고자료 {analysisSources.length}건
+                    </button>
+                  </div>
+                )}
                 </div>
               )
             })}
 
             {isLoading && (
               <div className="flex justify-start mb-4">
-                {schoolRecordToolEnabled ? (
-                  <SchoolRecordResearchProgress logs={agentData.logs} />
+                {pendingSchoolRecordResearchQuery ? (
+                  <SchoolRecordResearchProgress
+                    logs={agentData.logs}
+                    query={pendingSchoolRecordResearchQuery}
+                    onStop={() => abortControllerRef.current?.abort()}
+                  />
                 ) : (
                   <ThinkingProcess logs={agentData.logs} />
                 )}
@@ -5545,6 +5548,30 @@ export default function ChatPage() {
 
                     {!isProfileEditMode && (
                       <div className="space-y-3">
+                        {(schoolRecordPdfUploading || visualReportDownloadPhase !== 'idle') && (
+                          <div className="overflow-hidden rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-2.5">
+                            <div className="mb-1.5 flex items-center justify-between">
+                              <span className="text-xs font-semibold text-blue-700">
+                                {schoolRecordPdfUploading
+                                  ? '생활기록부 업로드 중...'
+                                  : visualReportDownloadPhase === 'generating'
+                                    ? '분석 리포트 생성 중...'
+                                    : 'PDF 변환 중...'}
+                              </span>
+                              <span className="text-[10px] text-blue-400">잠시만 기다려 주세요</span>
+                            </div>
+                            <div className="h-1.5 w-full overflow-hidden rounded-full bg-blue-100">
+                              <div
+                                className="h-full rounded-full bg-blue-500"
+                                style={{
+                                  animation: 'progressIndeterminate 1.8s ease-in-out infinite',
+                                  width: '40%',
+                                }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                        <style>{`@keyframes progressIndeterminate{0%{margin-left:-40%}100%{margin-left:100%}}`}</style>
                         <div
                           className="group relative w-full rounded-2xl border border-gray-200 bg-white px-4 py-2.5 text-left shadow-sm transition-all duration-200 touch-manipulation min-h-[48px]"
                         >
@@ -5596,9 +5623,14 @@ export default function ChatPage() {
                                         e.stopPropagation()
                                         void handleDownloadSchoolRecordSummaryReport()
                                       }}
-                                      className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl border border-gray-200 bg-white px-4 text-[13px] font-extrabold tracking-[-0.01em] text-gray-700 shadow-sm transition hover:bg-gray-50 active:scale-[0.99]"
+                                      disabled={visualReportDownloadPhase !== 'idle'}
+                                      className={`inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl border px-4 text-[13px] font-extrabold tracking-[-0.01em] shadow-sm transition ${
+                                        visualReportDownloadPhase !== 'idle'
+                                          ? 'cursor-wait border-blue-200 bg-blue-50 text-blue-600'
+                                          : 'border-gray-200 bg-white text-gray-700 hover:bg-gray-50 active:scale-[0.99]'
+                                      }`}
                                     >
-                                      분석 리포트 다운로드
+                                      {visualReportDownloadPhase === 'idle' ? '분석 리포트 다운로드' : '분석 리포트 생성 중'}
                                     </button>
                                     <button
                                       type="button"
@@ -6332,7 +6364,7 @@ export default function ChatPage() {
                 messages.map(m => ({
                   role: m.isUser ? 'user' as const : 'assistant' as const,
                   content: m.text,
-                  sources: m.sources,
+                  sources: getStringSources(m.sources),
                   source_urls: m.source_urls
                 })),
                 sessionId
@@ -6893,11 +6925,14 @@ export default function ChatPage() {
         linked={schoolRecordLinked}
         loading={schoolRecordStatusLoading}
         dontAskAgain={skipSchoolRecordToolConfirm}
-        confirmLabel={schoolRecordLinked === true ? '새 채팅' : '생기부 연동하기'}
+        confirmLabel={isSchoolRecordStartPrepared ? '시작하기' : schoolRecordLinked === true ? '새 채팅' : '생기부 연동하기'}
         quickActions={schoolRecordStartActions}
         onSelectQuickAction={(actionId) => { void handleSelectSchoolRecordStartAction(actionId) }}
         onToggleDontAskAgain={setSkipSchoolRecordConfirm}
-        onClose={() => setIsSchoolRecordToolModalOpen(false)}
+        onClose={() => {
+          setIsSchoolRecordToolModalOpen(false)
+          setIsSchoolRecordStartPrepared(false)
+        }}
         onConfirm={() => { void handleConfirmSchoolRecordToolStart() }}
       />
 
@@ -7283,6 +7318,199 @@ export default function ChatPage() {
         </div>
       )}
 
+      {canShowAdminAnalysisPanel && isAdminAnalysisPanelOpen && (
+        <div className="w-[400px] shrink-0 border-l border-[#E5E8EB] bg-white flex flex-col h-screen">
+          <div className="shrink-0 border-b border-[#E5E8EB]">
+            <div className="px-4 py-3 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold text-[#111827]">답변 분석</p>
+                <p className="mt-0.5 text-[11px] text-[#8B95A1]">관리자 전용 참고자료 / 청크 뷰</p>
+              </div>
+              <button
+                onClick={() => setIsAdminAnalysisPanelOpen(false)}
+                className="flex h-7 w-7 items-center justify-center rounded-md text-[#8B95A1] hover:bg-gray-100 transition"
+                aria-label="답변 분석 닫기"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+            {(() => {
+              const assistantMsgs = messages
+                .map((message, index) => ({ message, index }))
+                .filter(
+                  ({ message }) => !message.isUser && getSourceMetaList(message.sources).length > 0
+                )
+
+              if (assistantMsgs.length === 0) {
+                return (
+                  <div className="py-12 text-center">
+                    <BookOpen className="h-10 w-10 text-[#D1D6DB] mx-auto mb-3" />
+                    <p className="text-sm font-semibold text-[#8B95A1]">아직 분석 데이터가 없습니다</p>
+                    <p className="mt-1 text-xs text-[#ADB5BD]">
+                      생기부 심층 분석 답변이 생성되면
+                      <br />
+                      사용된 참고자료와 청크가 여기에 표시됩니다.
+                    </p>
+                  </div>
+                )
+              }
+
+              const selectedSources =
+                selectedAdminAnalysisMsgIndex !== null
+                  ? getSourceMetaList(messages[selectedAdminAnalysisMsgIndex]?.sources)
+                  : []
+
+              return (
+                <>
+                  {assistantMsgs.length > 1 && (
+                    <div>
+                      <p className="text-[11px] font-bold text-[#8B95A1] mb-2 uppercase tracking-wider">
+                        답변 선택
+                      </p>
+                      <div className="flex gap-1.5 overflow-x-auto pb-1">
+                        {assistantMsgs.map(({ message, index }, chipIdx) => (
+                          <button
+                            key={message.id}
+                            onClick={() => {
+                              setSelectedAdminAnalysisMsgIndex(index)
+                              setExpandedAdminChunks(new Set())
+                            }}
+                            className={`shrink-0 rounded-lg px-3 py-1.5 text-[11px] font-semibold transition border ${
+                              selectedAdminAnalysisMsgIndex === index
+                                ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                                : 'bg-[#F9FAFB] text-[#6B7684] border-[#EEF0F3] hover:bg-gray-100'
+                            }`}
+                          >
+                            #{chipIdx + 1} ({getSourceMetaList(message.sources).length}건)
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedAdminAnalysisMsgIndex !== null && selectedAdminAnalysisMsgIndex > 0 && (
+                    <div className="rounded-xl bg-[#F2F4F6] px-3 py-2.5">
+                      <p className="text-[10px] font-bold text-[#8B95A1] mb-1">질문</p>
+                      <p className="text-xs text-[#4E5968] line-clamp-3">
+                        {messages[selectedAdminAnalysisMsgIndex - 1]?.text || ''}
+                      </p>
+                    </div>
+                  )}
+
+                  {selectedSources.length > 0 && (
+                    <div className="space-y-3">
+                      <p className="text-[11px] font-bold text-[#8B95A1] uppercase tracking-wider">
+                        사용된 청크 ({selectedSources.length}건)
+                      </p>
+                      {selectedSources.map((src, chunkIdx) => {
+                        const isExpanded = expandedAdminChunks.has(chunkIdx)
+                        const summaryShow = src.chunk_summary?.trim() || src.document_summary?.trim() || ''
+                        const isLong = summaryShow.length > 200
+
+                        return (
+                          <div
+                            key={`${src.document_id || src.source_title}-${src.chunk_index}-${chunkIdx}`}
+                            className="rounded-xl border border-[#EEF0F3] bg-[#FAFBFC] overflow-hidden"
+                          >
+                            <div className="px-3 py-2.5 border-b border-[#EEF0F3] bg-white">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-xs font-bold text-[#191F28] truncate">
+                                    {src.chunk_title || src.source_title}
+                                  </p>
+                                  <p className="text-[11px] font-medium text-[#4E5968] mt-0.5 truncate">
+                                    {src.source_title}
+                                  </p>
+                                </div>
+                                <div className="shrink-0 flex items-center gap-1.5">
+                                  {src.chunk_role && (
+                                    <span className="inline-flex items-center rounded-md bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-600">
+                                      {src.chunk_role}
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] text-[#ADB5BD]">#{src.chunk_index}</span>
+                                  {typeof src.rerank_score === 'number' && (
+                                    <span className="inline-flex items-center rounded-md bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-600">
+                                      최종 {(src.rerank_score * 100).toFixed(0)}%
+                                    </span>
+                                  )}
+                                  <span
+                                    className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-bold ${
+                                      src.similarity >= 0.8
+                                        ? 'bg-green-50 text-green-600'
+                                        : 'bg-gray-100 text-gray-500'
+                                    }`}
+                                  >
+                                    벡터 {(src.similarity * 100).toFixed(0)}%
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {(summaryShow || (src.chunk_keywords && src.chunk_keywords.length > 0)) && (
+                              <div className="px-3 py-2.5">
+                                {summaryShow && (
+                                  <>
+                                    <p className="text-[10px] font-bold text-[#8B95A1]">원문 발췌</p>
+                                    <p
+                                      className={`mt-1 text-[12px] leading-relaxed text-[#4E5968] whitespace-pre-wrap break-words ${
+                                        !isExpanded && isLong ? 'line-clamp-5' : ''
+                                      }`}
+                                    >
+                                      {summaryShow}
+                                    </p>
+                                    {isLong && (
+                                      <button
+                                        onClick={() => {
+                                          setExpandedAdminChunks((prev) => {
+                                            const next = new Set(prev)
+                                            if (next.has(chunkIdx)) next.delete(chunkIdx)
+                                            else next.add(chunkIdx)
+                                            return next
+                                          })
+                                        }}
+                                        className="mt-2 text-[11px] font-semibold text-indigo-500 hover:text-indigo-700 transition"
+                                      >
+                                        {isExpanded ? '접기' : '전체 보기'}
+                                      </button>
+                                    )}
+                                  </>
+                                )}
+                                {src.chunk_keywords && src.chunk_keywords.length > 0 && (
+                                  <div className="mt-2 flex flex-wrap gap-1">
+                                    {src.chunk_keywords.slice(0, 6).map((keyword) => (
+                                      <span
+                                        key={keyword}
+                                        className="inline-flex items-center rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-[#6B7684] border border-[#E5E8EB]"
+                                      >
+                                        {keyword}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </>
+              )
+            })()}
+          </div>
+
+          <div className="shrink-0 border-t border-[#EEF0F3] px-4 py-3">
+            <p className="text-[10px] text-[#ADB5BD] text-center leading-relaxed">
+              `최종`은 재랭킹 점수, `벡터`는 임베딩 유사도입니다.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* PRO 업그레이드 팝업 - 웹 + 로그인한 Basic 유저에게만 표시 (PRO 유저는 숨김) */}
       {isProPopupVisible && !isAppBuild() && isAuthenticated && user?.id && !user?.is_premium && (
         <div className="fixed bottom-4 right-4 z-40 group">
@@ -7333,6 +7561,22 @@ export default function ChatPage() {
         </div>
       )}
       </div>
+      <SchoolRecordPdfDownloadRunner
+        active={visualReportDownloadActive}
+        requestId={visualReportDownloadRequestId}
+        token={getRequestToken() ?? null}
+        onPhaseChange={(phase) => setVisualReportDownloadPhase(phase)}
+        onSuccess={() => {
+          setVisualReportDownloadActive(false)
+          setVisualReportDownloadPhase('idle')
+          triggerFloatingNotice('분석 리포트를 다운로드했습니다.')
+        }}
+        onError={(message) => {
+          setVisualReportDownloadActive(false)
+          setVisualReportDownloadPhase('idle')
+          triggerFloatingNotice(message || '분석 리포트 다운로드에 실패했습니다.')
+        }}
+      />
     </div>
   )
 }

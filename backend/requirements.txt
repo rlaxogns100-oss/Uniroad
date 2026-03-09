@@ -40,6 +40,7 @@ tiktoken>=0.7.0
 python-dotenv>=1.0.0
 httpx>=0.24.0
 aiofiles>=23.2.1
+user-agents>=2.2.0
 
 # Auth / JWT
 PyJWT>=2.0.0

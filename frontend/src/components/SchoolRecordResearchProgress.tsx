@@ -19,12 +19,17 @@ interface ResearchStepItem {
 
 const STEP_INDEX_BY_ID: Record<string, number> = {
   school_record_router: 0,
+  school_record_plan_start: 0,
   school_record_retrieval_complete: 1,
   school_record_retrieval_skip: 1,
   school_record_retrieval_rounds: 1,
+  school_record_plan_complete: 1,
   school_record_report: 2,
+  school_record_sections_start: 2,
   school_record_deep_dive: 3,
+  school_record_section_complete: 3,
   school_record_follow_up: 4,
+  school_record_report_finalizing: 4,
 }
 
 const parseLog = (rawLog: string): ParsedLog => {

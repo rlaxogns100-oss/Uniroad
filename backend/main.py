@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from config.config import settings
-from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs, admin_stats, profile, functions, auto_reply, tracking, test_evaluate, feedback, preregister, share, payments
+from routers import chat, upload, documents, auth, sessions, announcements, admin_evaluate, admin_logs, admin_stats, profile, functions, auto_reply, tracking, test_evaluate, feedback, preregister, share, payments, school_record_deep_chat, academic_contents
 from routes import calculator
 from school_record_eval import router as school_record_router
 import os
@@ -94,6 +94,8 @@ app.include_router(preregister.router, tags=["사전신청"])
 app.include_router(share.router, prefix="/api/share", tags=["공유"])
 app.include_router(school_record_router, prefix="/api/school-record", tags=["생기부평가"])
 app.include_router(payments.router, prefix="/api/v1/payments", tags=["결제(Gumroad)"])
+app.include_router(school_record_deep_chat.router, prefix="/api/school-record-deep-chat", tags=["생기부심층분석채팅"])
+app.include_router(academic_contents.router, prefix="/api/academic-contents", tags=["학술자료RAG"])
 
 # 정적 파일 경로 설정
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

@@ -23,6 +23,8 @@ backend/**/__pycache__/
 backend/**/*.pyc
 backend/**/*.pyo
 backend/**/*.pyd
+profile-agent/**/__pycache__/
+profile-agent/**/*.pyc
 backend/logs/
 logs/
 *.log

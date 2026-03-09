@@ -169,6 +169,7 @@ export interface ChatResponse {
   sources: string[]
   source_urls: string[]
   used_chunks?: UsedChunk[]  // 답변에 사용된 청크
+  report?: any
   // 멀티에이전트 디버그 데이터
   router_output?: Record<string, any>  // Router 출력 (최상위)
   function_results?: Record<string, any>  // Function 결과 (최상위)
@@ -177,6 +178,32 @@ export interface ChatResponse {
   metadata?: Record<string, any>
   require_login?: boolean  // 비로그인 3회째 질문 시 마스킹 필요
   score_id?: string
+}
+
+export interface SchoolRecordAnswerPlanEvent {
+  question_type?: string
+  user_goal?: string
+  refined_question?: string
+  analysis_dimensions?: string[]
+  school_record_focus?: string[]
+  answer_sections?: string[]
+  retrieval_queries?: string[]
+  reasoning_hint?: string
+}
+
+export interface SchoolRecordSectionOutlineItem {
+  section_id: string
+  title: string
+}
+
+export interface SchoolRecordSectionEvent {
+  section: {
+    section_id: string
+    title: string
+    preview?: string
+  }
+  section_index: number
+  total_sections: number
 }
 
 export interface StreamChatRequest extends ChatRequest {
@@ -316,6 +343,8 @@ const sendMessageNonStream = async (
     const text = await response.text()
     let fullResponse = ''
     let finalData: any = null
+    let structuredReport: any = null
+    let sourceEvents: any[] = []
 
     const blocks = normalizeSseText(text).split('\n\n')
     for (const block of blocks) {
@@ -332,6 +361,10 @@ const sendMessageNonStream = async (
           onLog(event.content || '')
         } else if (event.type === 'chunk') {
           fullResponse += event.text || ''
+        } else if (event.type === 'sources') {
+          sourceEvents = Array.isArray(event.sources) ? event.sources : []
+        } else if (event.type === 'report') {
+          structuredReport = event.report || null
         } else if (event.type === 'score_review_required') {
           onScoreReviewRequired?.(event as ScoreReviewRequiredEvent)
           return
@@ -353,9 +386,10 @@ const sendMessageNonStream = async (
     const chatResponse: ChatResponse = {
       response: finalData?.response || fullResponse,
       raw_answer: finalData?.response || fullResponse,
-      sources: finalData?.sources || [],
+      sources: finalData?.sources || sourceEvents || [],
       source_urls: finalData?.source_urls || [],
       used_chunks: finalData?.used_chunks || [],
+      report: structuredReport || finalData?.report,
       router_output: finalData?.router_output,
       function_results: finalData?.function_results,
       orchestration_result: undefined,
@@ -397,6 +431,10 @@ export const sendMessageStream = async (
   onSchoolGradeSaved?: (payload: SchoolGradeSavedEvent) => void,
   useLinkedNaesin?: boolean,
   skipScoreReview?: boolean,
+  onSchoolRecordSources?: (sources: any[]) => void,
+  onSchoolRecordAnswerPlan?: (plan: SchoolRecordAnswerPlanEvent) => void,
+  onSchoolRecordSectionOutline?: (sections: SchoolRecordSectionOutlineItem[]) => void,
+  onSchoolRecordSection?: (section: SchoolRecordSectionEvent) => void,
 ): Promise<void> => {
   const IS_CAPACITOR_APP = isCapacitorApp()
   console.log('[sendMessageStream] IS_CAPACITOR_APP:', IS_CAPACITOR_APP)
@@ -489,6 +527,8 @@ export const sendMessageStream = async (
     let buffer = ''
     let fullResponse = ''
     let finalData: any = null
+    let structuredReport: any = null
+    let sourceEvents: any[] = []
 
     while (true) {
       const { done, value } = await reader.read()
@@ -529,6 +569,17 @@ export const sendMessageStream = async (
             const chunkText = event.text || ''
             fullResponse += chunkText
             onChunk?.(chunkText)
+          } else if (event.type === 'sources') {
+            sourceEvents = Array.isArray(event.sources) ? event.sources : []
+            onSchoolRecordSources?.(sourceEvents)
+          } else if (event.type === 'answer_plan') {
+            onSchoolRecordAnswerPlan?.((event.answer_plan || {}) as SchoolRecordAnswerPlanEvent)
+          } else if (event.type === 'section_outline') {
+            onSchoolRecordSectionOutline?.((Array.isArray(event.sections) ? event.sections : []) as SchoolRecordSectionOutlineItem[])
+          } else if (event.type === 'section') {
+            onSchoolRecordSection?.(event as SchoolRecordSectionEvent)
+          } else if (event.type === 'report') {
+            structuredReport = event.report || null
           } else if (event.type === 'score_review_required') {
             onScoreReviewRequired?.(event as ScoreReviewRequiredEvent)
             return
@@ -553,9 +604,10 @@ export const sendMessageStream = async (
     const chatResponse: ChatResponse = {
       response: finalData?.response || fullResponse,
       raw_answer: finalData?.response || fullResponse,
-      sources: finalData?.sources || [],
+      sources: finalData?.sources || sourceEvents || [],
       source_urls: finalData?.source_urls || [],
       used_chunks: finalData?.used_chunks || [],
+      report: structuredReport || finalData?.report,
       router_output: finalData?.router_output,
       function_results: finalData?.function_results,
       orchestration_result: undefined,
@@ -637,6 +689,8 @@ export const sendContinueAfterNaesin = async (
       const text = await response.text()
       let fullResponse = ''
       let finalData: any = null
+      let structuredReport: any = null
+      let sourceEvents: any[] = []
 
       const blocks = normalizeSseText(text).split('\n\n')
       for (const block of blocks) {
@@ -653,6 +707,10 @@ export const sendContinueAfterNaesin = async (
             const chunkText = event.text || ''
             fullResponse += chunkText
             onChunk?.(chunkText)
+          } else if (event.type === 'sources') {
+            sourceEvents = Array.isArray(event.sources) ? event.sources : []
+          } else if (event.type === 'report') {
+            structuredReport = event.report || null
           } else if (event.type === 'done') {
             finalData = event
             onLog('✨ 답변 완료!')
@@ -668,9 +726,10 @@ export const sendContinueAfterNaesin = async (
       const chatResponse: ChatResponse = {
         response: finalData?.response || fullResponse,
         raw_answer: finalData?.response || fullResponse,
-        sources: finalData?.sources || [],
+        sources: finalData?.sources || sourceEvents || [],
         source_urls: finalData?.source_urls || [],
         used_chunks: finalData?.used_chunks || [],
+        report: structuredReport || finalData?.report,
         router_output: finalData?.router_output,
         function_results: finalData?.function_results,
         orchestration_result: undefined,
@@ -693,6 +752,8 @@ export const sendContinueAfterNaesin = async (
     let buffer = ''
     let fullResponse = ''
     let finalData: any = null
+    let structuredReport: any = null
+    let sourceEvents: any[] = []
 
     while (true) {
       const { done, value } = await reader.read()
@@ -715,6 +776,10 @@ export const sendContinueAfterNaesin = async (
             const chunkText = event.text || ''
             fullResponse += chunkText
             onChunk?.(chunkText)
+          } else if (event.type === 'sources') {
+            sourceEvents = Array.isArray(event.sources) ? event.sources : []
+          } else if (event.type === 'report') {
+            structuredReport = event.report || null
           } else if (event.type === 'done') {
             finalData = event
             onLog('✨ 답변 완료!')
@@ -731,9 +796,10 @@ export const sendContinueAfterNaesin = async (
     const chatResponse: ChatResponse = {
       response: finalData?.response || fullResponse,
       raw_answer: finalData?.response || fullResponse,
-      sources: finalData?.sources || [],
+      sources: finalData?.sources || sourceEvents || [],
       source_urls: finalData?.source_urls || [],
       used_chunks: finalData?.used_chunks || [],
+      report: structuredReport || finalData?.report,
       router_output: finalData?.router_output,
       function_results: finalData?.function_results,
       orchestration_result: undefined,
@@ -795,6 +861,8 @@ export const sendContinueAfterScoreConfirm = async (
       const text = await response.text()
       let fullResponse = ''
       let finalData: any = null
+      let structuredReport: any = null
+      let sourceEvents: any[] = []
 
       const blocks = normalizeSseText(text).split('\n\n')
       for (const block of blocks) {
@@ -811,6 +879,10 @@ export const sendContinueAfterScoreConfirm = async (
             const chunkText = event.text || ''
             fullResponse += chunkText
             onChunk?.(chunkText)
+          } else if (event.type === 'sources') {
+            sourceEvents = Array.isArray(event.sources) ? event.sources : []
+          } else if (event.type === 'report') {
+            structuredReport = event.report || null
           } else if (event.type === 'done') {
             finalData = event
             onLog('✨ 답변 완료!')
@@ -826,9 +898,10 @@ export const sendContinueAfterScoreConfirm = async (
       const chatResponse: ChatResponse = {
         response: finalData?.response || fullResponse,
         raw_answer: finalData?.response || fullResponse,
-        sources: finalData?.sources || [],
+        sources: finalData?.sources || sourceEvents || [],
         source_urls: finalData?.source_urls || [],
         used_chunks: finalData?.used_chunks || [],
+        report: structuredReport || finalData?.report,
         router_output: finalData?.router_output,
         function_results: finalData?.function_results,
         orchestration_result: undefined,
@@ -851,6 +924,8 @@ export const sendContinueAfterScoreConfirm = async (
     let buffer = ''
     let fullResponse = ''
     let finalData: any = null
+    let structuredReport: any = null
+    let sourceEvents: any[] = []
 
     while (true) {
       const { done, value } = await reader.read()
@@ -873,6 +948,10 @@ export const sendContinueAfterScoreConfirm = async (
             const chunkText = event.text || ''
             fullResponse += chunkText
             onChunk?.(chunkText)
+          } else if (event.type === 'sources') {
+            sourceEvents = Array.isArray(event.sources) ? event.sources : []
+          } else if (event.type === 'report') {
+            structuredReport = event.report || null
           } else if (event.type === 'done') {
             finalData = event
             onLog('✨ 답변 완료!')
@@ -889,9 +968,10 @@ export const sendContinueAfterScoreConfirm = async (
     const chatResponse: ChatResponse = {
       response: finalData?.response || fullResponse,
       raw_answer: finalData?.response || fullResponse,
-      sources: finalData?.sources || [],
+      sources: finalData?.sources || sourceEvents || [],
       source_urls: finalData?.source_urls || [],
       used_chunks: finalData?.used_chunks || [],
+      report: structuredReport || finalData?.report,
       router_output: finalData?.router_output,
       function_results: finalData?.function_results,
       orchestration_result: undefined,
@@ -1043,6 +1123,10 @@ export const sendMessageStreamWithImage = async (
   onSchoolGradeSaved?: (payload: SchoolGradeSavedEvent) => void,
   useLinkedNaesin?: boolean,
   skipScoreReview?: boolean,
+  onSchoolRecordSources?: (sources: any[]) => void,
+  onSchoolRecordAnswerPlan?: (plan: SchoolRecordAnswerPlanEvent) => void,
+  onSchoolRecordSectionOutline?: (sections: SchoolRecordSectionOutlineItem[]) => void,
+  onSchoolRecordSection?: (section: SchoolRecordSectionEvent) => void,
 ): Promise<void> => {
   const IS_CAPACITOR_APP = isCapacitorApp()
   
@@ -1123,6 +1207,8 @@ export const sendMessageStreamWithImage = async (
     let buffer = ''
     let fullResponse = ''
     let finalData: any = null
+    let structuredReport: any = null
+    let sourceEvents: any[] = []
 
     while (true) {
       const { done, value } = await reader.read()
@@ -1150,6 +1236,17 @@ export const sendMessageStreamWithImage = async (
             const chunkText = event.text || ''
             fullResponse += chunkText
             onChunk?.(chunkText)
+          } else if (event.type === 'sources') {
+            sourceEvents = Array.isArray(event.sources) ? event.sources : []
+            onSchoolRecordSources?.(sourceEvents)
+          } else if (event.type === 'answer_plan') {
+            onSchoolRecordAnswerPlan?.((event.answer_plan || {}) as SchoolRecordAnswerPlanEvent)
+          } else if (event.type === 'section_outline') {
+            onSchoolRecordSectionOutline?.((Array.isArray(event.sections) ? event.sections : []) as SchoolRecordSectionOutlineItem[])
+          } else if (event.type === 'section') {
+            onSchoolRecordSection?.(event as SchoolRecordSectionEvent)
+          } else if (event.type === 'report') {
+            structuredReport = event.report || null
           } else if (event.type === 'score_review_required') {
             onScoreReviewRequired?.(event as ScoreReviewRequiredEvent)
             return
@@ -1173,9 +1270,10 @@ export const sendMessageStreamWithImage = async (
     const chatResponse: ChatResponse = {
       response: finalData?.response || fullResponse,
       raw_answer: finalData?.response || fullResponse,
-      sources: finalData?.sources || [],
+      sources: finalData?.sources || sourceEvents || [],
       source_urls: finalData?.source_urls || [],
       used_chunks: finalData?.used_chunks || [],
+      report: structuredReport || finalData?.report,
       router_output: undefined,
       function_results: undefined,
       orchestration_result: undefined,

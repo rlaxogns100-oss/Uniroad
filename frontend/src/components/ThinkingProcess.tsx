@@ -55,7 +55,7 @@ const parseLog = (log: string): { message: string; step?: string; iteration?: nu
 }
 
 export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
-  const [isExpanded, setIsExpanded] = useState(false)
+  const [isExpanded, setIsExpanded] = useState(true)
   const [thinkingSteps, setThinkingSteps] = useState<ThinkingStep[]>([])
   const [currentStatus, setCurrentStatus] = useState('Analyzing question...')
   const [displayedStatus, setDisplayedStatus] = useState('')
@@ -126,6 +126,51 @@ export default function ThinkingProcess({ logs }: ThinkingProcessProps) {
         newSteps.push({
           title: '답변 작성하기',
           description: '수집한 정보를 종합하여 질문에 맞는 명확하고 이해하기 쉬운 답변을 작성하고 있습니다.'
+        })
+      }
+
+      if (step === 'school_record_plan_start') {
+        setCurrentStatus('질문을 구조화하고 있어요...')
+      }
+
+      if (step === 'school_record_plan_complete') {
+        setCurrentStatus('답변 설계를 정리하고 있어요...')
+        const refinedQuestion = detail?.refined_question ? `정제된 질문: ${detail.refined_question}` : '질문을 구조화해 분석 방향을 정리했습니다.'
+        const sectionCount = detail?.section_count ? `예상 섹션 ${detail.section_count}개` : ''
+        const sourceCount = typeof detail?.source_count === 'number' ? `참고자료 ${detail.source_count}건 확보` : ''
+        newSteps.push({
+          title: '질문 구조화하기',
+          description: [refinedQuestion, sectionCount, sourceCount].filter(Boolean).join(' · ')
+        })
+      }
+
+      if (step === 'school_record_sections_start') {
+        setCurrentStatus('섹션별 분석을 작성하고 있어요...')
+        const sections = Array.isArray(detail?.sections) ? detail.sections : []
+        newSteps.push({
+          title: '섹션 설계하기',
+          description: sections.length > 0
+            ? `${sections.length}개 섹션을 순차적으로 작성합니다.`
+            : '섹션별 분석 초안을 작성합니다.'
+        })
+      }
+
+      if (step === 'school_record_section_complete') {
+        const title = detail?.title || `섹션 ${detail?.section_index || ''}`.trim()
+        setCurrentStatus(`${title} 섹션을 정리했어요...`)
+        newSteps.push({
+          title,
+          description: detail?.total_sections
+            ? `${detail.section_index}/${detail.total_sections}번째 섹션 초안이 준비되었습니다.`
+            : '섹션 초안이 준비되었습니다.'
+        })
+      }
+
+      if (step === 'school_record_report_finalizing') {
+        setCurrentStatus('최종 요약을 정리하고 있어요...')
+        newSteps.push({
+          title: '최종 리포트 마무리',
+          description: '섹션별 초안을 종합해 핵심 요약과 최종 구조화 답변을 정리하고 있습니다.'
         })
       }
       
