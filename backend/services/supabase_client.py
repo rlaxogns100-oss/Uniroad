@@ -2,12 +2,15 @@
 Supabase 클라이언트 서비스
 """
 from supabase import create_client, Client
+from supabase.lib.client_options import SyncClientOptions
 from config import settings
 from config import embedding_settings as embedding_config
 from typing import Optional, Dict, Any, List
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_core.documents import Document
 import os
+
+_CLIENT_OPTIONS = SyncClientOptions(postgrest_client_timeout=30)
 
 
 class SupabaseService:
@@ -22,7 +25,8 @@ class SupabaseService:
         if cls._instance is None:
             cls._instance = create_client(
                 settings.SUPABASE_URL,
-                settings.SUPABASE_KEY
+                settings.SUPABASE_KEY,
+                options=_CLIENT_OPTIONS,
             )
         return cls._instance
     
@@ -30,11 +34,11 @@ class SupabaseService:
     def get_admin_client(cls) -> Client:
         """관리자 권한 Supabase 클라이언트 반환 (서비스 역할 키)"""
         if cls._admin_instance is None:
-            # 서비스 역할 키가 있으면 사용, 없으면 일반 키 사용
             service_key = settings.SUPABASE_SERVICE_ROLE_KEY or settings.SUPABASE_KEY
             cls._admin_instance = create_client(
                 settings.SUPABASE_URL,
-                service_key
+                service_key,
+                options=_CLIENT_OPTIONS,
             )
         return cls._admin_instance
     

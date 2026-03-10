@@ -78,28 +78,33 @@ class LogResponse(BaseModel):
     evaluation: Optional[EvaluationInfo] = None
 
 
+LOGS_LIGHT_COLUMNS = (
+    'id, user_id, timestamp, user_question, elapsed_time, '
+    '진입_url, timing_router, timing_function, timing_main_agent, '
+    'eval_router_status, eval_function_status, eval_answer_status, eval_time_status, '
+    'eval_router_comment, eval_function_comment, eval_answer_comment, eval_time_comment'
+)
+
+
 @router.get("/logs")
-async def get_logs(limit: int = 500, offset: int = 0):
-    """모든 로그 조회 (최신순). Excel 내보내기 시 limit=10000 등으로 요청 가능."""
-    limit = min(max(1, limit), 10000)  # 1~10000 허용
+async def get_logs(limit: int = 50, offset: int = 0, full: bool = False):
+    """로그 목록 조회 (최신순). full=true면 전체 컬럼(Excel 내보내기용)."""
+    limit = min(max(1, limit), 10000)
+    columns = '*' if full else LOGS_LIGHT_COLUMNS
     try:
         result = supabase_service.client.table('admin_logs') \
-            .select('*') \
+            .select(columns) \
             .order('timestamp', desc=True) \
             .range(offset, offset + limit - 1) \
             .execute()
         
         logs = []
         for row in result.data:
-            logs.append({
+            entry = {
                 'id': row['id'],
                 'userId': row.get('user_id'),
                 'timestamp': row['timestamp'],
-                'conversationHistory': row.get('conversation_history', []),
-                'userQuestion': row['user_question'],
-                'routerOutput': row.get('router_output'),
-                'functionResult': row.get('function_result'),
-                'finalAnswer': row.get('final_answer'),
+                'userQuestion': row.get('user_question', ''),
                 'elapsedTime': row.get('elapsed_time', 0),
                 'entryUrl': row.get('진입_url'),
                 'timing': {
@@ -117,12 +122,67 @@ async def get_logs(limit: int = 500, offset: int = 0):
                     'answerComment': row.get('eval_answer_comment'),
                     'timeComment': row.get('eval_time_comment')
                 }
-            })
+            }
+            if full:
+                entry['conversationHistory'] = row.get('conversation_history', [])
+                entry['routerOutput'] = row.get('router_output')
+                entry['functionResult'] = row.get('function_result')
+                entry['finalAnswer'] = row.get('final_answer')
+            logs.append(entry)
         
         return {'logs': logs, 'total': len(logs)}
     
     except Exception as e:
         print(f"❌ 로그 조회 오류: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/logs/detail/{log_id}")
+async def get_log_detail(log_id: str):
+    """단건 로그 상세 조회 (전체 컬럼). 행 확장 시 호출."""
+    try:
+        result = supabase_service.client.table('admin_logs') \
+            .select('*') \
+            .eq('id', log_id) \
+            .limit(1) \
+            .execute()
+
+        if not result.data:
+            raise HTTPException(status_code=404, detail="로그를 찾을 수 없습니다")
+
+        row = result.data[0]
+        return {
+            'id': row['id'],
+            'userId': row.get('user_id'),
+            'timestamp': row['timestamp'],
+            'conversationHistory': row.get('conversation_history', []),
+            'userQuestion': row.get('user_question', ''),
+            'routerOutput': row.get('router_output'),
+            'functionResult': row.get('function_result'),
+            'finalAnswer': row.get('final_answer'),
+            'elapsedTime': row.get('elapsed_time', 0),
+            'entryUrl': row.get('진입_url'),
+            'timing': {
+                'router': row.get('timing_router', 0),
+                'function': row.get('timing_function', 0),
+                'main_agent': row.get('timing_main_agent', 0)
+            },
+            'evaluation': {
+                'routerStatus': row.get('eval_router_status', 'pending'),
+                'functionStatus': row.get('eval_function_status', 'pending'),
+                'answerStatus': row.get('eval_answer_status', 'pending'),
+                'timeStatus': row.get('eval_time_status', 'pending'),
+                'routerComment': row.get('eval_router_comment'),
+                'functionComment': row.get('eval_function_comment'),
+                'answerComment': row.get('eval_answer_comment'),
+                'timeComment': row.get('eval_time_comment')
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ 로그 상세 조회 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -5,6 +5,7 @@ import { API_BASE } from '../config'
 import { 
   getLogs, 
   fetchLogs, 
+  fetchLogDetail,
   fetchLogsForExport,
   clearLogs, 
   updateLogEvaluation, 
@@ -292,15 +293,21 @@ function ExpandableCell({ content, maxLength = 30, cleanRouter = false, isExpand
 
 const EVALUATION_PAUSED_KEY = 'admin-agent-evaluation-paused'
 
+const PAGE_SIZE = 50
+
 export default function AdminAgentPage() {
   const navigate = useNavigate()
   const [logs, setLogs] = useState<ExecutionLog[]>([])
   const [loading, setLoading] = useState(true)
   const [evaluatingIds, setEvaluatingIds] = useState<Set<string>>(new Set())
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+  const [expandedDetails, setExpandedDetails] = useState<Record<string, ExecutionLog>>({})
+  const [loadingDetails, setLoadingDetails] = useState<Set<string>>(new Set())
   const [showMigrateBanner, setShowMigrateBanner] = useState(false)
   const [migrating, setMigrating] = useState(false)
   const [exporting, setExporting] = useState(false)
+  const [page, setPage] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
   // 평가 전체 중단 (true = 평가 안 함, false = 평가 함)
   const [evaluationPaused, setEvaluationPaused] = useState(() => {
     try {
@@ -310,12 +317,17 @@ export default function AdminAgentPage() {
     }
   })
 
-  // 로그 로드 (Supabase에서)
-  const loadLogs = useCallback(async () => {
+  // 로그 로드 (Supabase에서, 경량 목록)
+  const loadLogs = useCallback(async (pageNum = 0) => {
     setLoading(true)
     try {
-      const fetchedLogs = await fetchLogs()
+      const offset = pageNum * PAGE_SIZE
+      const { logs: fetchedLogs, total } = await fetchLogs(PAGE_SIZE, offset)
       setLogs(fetchedLogs)
+      setPage(pageNum)
+      setHasMore(total >= PAGE_SIZE)
+      setExpandedRows(new Set())
+      setExpandedDetails({})
     } catch (error) {
       console.error('로그 로드 오류:', error)
     } finally {
@@ -323,7 +335,32 @@ export default function AdminAgentPage() {
     }
   }, [])
 
-  // pending 로그 자동 평가 (evaluationPaused면 실행 안 함)
+  const handleToggleRow = useCallback(async (logId: string) => {
+    setExpandedRows(prev => {
+      const next = new Set(prev)
+      if (next.has(logId)) {
+        next.delete(logId)
+        return next
+      }
+      next.add(logId)
+      return next
+    })
+
+    if (!expandedDetails[logId] && !loadingDetails.has(logId)) {
+      setLoadingDetails(prev => new Set([...prev, logId]))
+      const detail = await fetchLogDetail(logId)
+      if (detail) {
+        setExpandedDetails(prev => ({ ...prev, [logId]: detail }))
+      }
+      setLoadingDetails(prev => {
+        const next = new Set(prev)
+        next.delete(logId)
+        return next
+      })
+    }
+  }, [expandedDetails, loadingDetails])
+
+  // pending 로그 자동 평가 (evaluationPaused면 실행 안 함, 상세 조회 후 평가)
   const evaluatePendingLogs = useCallback(async (logsToCheck: ExecutionLog[]) => {
     if (evaluationPaused) return
     const pendingLogs = logsToCheck.filter(
@@ -331,16 +368,18 @@ export default function AdminAgentPage() {
     )
     for (const log of pendingLogs) {
       setEvaluatingIds(prev => new Set([...prev, log.id]))
-      evaluateLog(log).finally(() => {
+      fetchLogDetail(log.id).then(detail => {
+        if (detail) return evaluateLog(detail)
+      }).finally(() => {
         setEvaluatingIds(prev => {
           const next = new Set(prev)
           next.delete(log.id)
           return next
         })
-        setLogs(getLogs())
+        loadLogs(page)
       })
     }
-  }, [evaluatingIds, evaluationPaused])
+  }, [evaluatingIds, evaluationPaused, page, loadLogs])
 
   // 마이그레이션 처리
   const handleMigrate = async () => {
@@ -361,38 +400,22 @@ export default function AdminAgentPage() {
 
   // 초기 로드 및 이벤트 리스너
   useEffect(() => {
-    // localStorage에 미마이그레이션 로그가 있는지 확인
     if (hasLocalStorageLogs()) {
       setShowMigrateBanner(true)
     }
-
-    // Supabase에서 로그 로드
-    loadLogs().then(() => {
+    loadLogs(0).then(() => {
       const cached = getLogs()
       evaluatePendingLogs(cached)
     })
-    
-    // 실시간 업데이트 리스너 (평가 중단이면 평가 안 함, 로그만 반영)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
     const handleLogUpdated = async (e: CustomEvent) => {
-      const newLog = e.detail as ExecutionLog
-      setLogs(getLogs())
-      if (evaluationPaused) return
-      if (!evaluatingIds.has(newLog.id)) {
-        setEvaluatingIds(prev => new Set([...prev, newLog.id]))
-        evaluateLog(newLog).finally(() => {
-          setEvaluatingIds(prev => {
-            const next = new Set(prev)
-            next.delete(newLog.id)
-            return next
-          })
-          setLogs(getLogs())
-        })
-      }
+      loadLogs(page)
     }
-    
-    const handleLogEvaluated = () => setLogs(getLogs())
-    const handleLogCleared = () => setLogs([])
-    
+    const handleLogEvaluated = () => loadLogs(page)
+    const handleLogCleared = () => { setLogs([]); setPage(0) }
+
     window.addEventListener('admin-log-updated', handleLogUpdated as unknown as EventListener)
     window.addEventListener('admin-log-evaluated', handleLogEvaluated)
     window.addEventListener('admin-log-cleared', handleLogCleared)
@@ -402,19 +425,20 @@ export default function AdminAgentPage() {
       window.removeEventListener('admin-log-evaluated', handleLogEvaluated)
       window.removeEventListener('admin-log-cleared', handleLogCleared)
     }
-  }, [loadLogs, evaluatingIds, evaluatePendingLogs, evaluationPaused])
+  }, [page, loadLogs])
 
-  // 수동 평가 재실행 (평가 중단이면 실행 안 함)
+  // 수동 평가 재실행 (상세 조회 후 평가)
   const handleReEvaluate = async (log: ExecutionLog) => {
     if (evaluationPaused || evaluatingIds.has(log.id)) return
     setEvaluatingIds(prev => new Set([...prev, log.id]))
-    await evaluateLog(log)
+    const detail = await fetchLogDetail(log.id)
+    if (detail) await evaluateLog(detail)
     setEvaluatingIds(prev => {
       const next = new Set(prev)
       next.delete(log.id)
       return next
     })
-    setLogs(getLogs())
+    loadLogs(page)
   }
 
   // 평가 중단
@@ -571,7 +595,7 @@ export default function AdminAgentPage() {
               {evaluationPaused ? '평가 시작' : '평가 중단'}
             </button>
             <button
-              onClick={loadLogs}
+              onClick={() => loadLogs(page)}
               disabled={loading}
               className="px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors text-sm disabled:opacity-50"
             >
@@ -635,18 +659,8 @@ export default function AdminAgentPage() {
                   <tr 
                     key={log.id} 
                     onClick={(e) => {
-                      // 재평가 버튼 클릭은 제외
                       if ((e.target as HTMLElement).closest('button')) return
-                      
-                      setExpandedRows(prev => {
-                        const next = new Set(prev)
-                        if (next.has(log.id)) {
-                          next.delete(log.id)
-                        } else {
-                          next.add(log.id)
-                        }
-                        return next
-                      })
+                      handleToggleRow(log.id)
                     }}
                     className={`border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${index % 2 === 0 ? '' : 'bg-gray-25'}`}
                   >
@@ -663,11 +677,21 @@ export default function AdminAgentPage() {
                     
                     {/* 이전 대화 */}
                     <td className="px-2 py-1.5 align-middle">
-                      <ExpandableCell 
-                        content={log.conversationHistory.length > 0 ? log.conversationHistory.join('\n') : '-'} 
-                        maxLength={20}
-                        isExpanded={isExpanded}
-                      />
+                      {isExpanded ? (
+                        loadingDetails.has(log.id) ? (
+                          <span className="text-[10px] text-gray-400 animate-pulse">로딩...</span>
+                        ) : (
+                          <ExpandableCell
+                            content={(expandedDetails[log.id]?.conversationHistory?.length ?? 0) > 0
+                              ? expandedDetails[log.id].conversationHistory.join('\n')
+                              : '-'}
+                            maxLength={20}
+                            isExpanded={true}
+                          />
+                        )
+                      ) : (
+                        <span className="text-[10px] text-gray-400">클릭하여 보기</span>
+                      )}
                     </td>
                     
                     {/* 사용자 질문 */}
@@ -677,9 +701,19 @@ export default function AdminAgentPage() {
                     
                     {/* Router 출력 */}
                     <td className={`px-2 py-1.5 align-middle ${routerBg}`}>
-                      <div className="flex-1 min-w-0">
-                        <ExpandableCell content={log.routerOutput} maxLength={35} cleanRouter={true} isExpanded={isExpanded} />
-                      </div>
+                      {isExpanded ? (
+                        loadingDetails.has(log.id) ? (
+                          <span className="text-[10px] text-gray-400 animate-pulse">로딩...</span>
+                        ) : (
+                          <div className="flex-1 min-w-0">
+                            <ExpandableCell content={expandedDetails[log.id]?.routerOutput} maxLength={35} cleanRouter={true} isExpanded={true} />
+                          </div>
+                        )
+                      ) : (
+                        <span className={`text-[10px] ${log.evaluation?.routerStatus === 'ok' ? 'text-green-600' : log.evaluation?.routerStatus === 'error' ? 'text-red-600' : 'text-gray-500'}`}>
+                          {log.evaluation?.routerStatus ?? 'pending'}
+                        </span>
+                      )}
                       {log.evaluation?.routerComment && (
                         <div className={`text-[9px] mt-0.5 truncate ${log.evaluation?.routerStatus === 'ok' ? 'text-green-600' : 'text-gray-500'}`} title={log.evaluation.routerComment}>
                           {log.evaluation.routerComment.length > 50 ? log.evaluation.routerComment.substring(0, 50) + '...' : log.evaluation.routerComment}
@@ -689,31 +723,39 @@ export default function AdminAgentPage() {
                     
                     {/* Function 결과 */}
                     <td className={`px-2 py-1.5 align-middle ${getStatusBgColor(log.evaluation?.functionStatus || 'pending')}`}>
-                      {log.functionResult ? (
-                        <div className="flex-1 min-w-0">
-                          <ExpandableCell 
-                            content={formatFunctionResult(log.functionResult)} 
-                            maxLength={50} 
-                            isExpanded={isExpanded} 
-                          />
-                          {log.evaluation?.functionComment && (
-                            <div className={`text-[9px] mt-0.5 truncate ${log.evaluation?.functionStatus === 'ok' ? 'text-green-600' : 'text-gray-500'}`} title={log.evaluation.functionComment}>
-                              {log.evaluation.functionComment.length > 50 ? log.evaluation.functionComment.substring(0, 50) + '...' : log.evaluation.functionComment}
-                            </div>
-                          )}
-                        </div>
+                      {isExpanded ? (
+                        loadingDetails.has(log.id) ? (
+                          <span className="text-[10px] text-gray-400 animate-pulse">로딩...</span>
+                        ) : expandedDetails[log.id]?.functionResult ? (
+                          <div className="flex-1 min-w-0">
+                            <ExpandableCell
+                              content={formatFunctionResult(expandedDetails[log.id].functionResult)}
+                              maxLength={50}
+                              isExpanded={true}
+                            />
+                          </div>
+                        ) : (
+                          <span className="text-[10px] text-gray-400">-</span>
+                        )
                       ) : (
-                        <span className="text-[10px] text-gray-400">-</span>
+                        <span className={`text-[10px] ${log.evaluation?.functionStatus === 'ok' ? 'text-green-600' : log.evaluation?.functionStatus === 'error' ? 'text-red-600' : 'text-gray-500'}`}>
+                          {log.evaluation?.functionComment || log.evaluation?.functionStatus || 'pending'}
+                        </span>
                       )}
                     </td>
                     
                     {/* 최종 답변 */}
                     <td className={`px-2 py-1.5 align-middle ${getStatusBgColor(log.evaluation?.answerStatus || 'pending')}`}>
-                      <ExpandableCell content={log.finalAnswer || '-'} maxLength={25} isExpanded={isExpanded} />
-                      {log.evaluation?.answerComment && (
-                        <div className={`text-[9px] mt-0.5 truncate ${log.evaluation?.answerStatus === 'ok' ? 'text-green-600' : 'text-gray-500'}`} title={log.evaluation.answerComment}>
-                          {log.evaluation.answerComment.length > 40 ? log.evaluation.answerComment.substring(0, 40) + '...' : log.evaluation.answerComment}
-                        </div>
+                      {isExpanded ? (
+                        loadingDetails.has(log.id) ? (
+                          <span className="text-[10px] text-gray-400 animate-pulse">로딩...</span>
+                        ) : (
+                          <ExpandableCell content={expandedDetails[log.id]?.finalAnswer || '-'} maxLength={25} isExpanded={true} />
+                        )
+                      ) : (
+                        <span className={`text-[10px] ${log.evaluation?.answerStatus === 'ok' ? 'text-green-600' : log.evaluation?.answerStatus === 'error' ? 'text-red-600' : 'text-gray-500'}`}>
+                          {log.evaluation?.answerComment || log.evaluation?.answerStatus || 'pending'}
+                        </span>
                       )}
                     </td>
                     
@@ -771,6 +813,29 @@ export default function AdminAgentPage() {
               })}
             </tbody>
           </table>
+
+          {/* 페이지네이션 */}
+          <div className="flex items-center justify-between mt-4 px-2">
+            <span className="text-sm text-gray-500">
+              페이지 {page + 1} ({logs.length}건 표시)
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => loadLogs(page - 1)}
+                disabled={page === 0 || loading}
+                className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded text-sm disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                이전
+              </button>
+              <button
+                onClick={() => loadLogs(page + 1)}
+                disabled={!hasMore || loading}
+                className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded text-sm disabled:opacity-30 disabled:cursor-not-allowed"
+              >
+                다음
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>

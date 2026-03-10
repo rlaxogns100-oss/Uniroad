@@ -116,47 +116,52 @@ if os.path.exists(FRONTEND_ASSETS_DIR):
 async def startup_event():
     """서버 시작 시 모델 및 DB 연결 미리 초기화 (실패해도 서버는 계속 실행)"""
     import time
+    import asyncio
     start_time = time.time()
-    
-    print("🚀 서버 Warm-up 시작...")
-    
-    # 1. Supabase 연결 Warm-up
-    print("   [1/4] Supabase 연결 중...")
+
+    async def _warmup():
+        print("🚀 서버 Warm-up 시작...")
+
+        print("   [1/4] Supabase 연결 중...")
+        try:
+            from services.supabase_client import SupabaseService
+            client = SupabaseService.get_client()
+            await asyncio.to_thread(
+                lambda: client.table("events").select("id").limit(1).execute()
+            )
+            print("   ✅ Supabase 연결 Warm-up 완료")
+        except Exception as e:
+            print(f"   ⚠️ Supabase Warm-up 실패 (무시하고 계속): {e}")
+
+        print("   [2/4] RAGFunctions 초기화 중...")
+        try:
+            from services.multi_agent.functions import RAGFunctions
+            await asyncio.to_thread(RAGFunctions.get_instance)
+            print("   ✅ RAGFunctions 초기화 완료")
+        except Exception as e:
+            print(f"   ⚠️ RAGFunctions 초기화 실패 (무시하고 계속): {e}")
+
+        print("   [3/4] RouterAgent 초기화 중...")
+        try:
+            from services.multi_agent.router_agent import get_router
+            await asyncio.to_thread(get_router)
+            print("   ✅ RouterAgent 초기화 완료")
+        except Exception as e:
+            print(f"   ⚠️ RouterAgent 초기화 실패 (무시하고 계속): {e}")
+
+        print("   [4/4] MainAgent 초기화 중...")
+        try:
+            from services.multi_agent.main_agent import get_main_agent
+            await asyncio.to_thread(get_main_agent)
+            print("   ✅ MainAgent 초기화 완료")
+        except Exception as e:
+            print(f"   ⚠️ MainAgent 초기화 실패 (무시하고 계속): {e}")
+
     try:
-        from services.supabase_client import SupabaseService
-        client = SupabaseService.get_client()
-        client.table("events").select("id").limit(1).execute()
-        print("   ✅ Supabase 연결 Warm-up 완료")
-    except Exception as e:
-        print(f"   ⚠️ Supabase Warm-up 실패 (무시하고 계속): {e}")
-    
-    # 2. RAG Functions 초기화
-    print("   [2/4] RAGFunctions 초기화 중...")
-    try:
-        from services.multi_agent.functions import RAGFunctions
-        RAGFunctions.get_instance()
-        print("   ✅ RAGFunctions 초기화 완료")
-    except Exception as e:
-        print(f"   ⚠️ RAGFunctions 초기화 실패 (무시하고 계속): {e}")
-    
-    # 3. Router Agent 초기화
-    print("   [3/4] RouterAgent 초기화 중...")
-    try:
-        from services.multi_agent.router_agent import get_router
-        get_router()
-        print("   ✅ RouterAgent 초기화 완료")
-    except Exception as e:
-        print(f"   ⚠️ RouterAgent 초기화 실패 (무시하고 계속): {e}")
-    
-    # 4. Main Agent 초기화
-    print("   [4/4] MainAgent 초기화 중...")
-    try:
-        from services.multi_agent.main_agent import get_main_agent
-        get_main_agent()
-        print("   ✅ MainAgent 초기화 완료")
-    except Exception as e:
-        print(f"   ⚠️ MainAgent 초기화 실패 (무시하고 계속): {e}")
-    
+        await asyncio.wait_for(_warmup(), timeout=15.0)
+    except asyncio.TimeoutError:
+        print("⚠️ Warm-up 15초 타임아웃 - 서버는 계속 기동합니다.")
+
     elapsed = time.time() - start_time
     print(f"🎉 서버 Warm-up 완료! (총 {elapsed:.2f}초) - 서버는 정상 기동됩니다.")
 

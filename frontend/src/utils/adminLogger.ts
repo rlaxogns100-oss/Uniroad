@@ -43,28 +43,45 @@ let logsCache: ExecutionLog[] = []
 let cacheLoaded = false
 
 /**
- * 모든 로그 가져오기 (Supabase에서)
+ * 로그 목록 조회 (경량 - 대형 JSON 컬럼 제외)
  */
-export async function fetchLogs(limit = 500): Promise<ExecutionLog[]> {
+export async function fetchLogs(limit = 50, offset = 0): Promise<{ logs: ExecutionLog[]; total: number }> {
   try {
-    const response = await fetch(`${API_BASE}/api/admin/logs?limit=${limit}`)
+    const response = await fetch(`${API_BASE}/api/admin/logs?limit=${limit}&offset=${offset}`)
     if (!response.ok) {
       throw new Error('로그 조회 실패')
     }
     const data = await response.json()
-    logsCache = data.logs || []
+    const logs: ExecutionLog[] = data.logs || []
+    logsCache = logs
     cacheLoaded = true
-    return logsCache
+    return { logs, total: data.total ?? logs.length }
   } catch (error) {
     console.error('❌ 로그 조회 오류:', error)
-    return []
+    return { logs: [], total: 0 }
+  }
+}
+
+/**
+ * 단건 로그 상세 조회 (전체 컬럼)
+ */
+export async function fetchLogDetail(logId: string): Promise<ExecutionLog | null> {
+  try {
+    const response = await fetch(`${API_BASE}/api/admin/logs/detail/${logId}`)
+    if (!response.ok) {
+      throw new Error('로그 상세 조회 실패')
+    }
+    return await response.json() as ExecutionLog
+  } catch (error) {
+    console.error('❌ 로그 상세 조회 오류:', error)
+    return null
   }
 }
 
 const EXPORT_PAGE_SIZE = 500
 
 /**
- * Excel 내보내기용 전체 로그 조회 (페이지네이션으로 최대 10000건)
+ * Excel 내보내기용 전체 로그 조회 (full=true로 전체 컬럼, 페이지네이션)
  */
 export async function fetchLogsForExport(): Promise<ExecutionLog[]> {
   const token = localStorage.getItem('access_token')
@@ -75,7 +92,7 @@ export async function fetchLogsForExport(): Promise<ExecutionLog[]> {
   let offset = 0
   while (true) {
     const res = await fetch(
-      `${API_BASE}/api/admin/logs?limit=${EXPORT_PAGE_SIZE}&offset=${offset}`,
+      `${API_BASE}/api/admin/logs?limit=${EXPORT_PAGE_SIZE}&offset=${offset}&full=true`,
       { headers }
     )
     if (!res.ok) {
