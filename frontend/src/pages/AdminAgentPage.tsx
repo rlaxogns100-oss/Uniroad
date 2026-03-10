@@ -635,6 +635,7 @@ export default function AdminAgentPage() {
             <p className="text-sm text-gray-400 mt-1">채팅 페이지에서 질문을 하면 여기에 로그가 기록됩니다</p>
           </div>
         ) : (
+          <>
           <table className="w-full bg-white rounded-lg shadow-sm border border-gray-200 table-fixed">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
@@ -836,6 +837,7 @@ export default function AdminAgentPage() {
               </button>
             </div>
           </div>
+          </>
         )}
       </div>
     </div>
