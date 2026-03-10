@@ -3,6 +3,7 @@ import { toCanvas, getFontEmbedCSS } from 'html-to-image'
 import { jsPDF } from 'jspdf'
 import SchoolRecordVisualReport, { type VisualReportData } from './SchoolRecordVisualReport'
 import { getApiBaseUrl } from '../config'
+import { useVisualReportCache } from '../contexts/VisualReportCacheContext'
 
 type RunnerPhase = 'idle' | 'generating' | 'rendering'
 
@@ -30,6 +31,7 @@ export default function SchoolRecordPdfDownloadRunner({
   const onPhaseChangeRef = useRef(onPhaseChange)
   const onSuccessRef = useRef(onSuccess)
   const onErrorRef = useRef(onError)
+  const cache = useVisualReportCache()
 
   useEffect(() => {
     onPhaseChangeRef.current = onPhaseChange
@@ -54,6 +56,21 @@ export default function SchoolRecordPdfDownloadRunner({
     const run = async () => {
       onPhaseChangeRef.current('generating')
       setReportData(null)
+
+      const cached = cache.consumeCachedData()
+      if (cached) {
+        if (!cancelled) setReportData(cached)
+        return
+      }
+
+      if (cache.status === 'generating') {
+        const waitedData = await cache.waitForData()
+        if (waitedData && !cancelled) {
+          cache.consumeCachedData()
+          setReportData(waitedData)
+          return
+        }
+      }
 
       try {
         const apiBase = getApiBaseUrl()
@@ -122,7 +139,7 @@ export default function SchoolRecordPdfDownloadRunner({
       cancelled = true
       controller.abort()
     }
-  }, [active, requestId, token])
+  }, [active, requestId, token, cache])
 
   useEffect(() => {
     if (!active || !reportData) return

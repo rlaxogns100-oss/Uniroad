@@ -15,16 +15,21 @@ class CalculateRequest(BaseModel):
     gun: str = '가'
 
 # 데이터 로드
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-CALCULATOR_DIR = os.path.join(BASE_DIR, 'suneung-calculator')
+DATA_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)),
+    'services',
+    'multi_agent',
+    'score_system',
+    'data',
+)
 
-with open(os.path.join(CALCULATOR_DIR, 'universities.json'), 'r', encoding='utf-8') as f:
+with open(os.path.join(DATA_DIR, 'universities.json'), 'r', encoding='utf-8') as f:
     universities = json.load(f)
 
-with open(os.path.join(CALCULATOR_DIR, 'formulas_extracted.json'), 'r', encoding='utf-8') as f:
+with open(os.path.join(DATA_DIR, 'formulas_extracted.json'), 'r', encoding='utf-8') as f:
     formulas = json.load(f)
 
-with open(os.path.join(CALCULATOR_DIR, 'deduction_tables.json'), 'r', encoding='utf-8') as f:
+with open(os.path.join(DATA_DIR, 'deduction_tables.json'), 'r', encoding='utf-8') as f:
     deductions = json.load(f)
 
 @calculator_bp.post('/calculate')

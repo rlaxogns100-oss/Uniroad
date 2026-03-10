@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '../contexts/AuthContext'
+import { useVisualReportCache } from '../contexts/VisualReportCacheContext'
 import { getApiBaseUrl } from '../config'
 import { getStudentGuideMethods, type GuideMethodId } from '../data/schoolRecordGuide'
 
@@ -65,6 +66,7 @@ export interface SchoolRecordDeepAnalysisPageProps {
 function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) {
   const { onBack, autoOpenRegisterModal = false, onAutoOpenRegisterModalHandled } = props
   const { isAuthenticated, accessToken } = useAuth()
+  const visualReportCache = useVisualReportCache()
   const [innerSchoolRecordTab, setInnerSchoolRecordTab] = useState(0)
   const [formsSaveStatus, setFormsSaveStatus] = useState<'idle' | 'saving' | 'ok' | 'err'>('idle')
   const [formsLoading, setFormsLoading] = useState(false)
@@ -371,6 +373,8 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
       setPdfUploading(false)
       setUploadProgress(0)
       setUploadStage('uploading')
+      const tok = (localStorage.getItem('access_token') || accessToken || '').trim()
+      if (tok) visualReportCache.pregenerate(tok)
       return true
     } catch {
       setPdfUploadError('네트워크 오류로 업로드에 실패했습니다.')
@@ -1198,14 +1202,26 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
                   <p className="text-[28px] font-bold tracking-[-0.02em] text-[#191F28]">연동 데이터</p>
                   <p className="mt-2 text-sm font-medium leading-7 text-[#6B7684]">업로드된 생기부 핵심 항목을 카드로 확인할 수 있어요.</p>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void handleSaveParsedSchoolRecord()}
-                  disabled={!parsedPreview?.sections || schoolRecordSaving || pdfUploading}
-                  className="inline-flex h-11 items-center justify-center rounded-xl bg-[#3182F6] px-5 text-sm font-bold text-white shadow-sm transition hover:bg-[#1f6fe2] disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {schoolRecordSaving ? '저장 중...' : '연동 데이터 저장'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      pdfFileInputRef.current?.click()
+                    }}
+                    disabled={pdfUploading}
+                    className="inline-flex h-11 items-center justify-center rounded-xl border border-[#3182F6] bg-white px-5 text-sm font-bold text-[#3182F6] shadow-sm transition hover:bg-[#3182F6]/5 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {pdfUploading ? '업로드 중...' : '생기부 재업로드'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveParsedSchoolRecord()}
+                    disabled={!parsedPreview?.sections || schoolRecordSaving || pdfUploading}
+                    className="inline-flex h-11 items-center justify-center rounded-xl bg-[#3182F6] px-5 text-sm font-bold text-white shadow-sm transition hover:bg-[#1f6fe2] disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {schoolRecordSaving ? '저장 중...' : '연동 데이터 저장'}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1280,7 +1296,7 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
             disabled={pdfUploading}
             className="inline-flex h-14 w-full items-center justify-center rounded-2xl bg-[#3182F6] text-lg font-bold text-white shadow-sm transition hover:bg-[#1f6fe2] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            PDF 파일 불러오기
+            {pdfUploading ? '업로드 중...' : hasParsedData ? 'PDF 재업로드' : 'PDF 파일 불러오기'}
           </button>
         </div>
       </div>

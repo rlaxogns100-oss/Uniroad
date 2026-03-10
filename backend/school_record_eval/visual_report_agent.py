@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import time
 from typing import Any, Dict
 
 import google.generativeai as genai
@@ -37,6 +36,124 @@ SUBJECT_COLORS = {
     "과학": "#EAB308",
     "사회": "#A855F7",
 }
+
+_MAIN_SUBJECTS = ["국어", "수학", "영어", "사회", "과학"]
+
+_SUBJECT_GROUP_MAP: Dict[str, str] = {
+    "국어": "국어", "수학": "수학", "영어": "영어",
+    "한국사": "사회", "사회": "사회", "사회(역사/도)": "사회",
+    "사회(역사/도덕포함)": "사회", "도덕": "사회", "역사": "사회",
+    "통합사회": "사회", "과학": "과학", "통합과학": "과학",
+}
+
+
+def _extract_grade_data(school_record: Dict[str, Any]) -> Dict[str, Any] | None:
+    """parsedSchoolRecord에서 실제 석차등급 데이터를 프로그래밍적으로 추출한다."""
+    forms = school_record.get("forms") or school_record
+    if not isinstance(forms, dict):
+        return None
+
+    parsed = forms.get("parsedSchoolRecord") or {}
+    if not isinstance(parsed, dict):
+        return None
+
+    sections = parsed.get("sections") or {}
+    if not isinstance(sections, dict):
+        return None
+
+    academic = sections.get("academicDevelopment") or {}
+    if not isinstance(academic, dict):
+        return None
+
+    general = academic.get("general_elective") or {}
+    if not isinstance(general, dict):
+        return None
+
+    main_grade_map: Dict[str, Dict[str, list]] = {s: {} for s in _MAIN_SUBJECTS}
+    all_grades_by_sem: Dict[str, list] = {}
+    all_semesters: set = set()
+
+    for grade_num in ("1", "2", "3"):
+        grade_block = general.get(grade_num)
+        if not isinstance(grade_block, dict):
+            continue
+        rows = grade_block.get("rows")
+        if not isinstance(rows, list):
+            continue
+
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+
+            semester = str(row.get("학기", "")).strip()
+            if not semester:
+                continue
+
+            subject_area = str(row.get("교과", "")).strip()
+            rank_str = str(row.get("석차등급", "")).strip()
+            if not rank_str or rank_str.lower() in ("", "none", "null", "-"):
+                continue
+
+            try:
+                rank_grade = int(rank_str)
+            except (ValueError, TypeError):
+                continue
+            if not (1 <= rank_grade <= 9):
+                continue
+
+            semester_key = f"{grade_num}-{semester}"
+            all_semesters.add(semester_key)
+
+            all_grades_by_sem.setdefault(semester_key, []).append(rank_grade)
+
+            main_subject = _SUBJECT_GROUP_MAP.get(subject_area)
+            if not main_subject:
+                continue
+            main_grade_map[main_subject].setdefault(semester_key, []).append(rank_grade)
+
+    if not all_semesters:
+        return None
+
+    sorted_semesters = sorted(
+        all_semesters,
+        key=lambda s: (int(s.split("-")[0]), int(s.split("-")[1])),
+    )
+
+    subjects_with_data: list[str] = []
+    values: list[list[int | None]] = []
+
+    for subj in _MAIN_SUBJECTS:
+        row_values: list[int | None] = []
+        has_any = False
+        for sem in sorted_semesters:
+            grades_list = main_grade_map[subj].get(sem, [])
+            if grades_list:
+                row_values.append(round(sum(grades_list) / len(grades_list)))
+                has_any = True
+            else:
+                row_values.append(None)
+        if has_any:
+            subjects_with_data.append(subj)
+            values.append(row_values)
+
+    if not subjects_with_data:
+        return None
+
+    avg_all: list[float | None] = []
+    avg_main: list[float | None] = []
+    for col_idx, sem in enumerate(sorted_semesters):
+        all_g = all_grades_by_sem.get(sem, [])
+        avg_all.append(round(sum(all_g) / len(all_g), 2) if all_g else None)
+        main_g = [values[r][col_idx] for r in range(len(values)) if values[r][col_idx] is not None]
+        avg_main.append(round(sum(main_g) / len(main_g), 2) if main_g else None)
+
+    return {
+        "subjects": subjects_with_data,
+        "semesters": sorted_semesters,
+        "values": values,
+        "avgAll": avg_all,
+        "avgMain": avg_main,
+    }
 
 REFERENCE_STYLE_GUIDE = """
 [기준 템플릿]
@@ -635,12 +752,44 @@ def _page4_prompt(student_name: str, context: str) -> str:
 """
 
 
+def _apply_real_grades(
+    page1: Dict[str, Any],
+    page2: Dict[str, Any],
+    grade_data: Dict[str, Any],
+) -> None:
+    """Gemini가 생성한 성적 데이터를 실제 석차등급으로 덮어쓴다."""
+    subjects_list = []
+    for i, subj in enumerate(grade_data["subjects"]):
+        subjects_list.append({
+            "name": subj,
+            "grades": grade_data["values"][i],
+            "color": SUBJECT_COLORS.get(subj, "#6B7280"),
+        })
+
+    page1["grades"] = {
+        "subjects": subjects_list,
+        "semesters": grade_data["semesters"],
+        "avgAll": grade_data["avgAll"],
+        "avgMain": grade_data["avgMain"],
+    }
+
+    for strength in (page2.get("strengths") or []):
+        if strength.get("type") == "heatmap":
+            strength["data"] = {
+                "subjects": grade_data["subjects"],
+                "semesters": grade_data["semesters"],
+                "values": grade_data["values"],
+            }
+            break
+
+
 async def generate_visual_report_data(
     school_record: Dict[str, Any],
     *,
     max_context_chars: int = 16000,
+    prebuilt_context: str | None = None,
 ) -> Dict[str, Any]:
-    context = build_school_record_report_context_text(
+    context = prebuilt_context or build_school_record_report_context_text(
         school_record,
         max_chars=max_context_chars,
     )
@@ -648,6 +797,7 @@ async def generate_visual_report_data(
         raise ValueError("생기부 데이터가 충분하지 않습니다.")
 
     student_name = _extract_student_name(school_record)
+    grade_data = _extract_grade_data(school_record)
 
     page1_task = _generate_json(_page1_prompt(student_name, context), max_output_tokens=8192)
     page2_task = _generate_json(_page2_prompt(student_name, context), max_output_tokens=8192)
@@ -658,6 +808,9 @@ async def generate_visual_report_data(
         page1_task, page2_task, page3_task, page4_task,
     )
 
+    if grade_data:
+        _apply_real_grades(page1, page2, grade_data)
+
     return {
         "studentName": student_name,
         "page1": page1,
@@ -667,34 +820,3 @@ async def generate_visual_report_data(
     }
 
 
-def generate_visual_report_stream(school_record: Dict[str, Any]):
-    started_at = time.perf_counter()
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    try:
-        yield {"type": "status", "step": "prepare"}
-        context = build_school_record_report_context_text(school_record, max_chars=16000)
-        if not context or len(context.strip()) < 100:
-            yield {"type": "error", "message": "생기부 데이터가 충분하지 않습니다."}
-            return
-
-        yield {"type": "status", "step": "generate_pages_parallel"}
-        report_data = loop.run_until_complete(generate_visual_report_data(school_record))
-        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
-        yield {
-            "type": "done",
-            "data": report_data,
-            "elapsed_ms": elapsed_ms,
-        }
-    except json.JSONDecodeError as e:
-        print(f"[VisualReport ERROR] JSON 파싱 실패: {e}")
-        yield {"type": "error", "message": f"AI 응답 파싱 실패: {e}"}
-    except Exception as e:
-        print(f"[VisualReport ERROR] 보고서 생성 오류: {type(e).__name__}: {e}")
-        yield {"type": "error", "message": f"보고서 생성 오류: {e}"}
-    finally:
-        try:
-            loop.close()
-        finally:
-            asyncio.set_event_loop(None)

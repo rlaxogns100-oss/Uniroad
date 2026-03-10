@@ -242,9 +242,9 @@ REPORT_MAX_OUTPUT_TOKENS = 8192
 REPORT_MAX_SOURCE_COUNT = 6
 REPORT_MAX_SOURCE_SNIPPET_CHARS = 1200
 REPORT_SECTION_MAX_OUTPUT_TOKENS = 2048
-REPORT_SECTION_MAX_WORKERS = 4
+REPORT_SECTION_MAX_WORKERS = 6
 REFERENCE_QUERY_MAX_WORKERS = 4
-REPORT_POST_PROCESS_MAX_WORKERS = 2
+REPORT_POST_PROCESS_MAX_WORKERS = 4
 REPORT_REVIEW_MAX_OUTPUT_TOKENS = 4096
 SCHOOL_RECORD_EVIDENCE_MAX_CHARS = 22000
 MIN_CRITERIA_EXCERPT_LINES = 3
@@ -5382,18 +5382,6 @@ def _build_structured_report(
             report["student_profile"] = student_profile
         if isinstance(user_grade_summary, dict) and user_grade_summary:
             report["grade_summary"] = user_grade_summary
-        university_recommendations, university_profiles = _build_university_recommendation_summary(
-            school_record=school_record,
-            school_record_context=school_record_context,
-            answer_plan=answer_plan,
-            student_profile=student_profile,
-            user_grade_summary=user_grade_summary,
-            matching_summary=matching_summary,
-        )
-        if university_profiles:
-            report["university_profiles"] = university_profiles
-        if university_recommendations:
-            report["university_recommendations"] = university_recommendations
     else:
         comparison_section = _build_accepted_case_comparison_section(
             user_message=user_message,
@@ -5406,27 +5394,55 @@ def _build_structured_report(
     if _is_fixed_report_mode(answer_plan):
         three_page_report = None
         final_summary = ""
-        with ThreadPoolExecutor(max_workers=REPORT_POST_PROCESS_MAX_WORKERS) as executor:
-            future_map = {
-                executor.submit(
-                    _build_three_page_report,
-                    report=report,
-                    school_record=school_record,
-                    school_record_context=school_record_context,
-                    student_profile=student_profile,
-                    user_metadata=user_metadata,
-                    user_grade_summary=user_grade_summary,
-                ): "three_page_report",
-                executor.submit(
-                    _build_final_report_summary,
+        university_recommendations = None
+        university_profiles: list[Dict[str, Any]] = []
+        direct_answer = None
+        with ThreadPoolExecutor(max_workers=REPORT_POST_PROCESS_MAX_WORKERS + 1) as executor:
+            three_page_future = executor.submit(
+                _build_three_page_report,
+                report=report,
+                school_record=school_record,
+                school_record_context=school_record_context,
+                student_profile=student_profile,
+                user_metadata=user_metadata,
+                user_grade_summary=user_grade_summary,
+            )
+            final_summary_future = executor.submit(
+                _build_final_report_summary,
+                user_message=user_message,
+                school_record_context=school_record_context,
+                answer_plan=answer_plan,
+                report=report,
+            )
+            uni_rec_future = executor.submit(
+                _build_university_recommendation_summary,
+                school_record=school_record,
+                school_record_context=school_record_context,
+                answer_plan=answer_plan,
+                student_profile=student_profile,
+                user_grade_summary=user_grade_summary,
+                matching_summary=matching_summary,
+            )
+
+            def _direct_answer_after_summary():
+                summary_result = final_summary_future.result()
+                summary_str = str(summary_result or "").strip()
+                report_for_da = {**report, "summary": summary_str}
+                return _build_direct_answer_block(
                     user_message=user_message,
                     school_record_context=school_record_context,
                     answer_plan=answer_plan,
-                    report=report,
-                ): "final_summary",
-            }
-            for future in as_completed(future_map):
-                task_name = future_map[future]
+                    report=report_for_da,
+                )
+
+            direct_answer_future = executor.submit(_direct_answer_after_summary)
+
+            for future, task_name in [
+                (three_page_future, "three_page_report"),
+                (final_summary_future, "final_summary"),
+                (uni_rec_future, "university_recommendations"),
+                (direct_answer_future, "direct_answer"),
+            ]:
                 try:
                     result = future.result()
                 except Exception as error:
@@ -5436,8 +5452,21 @@ def _build_structured_report(
                     three_page_report = result if isinstance(result, dict) else None
                 elif task_name == "final_summary":
                     final_summary = str(result or "").strip()
+                elif task_name == "university_recommendations":
+                    if isinstance(result, tuple) and len(result) == 2:
+                        university_recommendations, university_profiles = result
+                elif task_name == "direct_answer":
+                    direct_answer = result if isinstance(result, dict) else None
+        if university_profiles:
+            report["university_profiles"] = university_profiles
+        if university_recommendations:
+            report["university_recommendations"] = university_recommendations
         if three_page_report:
             report["three_page_report"] = three_page_report
+        if final_summary:
+            report["summary"] = final_summary
+        if direct_answer:
+            report["direct_answer"] = direct_answer
     else:
         final_summary = _build_final_report_summary(
             user_message=user_message,
@@ -5445,16 +5474,16 @@ def _build_structured_report(
             answer_plan=answer_plan,
             report=report,
         )
-    if final_summary:
-        report["summary"] = final_summary
-    direct_answer = _build_direct_answer_block(
-        user_message=user_message,
-        school_record_context=school_record_context,
-        answer_plan=answer_plan,
-        report=report,
-    )
-    if direct_answer:
-        report["direct_answer"] = direct_answer
+        if final_summary:
+            report["summary"] = final_summary
+        direct_answer = _build_direct_answer_block(
+            user_message=user_message,
+            school_record_context=school_record_context,
+            answer_plan=answer_plan,
+            report=report,
+        )
+        if direct_answer:
+            report["direct_answer"] = direct_answer
     report["plain_text"] = _build_plain_text_from_report(report)
     return report
 
@@ -5658,16 +5687,23 @@ async def generate_deep_chat_report(
             detail="연동된 생기부 데이터가 없습니다. 먼저 생기부를 연동해 주세요.",
         )
 
-    generation_context = _prepare_fixed_report_generation_context(
-        school_record_context=school_record_context,
+    async def _safe_matching_summary():
+        try:
+            return await ensure_matching_summary(user_id, school_record_dict)
+        except Exception as error:
+            print(f"⚠️ [deep_chat] matchingSummary 생성 실패(무시): {error}")
+            return ""
+
+    generation_context, user_metadata, matching_summary = await asyncio.gather(
+        asyncio.to_thread(
+            lambda: _prepare_fixed_report_generation_context(
+                school_record_context=school_record_context,
+            )
+        ),
+        supabase_service.get_user_profile_metadata(user_id),
+        _safe_matching_summary(),
     )
-    user_metadata = await supabase_service.get_user_profile_metadata(user_id)
     user_grade_summary = _extract_user_grade_summary(user_metadata)
-    try:
-        matching_summary = await ensure_matching_summary(user_id, school_record_dict)
-    except Exception as error:
-        print(f"⚠️ [deep_chat] matchingSummary 생성 실패(무시): {error}")
-        matching_summary = ""
     report_brief = _get_generation_task_text(
         str(request.message or "").strip(),
         generation_context["answer_plan"],

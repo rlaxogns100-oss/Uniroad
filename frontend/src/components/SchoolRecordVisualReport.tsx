@@ -256,6 +256,9 @@ function FlowchartViz({ data, isWeakness }: { data: any; isWeakness?: boolean })
   const resultX = mergeCenterX + 95
   const branchLabel = String(data?.branchLabel || (isWeakness ? '전환 지점' : '전문 확장')).trim()
   const mergeLabel = String(data?.mergeLabel || (isWeakness ? '보완 필요' : '역량 통합')).trim()
+  const branchLines = splitText(branchLabel, 6, 2)
+  const mergeLines = splitText(mergeLabel, 6, 2)
+  const diamondLineSpacing = 10
 
   const renderNodeText = (
     x: number,
@@ -265,34 +268,65 @@ function FlowchartViz({ data, isWeakness }: { data: any; isWeakness?: boolean })
     sub: string,
     color: string
   ) => {
-    const labelLines = splitText(label, 12, 2)
-    const subLines = splitText(sub, 15, 2)
-    return (
-      <>
+    const labelLines = splitText(label, 10, 2)
+    const subLines = splitText(sub, 13, 2)
+    const centerX = x + width / 2
+    const centerY = y + nodeH / 2
+    const labelLineSpacing = 14
+    const subLineSpacing = 11
+
+    if (subLines.length === 0) {
+      const labelStartY = centerY - ((labelLines.length - 1) * labelLineSpacing) / 2
+      return (
         <text
-          x={x + width / 2}
-          y={subLines.length > 0 ? y + 16 : y + 24}
+          x={centerX}
+          y={labelStartY}
           textAnchor="middle"
-          fontSize="10.5"
+          fontSize="12"
           fill={color}
           fontWeight="700"
           dominantBaseline="central"
         >
           {labelLines.map((line, idx) => (
-            <tspan key={idx} x={x + width / 2} dy={idx === 0 ? 0 : 11}>{line}</tspan>
+            <tspan key={idx} x={centerX} dy={idx === 0 ? 0 : labelLineSpacing}>{line}</tspan>
+          ))}
+        </text>
+      )
+    }
+
+    const labelBlockH = (labelLines.length - 1) * labelLineSpacing
+    const subBlockH = (subLines.length - 1) * subLineSpacing
+    const gap = 12
+    const totalH = labelBlockH + gap + subBlockH
+    const labelStartY = centerY - totalH / 2
+    const subStartY = labelStartY + labelBlockH + gap
+
+    return (
+      <>
+        <text
+          x={centerX}
+          y={labelStartY}
+          textAnchor="middle"
+          fontSize="12"
+          fill={color}
+          fontWeight="700"
+          dominantBaseline="central"
+        >
+          {labelLines.map((line, idx) => (
+            <tspan key={idx} x={centerX} dy={idx === 0 ? 0 : labelLineSpacing}>{line}</tspan>
           ))}
         </text>
         <text
-          x={x + width / 2}
-          y={y + 36}
+          x={centerX}
+          y={subStartY}
           textAnchor="middle"
-          fontSize="8"
+          fontSize="9.5"
           fill={color}
           opacity={0.82}
           dominantBaseline="central"
         >
           {subLines.map((line, idx) => (
-            <tspan key={idx} x={x + width / 2} dy={idx === 0 ? 0 : 9}>{line}</tspan>
+            <tspan key={idx} x={centerX} dy={idx === 0 ? 0 : subLineSpacing}>{line}</tspan>
           ))}
         </text>
       </>
@@ -340,24 +374,24 @@ function FlowchartViz({ data, isWeakness }: { data: any; isWeakness?: boolean })
         {renderRectNode(startNode, startX, startY + 30 - nodeH / 2)}
 
         <line x1={startX + nodeW} y1={startY + 30} x2={branchCenterX - 38} y2={startY + 30} stroke="#94A3B8" strokeWidth="1.2" markerEnd={`url(#fc-arrow-${isWeakness ? 'w' : 's'})`} />
-        <text x={startX + nodeW + 28} y={startY + 30 - 12} textAnchor="middle" fontSize="8.5" fill={BLUE} fontWeight="600" dominantBaseline="central">
+        <text x={startX + nodeW + 5} y={startY + 14} textAnchor="start" fontSize="9" fill={BLUE} fontWeight="600" dominantBaseline="central">
           {isWeakness ? '연결 부족' : '탐구 심화'}
         </text>
 
         <polygon points={`${branchCenterX},${startY + 6} ${branchCenterX + 36},${startY + 30} ${branchCenterX},${startY + 54} ${branchCenterX - 36},${startY + 30}`} fill="none" stroke={accentColor} strokeWidth="1.5" />
-        <text x={branchCenterX} y={startY + 30} textAnchor="middle" fontSize="9" fill={accentColor} fontWeight="700" dominantBaseline="central">
-          {splitText(branchLabel, 8, 2).map((line, idx) => (
-            <tspan key={idx} x={branchCenterX} dy={idx === 0 ? 0 : 10}>{line}</tspan>
+        <text x={branchCenterX} y={startY + 30 - ((branchLines.length - 1) * diamondLineSpacing) / 2} textAnchor="middle" fontSize="10" fill={accentColor} fontWeight="700" dominantBaseline="central">
+          {branchLines.map((line, idx) => (
+            <tspan key={idx} x={branchCenterX} dy={idx === 0 ? 0 : diamondLineSpacing}>{line}</tspan>
           ))}
         </text>
 
         <line x1={branchCenterX} y1={startY + 6} x2={branchCenterX} y2={topY + nodeH / 2} stroke="#94A3B8" strokeWidth="1.2" />
         <line x1={branchCenterX} y1={topY + nodeH / 2} x2={firstColX} y2={topY + nodeH / 2} stroke="#94A3B8" strokeWidth="1.2" markerEnd={`url(#fc-arrow-${isWeakness ? 'w' : 's'})`} />
-        <text x={branchCenterX + 28} y={topY + nodeH / 2 - 10} fontSize="8" fill={BLUE} fontWeight="600" dominantBaseline="central">상위 확장</text>
+        <text x={branchCenterX + 28} y={topY + nodeH / 2 - 10} fontSize="9" fill={BLUE} fontWeight="600" dominantBaseline="central">상위 확장</text>
 
         <line x1={branchCenterX} y1={startY + 54} x2={branchCenterX} y2={bottomY + nodeH / 2} stroke="#94A3B8" strokeWidth="1.2" />
         <line x1={branchCenterX} y1={bottomY + nodeH / 2} x2={firstColX} y2={bottomY + nodeH / 2} stroke="#94A3B8" strokeWidth="1.2" markerEnd={`url(#fc-arrow-${isWeakness ? 'w' : 's'})`} />
-        <text x={branchCenterX + 28} y={bottomY + nodeH / 2 - 10} fontSize="8" fill={BLUE} fontWeight="600" dominantBaseline="central">보조 전개</text>
+        <text x={branchCenterX + 28} y={bottomY + nodeH / 2 - 10} fontSize="9" fill={BLUE} fontWeight="600" dominantBaseline="central">보조 전개</text>
 
         {topNodes.map((node, idx) => {
           const x = firstColX + idx * colGap
@@ -367,7 +401,7 @@ function FlowchartViz({ data, isWeakness }: { data: any; isWeakness?: boolean })
               {idx < topNodes.length - 1 && (
                 <>
                   <line x1={x + nodeW} y1={topY + nodeH / 2} x2={x + colGap} y2={topY + nodeH / 2} stroke="#94A3B8" strokeWidth="1.2" markerEnd={`url(#fc-arrow-${isWeakness ? 'w' : 's'})`} />
-                  <text x={x + nodeW + colGap / 2 - 8} y={topY + nodeH / 2 - 12} textAnchor="middle" fontSize="8" fill={BLUE} fontWeight="600" dominantBaseline="central">심화</text>
+                  <text x={x + nodeW + colGap / 2 - 8} y={topY + nodeH / 2 - 12} textAnchor="middle" fontSize="9" fill={BLUE} fontWeight="600" dominantBaseline="central">심화</text>
                 </>
               )}
             </g>
@@ -382,7 +416,7 @@ function FlowchartViz({ data, isWeakness }: { data: any; isWeakness?: boolean })
               {idx < bottomNodes.length - 1 && (
                 <>
                   <line x1={x + nodeW} y1={bottomY + nodeH / 2} x2={x + colGap} y2={bottomY + nodeH / 2} stroke="#94A3B8" strokeWidth="1.2" markerEnd={`url(#fc-arrow-${isWeakness ? 'w' : 's'})`} />
-                  <text x={x + nodeW + colGap / 2 - 8} y={bottomY + nodeH / 2 - 12} textAnchor="middle" fontSize="8" fill={BLUE} fontWeight="600" dominantBaseline="central">확장</text>
+                  <text x={x + nodeW + colGap / 2 - 8} y={bottomY + nodeH / 2 - 12} textAnchor="middle" fontSize="9" fill={BLUE} fontWeight="600" dominantBaseline="central">확장</text>
                 </>
               )}
             </g>
@@ -403,14 +437,14 @@ function FlowchartViz({ data, isWeakness }: { data: any; isWeakness?: boolean })
         )}
 
         <polygon points={`${mergeCenterX},${startY + 6} ${mergeCenterX + 36},${startY + 30} ${mergeCenterX},${startY + 54} ${mergeCenterX - 36},${startY + 30}`} fill="none" stroke={accentColor} strokeWidth="1.5" />
-        <text x={mergeCenterX} y={startY + 30} textAnchor="middle" fontSize="9" fill={accentColor} fontWeight="700" dominantBaseline="central">
-          {splitText(mergeLabel, 8, 2).map((line, idx) => (
-            <tspan key={idx} x={mergeCenterX} dy={idx === 0 ? 0 : 10}>{line}</tspan>
+        <text x={mergeCenterX} y={startY + 30 - ((mergeLines.length - 1) * diamondLineSpacing) / 2} textAnchor="middle" fontSize="10" fill={accentColor} fontWeight="700" dominantBaseline="central">
+          {mergeLines.map((line, idx) => (
+            <tspan key={idx} x={mergeCenterX} dy={idx === 0 ? 0 : diamondLineSpacing}>{line}</tspan>
           ))}
         </text>
 
         <line x1={mergeCenterX + 36} y1={startY + 30} x2={resultX} y2={startY + 30} stroke="#94A3B8" strokeWidth="1.2" markerEnd={`url(#fc-arrow-${isWeakness ? 'w' : 's'})`} />
-        <text x={mergeCenterX + 58} y={startY + 30 - 12} fontSize="8.5" fill={BLUE} fontWeight="600" dominantBaseline="central">
+        <text x={mergeCenterX + 58} y={startY + 30 - 12} fontSize="9" fill={BLUE} fontWeight="600" dominantBaseline="central">
           {isWeakness ? '공백 발생' : '핵심 연결'}
         </text>
 
@@ -674,11 +708,10 @@ const SchoolRecordVisualReport = forwardRef<HTMLDivElement, { data: VisualReport
                         : <polygon points="0,0 124,0 140,45 124,90 0,90 16,45" fill={color} />}
                   </svg>
                   <div
-                    className="relative z-10 flex h-full flex-col justify-start"
+                    className="relative z-10 flex h-full flex-col justify-center"
                     style={{
                       paddingLeft: i === 0 ? '10px' : '22px',
                       paddingRight: '6px',
-                      paddingTop: '18px',
                     }}
                   >
                     <div className="flex items-center gap-1">
@@ -729,14 +762,14 @@ const SchoolRecordVisualReport = forwardRef<HTMLDivElement, { data: VisualReport
         <PageShell page={3}>
           <Badge text="Part 02 진단과 보완" />
           <h2 className="mb-4 text-sm font-extrabold text-gray-900">학교생활기록부 핵심 약점</h2>
-          <div className="mb-6 flex flex-col gap-3">
+          <div className="mb-4 flex flex-col gap-3">
             {p3.weaknesses.map((item, i) => (
               <StrengthWeaknessCard key={i} item={item} index={i} isWeakness />
             ))}
           </div>
-          <hr className="border-gray-200" style={{ marginBottom: '20px' }} />
-          <h2 className="mb-2 text-sm font-extrabold text-gray-900">생기부 핵심 진단</h2>
-          <p className="text-xs leading-6 text-gray-600">{p3.diagnosisSummary}</p>
+          <hr className="border-gray-200" style={{ marginBottom: '10px' }} />
+          <h2 className="mb-1 text-sm font-extrabold text-gray-900">생기부 핵심 진단</h2>
+          <p className="text-xs leading-5 text-gray-600">{p3.diagnosisSummary}</p>
         </PageShell>
 
         {/* ═══════ 4페이지: 비교 ═══════ */}

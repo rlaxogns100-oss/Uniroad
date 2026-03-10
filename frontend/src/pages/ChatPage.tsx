@@ -29,6 +29,7 @@ import ThinkingProcess from '../components/ThinkingProcess'
 import SchoolRecordResearchProgress from '../components/SchoolRecordResearchProgress'
 import AgentPanel from '../components/AgentPanel'
 import SchoolRecordPdfDownloadRunner from '../components/SchoolRecordPdfDownloadRunner'
+import { useVisualReportCache } from '../contexts/VisualReportCacheContext'
 import AuthModal from '../components/AuthModal'
 import PreregisterModal from '../components/PreregisterModal'
 import RollingPlaceholder from '../components/RollingPlaceholder'
@@ -710,6 +711,7 @@ export default function ChatPage() {
   const isSchoolRecordModeUrl = searchParams.get('mode') === 'school-record'
   const initialQuestionFromState = (location.state as { initialQuestion?: string } | null)?.initialQuestion
   const { user, signOut, isAuthenticated, accessToken } = useAuth()
+  const visualReportCache = useVisualReportCache()
   const {
     sessions,
     currentSessionId,
@@ -978,6 +980,7 @@ export default function ChatPage() {
   const [schoolRecordPreviewStep, setSchoolRecordPreviewStep] = useState<number | null>(null)
   const [schoolRecordParsedPreview, setSchoolRecordParsedPreview] = useState<Record<string, any> | null>(null)
   const [schoolRecordPreviewLoading, setSchoolRecordPreviewLoading] = useState(false)
+  const [schoolRecordPreviewRefreshKey, setSchoolRecordPreviewRefreshKey] = useState(0)
   const [schoolRecordGuideMethodId, setSchoolRecordGuideMethodId] = useState<GuideMethodId>('gov24')
   const [referralPromoExpiresAt, setReferralPromoExpiresAt] = useState<number | null>(null)
   /** 내 점수로 어디 갈 수 있을까 전용 채팅일 때 true (RollingPlaceholder·최근 컨텐츠 숨김) */
@@ -1276,7 +1279,7 @@ export default function ChatPage() {
     return () => {
       cancelled = true
     }
-  }, [isAuthenticated, schoolRecordLinked, runtimeApiBase, accessToken])
+  }, [isAuthenticated, schoolRecordLinked, runtimeApiBase, accessToken, schoolRecordPreviewRefreshKey])
 
   const handleDirectSchoolRecordPdfUpload = useCallback(async (file: File | null) => {
     if (!file) return
@@ -1295,13 +1298,17 @@ export default function ChatPage() {
       setSchoolRecordPdfUploading(true)
       await uploadSchoolRecordPdf(file, getRequestToken())
       await refreshLinkedDataState()
+      setSchoolRecordPreviewRefreshKey((k) => k + 1)
       triggerFloatingNotice('생활기록부 업로드가 완료되었습니다.')
+      setIsSchoolGradeInputModalOpen(true)
+      const tok = getRequestToken()
+      if (tok) visualReportCache.pregenerate(tok)
     } catch (error: any) {
       triggerFloatingNotice(error?.message || '생활기록부 업로드에 실패했습니다.')
     } finally {
       setSchoolRecordPdfUploading(false)
     }
-  }, [isAuthenticated, refreshLinkedDataState, triggerFloatingNotice])
+  }, [isAuthenticated, refreshLinkedDataState, triggerFloatingNotice, visualReportCache])
 
   useEffect(() => {
     if (isInlineNaesinDirty) return
@@ -2115,15 +2122,26 @@ export default function ChatPage() {
   }, [])
 
   // savedMessages가 변경되면 현재 선택된 세션의 메시지만 로컬 상태에 동기화
+  // localStorage에 캐싱된 StructuredReport도 함께 복원
   useEffect(() => {
-    if (currentSessionId && savedMessages && savedMessages.length > 0) {
-      const convertedMessages: Message[] = savedMessages.map(msg => ({
-        id: msg.id,
-        text: msg.content,
-        isUser: msg.role === 'user',
-        sources: msg.sources,
-        source_urls: msg.source_urls,
-      }))
+    if (currentSessionId && savedMessages && savedMessages.length > 0 && !isStreamingRef.current) {
+      const convertedMessages: Message[] = savedMessages.map(msg => {
+        let report: StructuredReport | undefined
+        if (msg.role === 'assistant') {
+          try {
+            const cached = localStorage.getItem(`uniroad_report_${msg.id}`)
+            if (cached) report = JSON.parse(cached)
+          } catch { /* ignore */ }
+        }
+        return {
+          id: msg.id,
+          text: msg.content,
+          isUser: msg.role === 'user',
+          sources: msg.sources,
+          source_urls: msg.source_urls,
+          report,
+        }
+      })
       setMessages(convertedMessages)
     } else if (savedMessages && savedMessages.length === 0 && currentSessionId && !isStreamingRef.current) {
       setMessages([])
@@ -2357,6 +2375,12 @@ export default function ChatPage() {
     // 이미지 상태 초기화
     setSelectedImage(null)
     setImagePreviewUrl(null)
+  }
+
+  const handleLogoClick = () => {
+    setRightPanelView('chat')
+    void handleNewChat()
+    if (!isDesktopLayout) setIsSideNavOpen(false)
   }
 
   // 이미지 선택 핸들러
@@ -2701,19 +2725,16 @@ export default function ChatPage() {
     }
   }, [currentSessionId, isAuthenticated])
   
-  // savedMessages가 업데이트되면 현재 세션의 메시지로 변환
-  // 단, 스트리밍 중이 아닐 때만 (로컬 메시지를 보호)
+  // Report 데이터를 localStorage에 캐싱 (세션 전환 시 복원용)
   useEffect(() => {
-    if (currentSessionId && savedMessages.length >= 0 && !isStreamingRef.current) {
-      // savedMessages가 현재 세션의 메시지인지 확인 (loadMessages가 올바른 세션 ID로 호출되었으므로)
-      const convertedMessages: Message[] = savedMessages.map((msg) => ({
-        id: msg.id,
-        text: msg.content,
-        isUser: msg.role === 'user',
-      }))
-      setMessages(convertedMessages)
+    for (const msg of messages) {
+      if (!msg.isUser && !msg.isStreaming && msg.report?.sections?.length) {
+        try {
+          localStorage.setItem(`uniroad_report_${msg.id}`, JSON.stringify(msg.report))
+        } catch { /* localStorage full or unavailable */ }
+      }
     }
-  }, [savedMessages, currentSessionId])
+  }, [messages])
 
   // 메시지가 있을 때만 아래로 스크롤 (빈 채팅/새 채팅 진입 시에는 맨 위 유지)
   useEffect(() => {
@@ -3979,7 +4000,7 @@ export default function ChatPage() {
       }`}>
         {/* 사이드 네비게이션 */}
         <div
-          className={`fixed top-0 left-0 h-full w-64 z-50 transform transition-transform duration-300 ease-in-out border-r border-gray-200 ${
+          className={`fixed top-0 left-0 h-full w-64 z-50 overflow-x-hidden transform transition-transform duration-300 ease-in-out border-r border-gray-200 ${
             isSideNavOpen ? 'translate-x-0' : '-translate-x-full'
           } sm:fixed sm:z-40 bg-white`}
         >
@@ -3993,22 +4014,23 @@ export default function ChatPage() {
             >
               <Menu className="w-5 h-5" />
             </button>
-            <div className="order-2 sm:order-1 flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={handleLogoClick}
+              className="order-2 sm:order-1 flex items-center gap-2.5 rounded-lg transition-opacity hover:opacity-80"
+              title="새 채팅"
+            >
               <div className="flex items-center justify-center w-7 h-7 rounded-full bg-gradient-to-br from-blue-500 to-purple-600 shadow-md shrink-0">
                 <GraduationCap className="w-3.5 h-3.5 text-white" strokeWidth={2} />
               </div>
               <span className="text-lg font-extrabold text-black tracking-tighter uppercase">UNIROAD</span>
-            </div>
+            </button>
           </div>
 
           {/* 메뉴: 새 채팅, 내 입시 기록 연동하기 (깔끔한 리스트 스타일) */}
           <nav className="px-4 pt-5 pb-4">
             <button
-              onClick={() => {
-                setRightPanelView('chat')
-                handleNewChat()
-                if (!isDesktopLayout) setIsSideNavOpen(false)
-              }}
+              onClick={handleLogoClick}
               className="w-full flex items-center gap-3 px-2 py-3 rounded-lg transition-colors text-left text-gray-800 hover:bg-gray-100/80"
             >
               <span className="flex items-center justify-center w-5 h-5 text-gray-800">
@@ -4168,7 +4190,7 @@ export default function ChatPage() {
 
           {/* 하단 섹션 */}
           <div className="p-4 sm:p-6 pt-3 sm:pt-4">
-            <div className="mb-3 flex flex-nowrap items-center justify-center gap-2 text-[11px] sm:text-xs text-gray-500 whitespace-nowrap overflow-x-auto">
+            <div className="mb-3 flex flex-nowrap items-center justify-center gap-2 text-[11px] sm:text-xs text-gray-500 whitespace-nowrap">
               <a
                 href="https://uni2road.com/terms"
                 onClick={(e) => {
@@ -5624,6 +5646,17 @@ export default function ChatPage() {
                                 )}
                                 {schoolRecordLinked ? (
                                   <>
+                                    <button
+                                      type="button"
+                                      disabled={schoolRecordPdfUploading}
+                                      onClick={(e) => {
+                                        e.stopPropagation()
+                                        schoolRecordPdfInputRef.current?.click()
+                                      }}
+                                      className="inline-flex h-11 items-center justify-center whitespace-nowrap rounded-xl border border-gray-200 bg-white px-4 text-[13px] font-extrabold tracking-[-0.01em] text-gray-700 shadow-sm transition hover:bg-gray-50 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-60"
+                                    >
+                                      {schoolRecordPdfUploading ? '업로드 중...' : '재업로드'}
+                                    </button>
                                     <button
                                       type="button"
                                       onClick={(e) => {
@@ -7189,7 +7222,10 @@ export default function ChatPage() {
 
       <SchoolGradeInputModal
         isOpen={isSchoolGradeInputModalOpen}
-        onClose={() => setIsSchoolGradeInputModalOpen(false)}
+        onClose={() => {
+          setIsSchoolGradeInputModalOpen(false)
+          void refreshLinkedDataState()
+        }}
         onRequireSchoolRecordLink={() => {
           setIsSchoolGradeInputModalOpen(false)
           navigate('/school-record-deep?tab=link')

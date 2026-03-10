@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import { LayoutModeProvider } from './contexts/LayoutModeContext'
+import { VisualReportCacheProvider } from './contexts/VisualReportCacheContext'
 import LandingPage from './pages/LandingPage'
 import ChatPage from './pages/ChatPage'
 import AdminPage from './pages/AdminPage'
@@ -102,6 +103,7 @@ function App() {
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
       <AuthProvider>
         <LayoutModeProvider>
+        <VisualReportCacheProvider>
         <PageTracker />
         <div>
           <Routes>
@@ -208,6 +210,7 @@ function App() {
             <Route path="*" element={<Navigate to="/chat" replace />} />
           </Routes>
         </div>
+        </VisualReportCacheProvider>
         </LayoutModeProvider>
       </AuthProvider>
     </BrowserRouter>

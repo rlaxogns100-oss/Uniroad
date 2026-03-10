@@ -1561,27 +1561,26 @@ export default function SchoolGradeInputModal({
     if (!isOpen) return
 
     const controller = new AbortController()
-    void loadSchoolGradeInputFromServer(controller.signal)
+
+    const loadThenAutofill = async () => {
+      await loadSchoolGradeInputFromServer(controller.signal)
+
+      if (controller.signal.aborted) return
+
+      await autofillFromLinkedSchoolRecord({
+        signal: controller.signal,
+        silentWhenUnavailable: true,
+        showLoading: false,
+        persistAfterFill: true,
+      })
+    }
+
+    void loadThenAutofill()
 
     return () => {
       controller.abort()
     }
-  }, [isOpen, loadSchoolGradeInputFromServer])
-
-  useEffect(() => {
-    if (!isOpen) return
-
-    const controller = new AbortController()
-    void autofillFromLinkedSchoolRecord({
-      signal: controller.signal,
-      silentWhenUnavailable: true,
-      showLoading: false,
-    })
-
-    return () => {
-      controller.abort()
-    }
-  }, [isOpen, autofillFromLinkedSchoolRecord])
+  }, [isOpen, loadSchoolGradeInputFromServer, autofillFromLinkedSchoolRecord])
 
   const currentSemesterRows = useMemo(
     () => data.semesters[selectedSemester] || [createEmptyRow()],

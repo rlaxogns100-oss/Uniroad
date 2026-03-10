@@ -135,7 +135,7 @@ MAX_UNIVERSITY_EXPANSION = 3
 MAX_QUERIES_PER_UNIVERSITY = 4
 MAX_CALLS_PER_ROUND = 18
 MAX_TOTAL_RETRIEVAL_CALLS = 42
-MAX_PARALLEL_FUNCTION_CALLS = 6
+MAX_PARALLEL_FUNCTION_CALLS = 10
 
 UNIVERSITY_ALIAS_MAP: Dict[str, List[str]] = {
     "서울대학교": ["서울대학교", "서울대", "서울대학"],
@@ -1616,15 +1616,18 @@ async def generate_school_record_report(
         university_chunk_counts=university_chunk_counts,
     )
     llm_ms = int((time.perf_counter() - llm_start) * 1000)
-    deep_dive_text, deep_dive_ms = await deep_dive_task
+
+    follow_up_start = time.perf_counter()
+    (deep_dive_text, deep_dive_ms), follow_up_questions = await asyncio.gather(
+        deep_dive_task,
+        _generate_follow_up_questions(
+            message=message,
+            report_text=response_text,
+            mode=report_mode,
+        ),
+    )
     if deep_dive_text:
         response_text = f"{response_text.rstrip()}\n\n{deep_dive_text}"
-    follow_up_start = time.perf_counter()
-    follow_up_questions = await _generate_follow_up_questions(
-        message=message,
-        report_text=response_text,
-        mode=report_mode,
-    )
     response_text = _append_follow_up_section(response_text, follow_up_questions)
     follow_up_ms = int((time.perf_counter() - follow_up_start) * 1000)
 
@@ -1828,24 +1831,25 @@ def generate_school_record_report_stream(
         yield {
             "type": "status",
             "step": "school_record_deep_dive",
-            "message": "🧩 학년/과목별 확장 분석을 정리하는 중...",
+            "message": "🧩 학년/과목별 확장 분석 + 꼬리 질문을 병렬 생성하는 중...",
         }
-        deep_dive_text, deep_dive_ms = loop.run_until_complete(deep_dive_task)
+        follow_up_start = time.perf_counter()
+
+        async def _parallel_post_process():
+            return await asyncio.gather(
+                deep_dive_task,
+                _generate_follow_up_questions(
+                    message=message,
+                    report_text=response_text,
+                    mode=report_mode,
+                ),
+            )
+
+        (deep_dive_text, deep_dive_ms), follow_up_questions = loop.run_until_complete(
+            _parallel_post_process()
+        )
         if deep_dive_text:
             response_text = f"{response_text.rstrip()}\n\n{deep_dive_text}"
-        follow_up_start = time.perf_counter()
-        yield {
-            "type": "status",
-            "step": "school_record_follow_up",
-            "message": "💬 답변 후 이어질 꼬리 질문을 생성하는 중...",
-        }
-        follow_up_questions = loop.run_until_complete(
-            _generate_follow_up_questions(
-                message=message,
-                report_text=response_text,
-                mode=report_mode,
-            )
-        )
         response_text = _append_follow_up_section(response_text, follow_up_questions)
         follow_up_ms = int((time.perf_counter() - follow_up_start) * 1000)
 

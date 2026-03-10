@@ -555,15 +555,15 @@ const buildComparisonSectionHtml = (section: ReportSection) => {
               ? `<div class="comparison-comment">${buildHtmlParagraphs(pair.pair_comment)}</div>`
               : ''
           }
-          <div class="comparison-columns">
-            <div>
-              <p class="comparison-label">${escapeHtml(
+          <div class="comparison-columns" style="display:grid;grid-template-columns:1fr 1fr;gap:0;">
+            <div style="width:100%">
+              <p class="comparison-label"><span style="color:#3b82f6;font-weight:700;font-size:11px;">내 생기부</span><br/>${escapeHtml(
                 pair.user_excerpt_label || '내 생기부 원문'
               )}</p>
               <blockquote>${escapeHtml(pair.user_excerpt)}</blockquote>
             </div>
-            <div>
-              <p class="comparison-label">${escapeHtml(
+            <div style="width:100%;border-left:1px solid #e5e7eb;">
+              <p class="comparison-label"><span style="color:#059669;font-weight:700;font-size:11px;">합격자 생기부</span><br/>${escapeHtml(
                 pair.accepted_excerpt_label || '합격자 생기부 원문'
               )}</p>
               <blockquote>${escapeHtml(pair.accepted_excerpt)}</blockquote>
@@ -3767,34 +3767,34 @@ export function SchoolRecordDeepResearchReportView({
                         원문 비교 {(pairIdx + 1).toString().padStart(2, '0')}
                       </p>
                       <div className="border-y border-[#e5e7eb] bg-white">
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full border-collapse">
-                            <thead className="bg-[#f7f7f8]">
-                              <tr>
-                                <th className="border-b border-[#e5e7eb] px-5 py-4 text-left text-[12px] font-semibold tracking-[0.16em] text-[#6b7280]">
-                                  {pair.user_excerpt_label || '내 생기부 원문'}
-                                </th>
-                                <th className="border-b border-[#e5e7eb] px-5 py-4 text-left text-[12px] font-semibold tracking-[0.16em] text-[#6b7280]">
-                                  {pair.accepted_excerpt_label || '합격자 생기부 원문'}
-                                </th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              <tr className="align-top">
-                                <td className="border-t border-[#eef0f3] px-5 py-4 text-[14px] leading-7 text-[#374151]">
-                                  {pair.user_excerpt
-                                    ? renderStructuredCellText(pair.user_excerpt)
-                                    : '-'}
-                                </td>
-                                <td className="border-t border-[#eef0f3] px-5 py-4 text-[14px] leading-7 text-[#374151]">
-                                  {pair.accepted_excerpt
-                                    ? renderStructuredCellText(pair.accepted_excerpt)
-                                    : '-'}
-                                </td>
-                              </tr>
-                            </tbody>
-                          </table>
-                        </div>
+                        <table className="w-full border-collapse table-fixed">
+                          <thead className="bg-[#f7f7f8]">
+                            <tr>
+                              <th className="w-1/2 border-b border-[#e5e7eb] px-5 py-4 text-left text-[12px] font-semibold tracking-[0.16em] text-[#6b7280]">
+                                <span className="block text-[11px] text-blue-500 font-bold mb-0.5">내 생기부</span>
+                                {pair.user_excerpt_label || '내 생기부 원문'}
+                              </th>
+                              <th className="w-1/2 border-b border-l border-[#e5e7eb] px-5 py-4 text-left text-[12px] font-semibold tracking-[0.16em] text-[#6b7280]">
+                                <span className="block text-[11px] text-emerald-600 font-bold mb-0.5">합격자 생기부</span>
+                                {pair.accepted_excerpt_label || '합격자 생기부 원문'}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr className="align-top">
+                              <td className="w-1/2 border-t border-[#eef0f3] px-5 py-4 text-[14px] leading-7 text-[#374151]">
+                                {pair.user_excerpt
+                                  ? renderStructuredCellText(pair.user_excerpt)
+                                  : '-'}
+                              </td>
+                              <td className="w-1/2 border-t border-l border-[#eef0f3] px-5 py-4 text-[14px] leading-7 text-[#374151]">
+                                {pair.accepted_excerpt
+                                  ? renderStructuredCellText(pair.accepted_excerpt)
+                                  : '-'}
+                              </td>
+                            </tr>
+                          </tbody>
+                        </table>
                         <div className="border-t border-[#e5e7eb] bg-[#fafafa] px-5 py-4">
                           <p className="text-[12px] font-semibold tracking-[0.14em] text-[#6b7280]">
                             해설
@@ -5070,34 +5070,34 @@ function SchoolRecordDeepChatPage() {
                                                         원문 비교 {(pairIdx + 1).toString().padStart(2, '0')}
                                                       </p>
                                                       <div className="border-y border-[#e5e7eb] bg-white">
-                                                        <div className="overflow-x-auto">
-                                                          <table className="min-w-full border-collapse">
-                                                            <thead className="bg-[#f7f7f8]">
-                                                              <tr>
-                                                                <th className="border-b border-[#e5e7eb] px-5 py-4 text-left text-[12px] font-semibold tracking-[0.16em] text-[#6b7280]">
-                                                                  {pair.user_excerpt_label || '내 생기부 원문'}
-                                                                </th>
-                                                                <th className="border-b border-[#e5e7eb] px-5 py-4 text-left text-[12px] font-semibold tracking-[0.16em] text-[#6b7280]">
-                                                                  {pair.accepted_excerpt_label || '합격자 생기부 원문'}
-                                                                </th>
-                                                              </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                              <tr className="align-top">
-                                                                <td className="border-t border-[#eef0f3] px-5 py-4 text-[14px] leading-7 text-[#374151]">
-                                                                  {pair.user_excerpt
-                                                                    ? renderStructuredCellText(pair.user_excerpt)
-                                                                    : '-'}
-                                                                </td>
-                                                                <td className="border-t border-[#eef0f3] px-5 py-4 text-[14px] leading-7 text-[#374151]">
-                                                                  {pair.accepted_excerpt
-                                                                    ? renderStructuredCellText(pair.accepted_excerpt)
-                                                                    : '-'}
-                                                                </td>
-                                                              </tr>
-                                                            </tbody>
-                                                          </table>
-                                                        </div>
+                                                        <table className="w-full border-collapse table-fixed">
+                                                          <thead className="bg-[#f7f7f8]">
+                                                            <tr>
+                                                              <th className="w-1/2 border-b border-[#e5e7eb] px-5 py-4 text-left text-[12px] font-semibold tracking-[0.16em] text-[#6b7280]">
+                                                                <span className="block text-[11px] text-blue-500 font-bold mb-0.5">내 생기부</span>
+                                                                {pair.user_excerpt_label || '내 생기부 원문'}
+                                                              </th>
+                                                              <th className="w-1/2 border-b border-l border-[#e5e7eb] px-5 py-4 text-left text-[12px] font-semibold tracking-[0.16em] text-[#6b7280]">
+                                                                <span className="block text-[11px] text-emerald-600 font-bold mb-0.5">합격자 생기부</span>
+                                                                {pair.accepted_excerpt_label || '합격자 생기부 원문'}
+                                                              </th>
+                                                            </tr>
+                                                          </thead>
+                                                          <tbody>
+                                                            <tr className="align-top">
+                                                              <td className="w-1/2 border-t border-[#eef0f3] px-5 py-4 text-[14px] leading-7 text-[#374151]">
+                                                                {pair.user_excerpt
+                                                                  ? renderStructuredCellText(pair.user_excerpt)
+                                                                  : '-'}
+                                                              </td>
+                                                              <td className="w-1/2 border-t border-l border-[#eef0f3] px-5 py-4 text-[14px] leading-7 text-[#374151]">
+                                                                {pair.accepted_excerpt
+                                                                  ? renderStructuredCellText(pair.accepted_excerpt)
+                                                                  : '-'}
+                                                              </td>
+                                                            </tr>
+                                                          </tbody>
+                                                        </table>
                                                         <div className="border-t border-[#e5e7eb] bg-[#fafafa] px-5 py-4">
                                                           <p className="text-[12px] font-semibold tracking-[0.14em] text-[#6b7280]">
                                                             해설

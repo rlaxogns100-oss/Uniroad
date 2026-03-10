@@ -4,6 +4,7 @@
 - prefix: /api/school-record (main.py에서 지정)
 - 로그인 유저의 세특 데이터는 user_profiles.metadata.school_record 에 연동 저장
 """
+import asyncio
 import copy
 import json
 import time
@@ -424,19 +425,27 @@ async def upload_school_record_pdf(
     school["rawSchoolRecordText"] = raw_text
     school["parsedSchoolRecord"] = full_parsed
     school["parsedSchoolRecordSummary"] = full_summary
-    await SupabaseService.update_user_profile_school_record(user_id, school)
 
-    # 매칭용 내부 요약 1회 생성 (적합 학교 추천 시 사용, 사용자 비노출)
-    try:
-        from school_record_eval.matching_summary import generate_matching_summary_from_school_record
-        matching_text = await generate_matching_summary_from_school_record(school)
-        if matching_text:
-            school["matchingSummary"] = matching_text
-            forms["matchingSummary"] = matching_text
-            school["forms"] = forms
-            await SupabaseService.update_user_profile_school_record(user_id, school)
-    except Exception as e:
-        print(f"⚠️ 매칭용 요약 생성 실패(무시, 최초 추천 요청 시 생성됨): {e}")
+    # DB 저장과 매칭용 요약 생성을 병렬 실행
+    from school_record_eval.matching_summary import generate_matching_summary_from_school_record
+
+    async def _save_initial():
+        await SupabaseService.update_user_profile_school_record(user_id, school)
+
+    async def _generate_matching():
+        try:
+            return await generate_matching_summary_from_school_record(school)
+        except Exception as e:
+            print(f"⚠️ 매칭용 요약 생성 실패(무시, 최초 추천 요청 시 생성됨): {e}")
+            return None
+
+    _, matching_text = await asyncio.gather(_save_initial(), _generate_matching())
+
+    if matching_text:
+        school["matchingSummary"] = matching_text
+        forms["matchingSummary"] = matching_text
+        school["forms"] = forms
+        await SupabaseService.update_user_profile_school_record(user_id, school)
 
     return {
         "ok": True,
@@ -456,7 +465,8 @@ async def upload_school_record_pdf(
 @router.post("/generate-visual-report")
 async def generate_visual_report(user: dict = Depends(get_current_user)):
     """생기부 시각 보고서 생성 (SSE 스트리밍)."""
-    from .visual_report_agent import generate_visual_report_stream
+    from .visual_report_agent import generate_visual_report_data
+    from .report_context import build_school_record_report_context_text
 
     user_id = user.get("user_id")
     if not user_id:
@@ -473,9 +483,30 @@ async def generate_visual_report(user: dict = Depends(get_current_user)):
             detail="연동된 생기부가 없습니다. 먼저 생활기록부를 업로드해 주세요.",
         )
 
-    def event_generator():
-        for event in generate_visual_report_stream(school):
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+    async def event_generator():
+        started_at = time.perf_counter()
+        try:
+            yield f"data: {json.dumps({'type': 'status', 'step': 'prepare'}, ensure_ascii=False)}\n\n"
+
+            context = await asyncio.to_thread(
+                build_school_record_report_context_text, school, max_chars=16000,
+            )
+            if not context or len(context.strip()) < 100:
+                yield f"data: {json.dumps({'type': 'error', 'message': '생기부 데이터가 충분하지 않습니다.'}, ensure_ascii=False)}\n\n"
+                return
+
+            yield f"data: {json.dumps({'type': 'status', 'step': 'generate_pages_parallel'}, ensure_ascii=False)}\n\n"
+
+            report_data = await generate_visual_report_data(school, prebuilt_context=context)
+
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            yield f"data: {json.dumps({'type': 'done', 'data': report_data, 'elapsed_ms': elapsed_ms}, ensure_ascii=False)}\n\n"
+        except json.JSONDecodeError as e:
+            print(f"[VisualReport ERROR] JSON 파싱 실패: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': f'AI 응답 파싱 실패: {e}'}, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            print(f"[VisualReport ERROR] 보고서 생성 오류: {type(e).__name__}: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': f'보고서 생성 오류: {e}'}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_generator(),
