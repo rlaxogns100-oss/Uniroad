@@ -4598,32 +4598,6 @@ def _infer_accepted_record_type(area: str, source_kind: str) -> str:
     return "기타"
 
 
-_EXCERPT_PAIR_SYSTEM_PROMPT = """\
-당신은 학교생활기록부(생기부) 비교 분석 전문가입니다.
-사용자의 생기부 항목과 합격자의 생기부 항목을 받아, 가장 적절한 비교 쌍을 만들어야 합니다.
-
-각 항목에는 [타입]이 표시되어 있다: 세특, 자율활동, 동아리활동, 진로활동, 행특 등.
-
-## 절대 규칙 (위반 금지)
-- **세특은 반드시 세특끼리만 매칭하라.** 세특을 자율활동/동아리활동/진로활동/행특과 매칭하면 안 된다.
-- **창체(자율/동아리/진로)는 창체끼리만 매칭하라.**
-- 과목이 완전히 다른 세특끼리 매칭하지 마라 (예: 수학 ↔ 체육, 영어 ↔ 음악)
-- 같은 합격자 항목을 중복 사용하지 마라.
-- 매칭할 적절한 항목이 없으면 만들지 마라. 쌍 수가 적어도 된다.
-
-## 매칭 선호도 (절대 규칙을 지킨 뒤 적용)
-1. **과목/영역 일치**: 같은 교과 계열끼리 (사용자 수학I ↔ 합격자 고급수학I)
-2. **학년 일치**: 같은 학년끼리
-3. **내용 관련성**: 탐구 주제가 유사하면 가산
-
-## 출력 형식
-반드시 JSON으로 출력하라:
-{"pairs": [{"user_idx": 0, "accepted_idx": 2}, {"user_idx": 1, "accepted_idx": 5}]}
-- user_idx: 사용자 항목 번호 (0부터 시작)
-- accepted_idx: 합격자 항목 번호 (0부터 시작)
-"""
-
-
 def _build_excerpt_pairs_for_case(
     *,
     case_snippets: list[Dict[str, Any]],
@@ -4634,175 +4608,63 @@ def _build_excerpt_pairs_for_case(
     comparison_mode: str,
     target_count: int,
 ) -> list[Dict[str, Any]]:
+    """사용자 스니펫과 동일한 과목/기록유형의 합격자 스니펫을 직접 매칭."""
     if not case_snippets or not user_selected_snippets:
         return []
 
-    ranked_case_snippets = _rank_scoped_snippets(
-        case_snippets,
-        query_tokens=query_tokens,
-        grade_scope=grade_scope,
-        record_scope=record_scope,
-        comparison_mode=comparison_mode,
-    )
-    if not ranked_case_snippets:
-        ranked_case_snippets = case_snippets
-
-    llm_pairs = _llm_match_excerpt_pairs(
-        user_snippets=user_selected_snippets[:target_count],
-        case_snippets=ranked_case_snippets,
-        target_count=target_count,
-    )
-    if llm_pairs:
-        return llm_pairs
-
-    return _rule_based_excerpt_pairs(
-        ranked_case_snippets=ranked_case_snippets,
-        user_selected_snippets=user_selected_snippets,
-        query_tokens=query_tokens,
-        grade_scope=grade_scope,
-        record_scope=record_scope,
-        comparison_mode=comparison_mode,
-        target_count=target_count,
-    )
-
-
-def _llm_match_excerpt_pairs(
-    *,
-    user_snippets: list[Dict[str, Any]],
-    case_snippets: list[Dict[str, Any]],
-    target_count: int,
-) -> list[Dict[str, Any]]:
-    """LLM에게 사용자/합격자 스니펫 목록을 주고 최적 페어링을 받는다."""
-    user_summaries = []
-    for i, s in enumerate(user_snippets):
-        label = str(s.get("label") or "").strip()
-        rtype = str(s.get("record_type") or "기타").strip()
-        text_preview = str(s.get("text") or "").strip()[:120]
-        user_summaries.append(f"[U{i}] [타입:{rtype}] {label}: {text_preview}...")
-
-    case_summaries = []
-    for i, s in enumerate(case_snippets[:30]):
-        label = str(s.get("label") or "").strip()
-        rtype = str(s.get("record_type") or "기타").strip()
-        text_preview = str(s.get("text") or "").strip()[:120]
-        case_summaries.append(f"[A{i}] [타입:{rtype}] {label}: {text_preview}...")
-
-    user_prompt = (
-        f"## 사용자 생기부 항목 ({len(user_summaries)}개)\n"
-        + "\n".join(user_summaries)
-        + f"\n\n## 합격자 생기부 항목 ({len(case_summaries)}개)\n"
-        + "\n".join(case_summaries)
-        + f"\n\n위 항목들에서 최대 {target_count}개의 비교 쌍을 만들어 주세요."
-    )
-
-    result = _generate_json_with_gemini(
-        system_prompt=_EXCERPT_PAIR_SYSTEM_PROMPT,
-        user_prompt=user_prompt,
-        model_name=DEEP_CHAT_MODEL,
-        max_output_tokens=1024,
-    )
-
-    if not result or "pairs" not in result:
-        return []
-
-    raw_pairs = result.get("pairs") or []
-    if not isinstance(raw_pairs, list):
-        return []
-
     excerpt_pairs: list[Dict[str, Any]] = []
-    used_accepted: set[int] = set()
-    for pair_idx, pair_data in enumerate(raw_pairs[:target_count], start=1):
-        if not isinstance(pair_data, dict):
-            continue
-        u_idx = pair_data.get("user_idx")
-        a_idx = pair_data.get("accepted_idx")
-        if not isinstance(u_idx, int) or not isinstance(a_idx, int):
-            continue
-        if u_idx < 0 or u_idx >= len(user_snippets):
-            continue
-        if a_idx < 0 or a_idx >= len(case_snippets):
-            continue
-        if a_idx in used_accepted:
-            continue
-
-        user_s = user_snippets[u_idx]
-        case_s = case_snippets[a_idx]
-
-        u_rtype = str(user_s.get("record_type") or "").strip()
-        c_rtype = str(case_s.get("record_type") or "").strip()
-        if u_rtype == "세특" and c_rtype != "세특":
-            continue
-        if u_rtype != "세특" and u_rtype in ("자율활동", "동아리활동", "진로활동", "창체") and c_rtype == "세특":
-            continue
-
-        used_accepted.add(a_idx)
-        excerpt_pairs.append({
-            "pair_id": f"pair-{pair_idx}",
-            "user_excerpt_label": str(user_s.get("label") or "사용자 발췌").strip(),
-            "user_excerpt": str(user_s.get("text") or "").strip(),
-            "accepted_excerpt_label": str(case_s.get("label") or "합격자 발췌").strip(),
-            "accepted_excerpt": str(case_s.get("text") or "").strip(),
-            "pair_comment": "",
-            "_match_score": 1.0,
-        })
-
-    return excerpt_pairs if excerpt_pairs else []
-
-
-def _rule_based_excerpt_pairs(
-    *,
-    ranked_case_snippets: list[Dict[str, Any]],
-    user_selected_snippets: list[Dict[str, Any]],
-    query_tokens: list[str],
-    grade_scope: list[str],
-    record_scope: list[str],
-    comparison_mode: str,
-    target_count: int,
-) -> list[Dict[str, Any]]:
-    """LLM 페어링 실패 시 규칙 기반 폴백."""
-    excerpt_pairs: list[Dict[str, Any]] = []
-    used_case_indexes: Dict[int, int] = {}
+    used_case_indexes: set[int] = set()
 
     for pair_idx, user_snippet in enumerate(user_selected_snippets[:target_count], start=1):
-        user_tokens = _tokenize_query(str(user_snippet.get("text") or ""))
-        user_subject_group = _get_subject_group(
-            str(user_snippet.get("area") or ""),
-            str(user_snippet.get("text") or ""),
-        )
-        best_idx = None
+        u_rtype = str(user_snippet.get("record_type") or "").strip()
+        u_grade = str(user_snippet.get("grade") or "").strip()
+        u_area = str(user_snippet.get("area") or "").strip()
+        u_group = _get_subject_group(u_area, str(user_snippet.get("text") or ""))
+
+        best_idx: Optional[int] = None
         best_score = float("-inf")
 
-        for idx, case_snippet in enumerate(ranked_case_snippets):
-            score = _snippet_scope_score(
-                case_snippet,
-                query_tokens=query_tokens,
-                grade_scope=grade_scope,
-                record_scope=record_scope,
-                comparison_mode=comparison_mode,
-            )
-            score += _score_text_overlap(user_tokens, str(case_snippet.get("text") or ""))
+        for idx, cs in enumerate(case_snippets):
+            if idx in used_case_indexes:
+                continue
+            c_rtype = str(cs.get("record_type") or "").strip()
+            c_grade = str(cs.get("grade") or "").strip()
+            c_area = str(cs.get("area") or "").strip()
 
-            if comparison_mode == "grade_flow_compare":
-                if str(user_snippet.get("grade") or "") == str(case_snippet.get("grade") or ""):
-                    score += 1.0
-            if comparison_mode == "subject_excerpt_compare":
-                if str(case_snippet.get("record_type") or "") == "세특":
-                    score += 0.7
-
-            if user_subject_group and str(user_snippet.get("record_type") or "") == "세특":
-                case_subject_group = _get_subject_group(
-                    str(case_snippet.get("area") or ""),
-                    str(case_snippet.get("text") or ""),
+            if u_rtype == "세특":
+                if c_rtype != "세특":
+                    continue
+                c_group = _get_subject_group(c_area, str(cs.get("text") or ""))
+                if u_group and c_group and c_group != u_group:
+                    continue
+                score = 0.0
+                if u_group and c_group and c_group == u_group:
+                    score += 5.0
+                if u_grade and c_grade and u_grade == c_grade:
+                    score += 2.0
+                score += _score_text_overlap(
+                    _tokenize_query(str(user_snippet.get("text") or "")),
+                    str(cs.get("text") or ""),
                 )
-                if case_subject_group:
-                    if case_subject_group == user_subject_group:
-                        score += 3.0
-                    else:
-                        score -= 2.0
-
-            use_count = used_case_indexes.get(idx, 0)
-            if use_count > 0:
-                score -= 0.5 * use_count
+            elif u_rtype in ("자율활동", "동아리활동", "진로활동", "창체"):
+                if c_rtype not in ("자율활동", "동아리활동", "진로활동", "창체"):
+                    continue
+                score = 0.0
+                if u_rtype == c_rtype:
+                    score += 3.0
+                if u_grade and c_grade and u_grade == c_grade:
+                    score += 2.0
+            elif u_rtype == "행특":
+                if c_rtype != "행특":
+                    continue
+                score = 0.0
+                if u_grade and c_grade and u_grade == c_grade:
+                    score += 2.0
+            else:
+                score = _score_text_overlap(
+                    _tokenize_query(str(user_snippet.get("text") or "")),
+                    str(cs.get("text") or ""),
+                )
 
             if score > best_score:
                 best_score = score
@@ -4811,52 +4673,19 @@ def _rule_based_excerpt_pairs(
         if best_idx is None:
             continue
 
-        used_case_indexes[best_idx] = used_case_indexes.get(best_idx, 0) + 1
-        accepted_snippet = ranked_case_snippets[best_idx]
-        excerpt_pairs.append(
-            {
-                "pair_id": f"pair-{pair_idx}",
-                "user_excerpt_label": str(user_snippet.get("label") or "사용자 발췌").strip(),
-                "user_excerpt": str(user_snippet.get("text") or "").strip(),
-                "accepted_excerpt_label": str(accepted_snippet.get("label") or "합격자 발췌").strip(),
-                "accepted_excerpt": str(accepted_snippet.get("text") or "").strip(),
-                "pair_comment": "",
-                "_match_score": round(best_score, 4),
-            }
-        )
+        used_case_indexes.add(best_idx)
+        accepted_snippet = case_snippets[best_idx]
+        excerpt_pairs.append({
+            "pair_id": f"pair-{pair_idx}",
+            "user_excerpt_label": str(user_snippet.get("label") or "사용자 발췌").strip(),
+            "user_excerpt": str(user_snippet.get("text") or "").strip(),
+            "accepted_excerpt_label": str(accepted_snippet.get("label") or "합격자 발췌").strip(),
+            "accepted_excerpt": str(accepted_snippet.get("text") or "").strip(),
+            "pair_comment": "",
+            "_match_score": round(best_score, 4),
+        })
 
-    seen_accepted_texts: set[str] = set()
-    deduped_pairs: list[Dict[str, Any]] = []
-    for pair in excerpt_pairs:
-        text = str(pair.get("accepted_excerpt") or "").strip()
-        if text and text not in seen_accepted_texts:
-            seen_accepted_texts.add(text)
-            deduped_pairs.append(pair)
-    excerpt_pairs = deduped_pairs
-
-    if len(excerpt_pairs) < ACCEPTED_CASE_MIN_EXCERPT_PAIRS:
-        for accepted_snippet in ranked_case_snippets:
-            if len(excerpt_pairs) >= ACCEPTED_CASE_MIN_EXCERPT_PAIRS:
-                break
-            if any(
-                str(pair.get("accepted_excerpt") or "") == str(accepted_snippet.get("text") or "").strip()
-                for pair in excerpt_pairs
-            ):
-                continue
-            fallback_user = user_selected_snippets[min(len(excerpt_pairs), len(user_selected_snippets) - 1)]
-            excerpt_pairs.append(
-                {
-                    "pair_id": f"pair-{len(excerpt_pairs) + 1}",
-                    "user_excerpt_label": str(fallback_user.get("label") or "사용자 발췌").strip(),
-                    "user_excerpt": str(fallback_user.get("text") or "").strip(),
-                    "accepted_excerpt_label": str(accepted_snippet.get("label") or "합격자 발췌").strip(),
-                    "accepted_excerpt": str(accepted_snippet.get("text") or "").strip(),
-                    "pair_comment": "",
-                    "_match_score": 0.0,
-                }
-            )
-
-    return excerpt_pairs[:target_count]
+    return excerpt_pairs
 
 
 def _extract_user_school_record_snippets(
