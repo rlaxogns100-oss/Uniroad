@@ -586,6 +586,10 @@ async def payapp_feedback(request: Request):
         _to_str(payload.get("var1")),
     )
 
+    def _normalize_payapp_key(v: str) -> str:
+        """form-urlencoded에서 +가 공백으로 디코딩되는 문제 보정"""
+        return v.replace(" ", "+")
+
     configured_userid = _to_str(getattr(settings, "PAYAPP_USERID", ""))
     if configured_userid:
         incoming_userid = _to_str(payload.get("userid"))
@@ -595,16 +599,16 @@ async def payapp_feedback(request: Request):
 
     configured_linkkey = _to_str(getattr(settings, "PAYAPP_LINKKEY", ""))
     if configured_linkkey:
-        incoming_linkkey = _to_str(payload.get("linkkey"))
+        incoming_linkkey = _normalize_payapp_key(_to_str(payload.get("linkkey")))
         if incoming_linkkey and incoming_linkkey != configured_linkkey:
-            logger.warning("PayApp feedback linkkey 불일치 mul_no=%s", mul_no)
+            logger.warning("PayApp feedback linkkey 불일치 mul_no=%s incoming=%s", mul_no, incoming_linkkey)
             return PlainTextResponse("FAIL", status_code=200)
 
     configured_linkval = _to_str(getattr(settings, "PAYAPP_LINKVAL", ""))
     if configured_linkval:
-        incoming_linkval = _to_str(payload.get("linkval"))
+        incoming_linkval = _normalize_payapp_key(_to_str(payload.get("linkval")))
         if incoming_linkval and incoming_linkval != configured_linkval:
-            logger.warning("PayApp feedback linkval 불일치 mul_no=%s", mul_no)
+            logger.warning("PayApp feedback linkval 불일치 mul_no=%s incoming=%s", mul_no, incoming_linkval)
             return PlainTextResponse("FAIL", status_code=200)
 
     if pay_state != "4":
