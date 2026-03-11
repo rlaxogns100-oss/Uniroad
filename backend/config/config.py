@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     POLAR_WEBHOOK_SECRET: str = ""  # Polar 대시보드 웹훅 엔드포인트에서 발급한 시크릿
     POLAR_ACCESS_TOKEN: str = ""  # Polar API 토큰 (구독 상태 조회 등)
     GUMROAD_WEBHOOK_TOKEN: str = ""  # Gumroad 웹훅 URL 토큰
+    PAYAPP_USERID: str = ""
+    PAYAPP_LINKKEY: str = ""
+    PAYAPP_LINKVAL: str = ""
+    PAYAPP_FEEDBACK_TOKEN: str = ""
     
     class Config:
         env_file = str(_ENV_FILE) if _ENV_FILE.exists() else ".env"

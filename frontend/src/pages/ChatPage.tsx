@@ -45,6 +45,7 @@ import {
 import { useAuth } from '../contexts/AuthContext'
 import { useLayoutMode } from '../contexts/LayoutModeContext'
 import { useChat } from '../hooks/useChat'
+import { openPayAppCheckout, PAYAPP_METHODS, type PayAppMethodKey } from '../utils/payapp'
 import { captureBusinessEvent, getSessionId, setAuthTrigger, trackUserAction } from '../utils/tracking'
 import { AuthTrigger, PaymentMethod, PaywallReason, TrackingEventNames } from '../utils/trackingSchema'
 import { FrontendTimingLogger } from '../utils/timingLogger'
@@ -738,6 +739,8 @@ export default function ChatPage() {
   const [isPreregisterModalOpen, setIsPreregisterModalOpen] = useState(false)
   const [isProModalOpen, setIsProModalOpen] = useState(false)
   const [isApprovalWidgetChoiceOpen, setIsApprovalWidgetChoiceOpen] = useState(false)
+  const [isPayAppMethodChoiceOpen, setIsPayAppMethodChoiceOpen] = useState(false)
+  const [payAppPhone, setPayAppPhone] = useState('')
   const [isBankTransferModalOpen, setIsBankTransferModalOpen] = useState(false)
   const [bankTransferName, setBankTransferName] = useState('')
   const [bankTransferPhone, setBankTransferPhone] = useState('')
@@ -982,6 +985,7 @@ export default function ChatPage() {
   const [isInlineNaesinSaving, setIsInlineNaesinSaving] = useState(false)
   const [floatingNoticeMessage, setFloatingNoticeMessage] = useState<string | null>(null)
   const [isFloatingNoticeFading, setIsFloatingNoticeFading] = useState(false)
+
   const [schoolRecordGuideOpen, setSchoolRecordGuideOpen] = useState(false)
   const [schoolRecordPreviewOpen, setSchoolRecordPreviewOpen] = useState(false)
   const [schoolRecordPreviewStep, setSchoolRecordPreviewStep] = useState<number | null>(null)
@@ -1995,6 +1999,16 @@ export default function ChatPage() {
     })
     setIsApprovalWidgetChoiceOpen(true)
   }
+  const openPayAppMethodChoice = () => {
+    void captureBusinessEvent(TrackingEventNames.paymentCtaClick, {
+      category: 'revenue',
+      payment_method: PaymentMethod.PayApp,
+      source: 'pro_modal',
+      ...priceVariantProps,
+    })
+    setPayAppPhone((prev) => prev || bankTransferPhone || '')
+    setIsPayAppMethodChoiceOpen(true)
+  }
   const openApprovalSimplePayWidget = () => {
     const oneTimeWidgetUrl = import.meta.env.VITE_TOSS_WIDGET_APPROVAL_ONETIME_URL || '/payments/checkout.html'
     void captureBusinessEvent(TrackingEventNames.paymentMethodSelected, {
@@ -2026,6 +2040,50 @@ export default function ChatPage() {
     })
     openApprovalPaymentWidget(billingWidgetUrl)
     setIsApprovalWidgetChoiceOpen(false)
+  }
+  const openPayAppTestCheckout = (method: PayAppMethodKey) => {
+    const selectedMethod = PAYAPP_METHODS[method]
+    const normalizedPhone = payAppPhone.replace(/\D/g, '')
+    if (normalizedPhone.length < 8) {
+      alert('웹에서 바로 결제하려면 전화번호를 입력해 주세요.')
+      return
+    }
+    void captureBusinessEvent(TrackingEventNames.paymentMethodSelected, {
+      category: 'revenue',
+      payment_method: PaymentMethod.PayApp,
+      payapp_method: selectedMethod.openpaytype,
+      ...priceVariantProps,
+    })
+    void captureBusinessEvent(TrackingEventNames.paymentStarted, {
+      category: 'revenue',
+      payment_method: PaymentMethod.PayApp,
+      source: 'payapp_local_test',
+      payapp_method: selectedMethod.openpaytype,
+      ...priceVariantProps,
+    })
+    setIsPayAppMethodChoiceOpen(false)
+
+    try {
+      openPayAppCheckout({
+        goodname: '유니로드 Pro 구독 테스트',
+        price: Number(proPrice) || 7900,
+        method,
+        recvphone: normalizedPhone,
+        directWebPay: true,
+        returnUrl: typeof window !== 'undefined' ? window.location.href : undefined,
+      })
+    } catch (error) {
+      console.error('PayApp 결제창 열기 실패:', error)
+      void captureBusinessEvent(TrackingEventNames.paymentFailed, {
+        category: 'revenue',
+        payment_method: PaymentMethod.PayApp,
+        source: 'payapp_local_test',
+        payapp_method: selectedMethod.openpaytype,
+        error_message: error instanceof Error ? error.message : 'payapp_open_failed',
+        ...priceVariantProps,
+      })
+      alert('PayApp 결제창을 열지 못했습니다. 인터넷 연결 또는 판매자 설정을 확인해 주세요.')
+    }
   }
   const subscribeByBankTransfer = () => {
     void captureBusinessEvent(TrackingEventNames.paymentCtaClick, {
@@ -6731,6 +6789,82 @@ export default function ChatPage() {
                   </span>
                 </button>
               </div>
+              <button
+                onClick={openPayAppMethodChoice}
+                className="mt-3 w-full min-h-[40px] px-4 py-2.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
+              >
+                <span className="inline-flex flex-col items-center leading-tight">
+                  <span>PayApp 결제 테스트</span>
+                  <span className="text-[10px] sm:text-xs whitespace-nowrap">(로컬 확인용)</span>
+                </span>
+              </button>
+              <p className="mt-3 text-xs text-gray-500 text-center">
+                로컬에서는 결제 완료 반영 없이 결제창 동작과 카드/간편결제 노출만 확인합니다.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PayApp 수단별 로컬 테스트 모달 */}
+      {!isAppBuild() && isPayAppMethodChoiceOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-gray-200">
+            <div className="p-5 border-b border-gray-100 flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-xl font-bold text-gray-900">PayApp 수단별 테스트</h3>
+                <p className="text-sm text-gray-600 mt-1">먼저 카드만 확인한 뒤 간편결제를 하나씩 테스트하세요.</p>
+              </div>
+              <button
+                onClick={() => setIsPayAppMethodChoiceOpen(false)}
+                className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-5 space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">전화번호</label>
+                <input
+                  value={payAppPhone}
+                  onChange={(e) => setPayAppPhone(e.target.value)}
+                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="01012345678"
+                />
+                <p className="mt-2 text-xs text-gray-500">
+                  웹 즉시 결제를 위해 `recvphone`과 `redirectpay=1`을 함께 전송합니다.
+                </p>
+              </div>
+              <button
+                onClick={() => openPayAppTestCheckout('card')}
+                className="w-full py-3.5 bg-indigo-600 text-white rounded-xl font-semibold hover:bg-indigo-700 transition-colors"
+              >
+                카드로 바로 결제
+              </button>
+              <button
+                onClick={() => openPayAppTestCheckout('kakaopay')}
+                className="w-full py-3.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
+              >
+                카카오페이로 바로 결제
+              </button>
+              <button
+                onClick={() => openPayAppTestCheckout('naverpay')}
+                className="w-full py-3.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
+              >
+                네이버페이로 바로 결제
+              </button>
+              <button
+                onClick={() => openPayAppTestCheckout('tosspay')}
+                className="w-full py-3.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
+              >
+                토스페이로 바로 결제
+              </button>
+              <p className="text-xs text-gray-500 leading-relaxed">
+                브라우저 Network 탭에서 `https://lite.payapp.kr/pay` 요청의 Form Data에 `userid`, `shopname`,
+                `goodname`, `price`, `openpaytype`, `recvphone`, `redirectpay=1`가 들어가는지 먼저 확인해 주세요.
+              </p>
             </div>
           </div>
         </div>

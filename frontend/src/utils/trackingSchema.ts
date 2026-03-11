@@ -73,6 +73,7 @@ export const PaymentMethod = {
   BankTransfer: 'bank_transfer',
   TossSimplePay: 'toss_simple_pay',
   TossBilling: 'toss_billing',
+  PayApp: 'payapp',
   Gumroad: 'gumroad',
   ReferralCode: 'referral_code',
 } as const

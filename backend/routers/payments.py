@@ -9,7 +9,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from config.config import settings
@@ -558,3 +558,34 @@ async def gumroad_webhook(request: Request):
 
     ok = await set_user_premium(user_id, is_premium=True)
     return JSONResponse(status_code=200, content={"ok": ok, "user_id": user_id})
+
+
+@router.post("/payapp/feedback")
+async def payapp_feedback(request: Request):
+    """
+    PayApp 운영 검증용 feedbackurl 골격.
+    - 로컬 단계에서는 사용하지 않음
+    - 운영 공개 URL에서 SUCCESS 응답을 돌려 재시도를 막는다
+    """
+    payload = await _parse_payload(request)
+    expected_token = _to_str(getattr(settings, "PAYAPP_FEEDBACK_TOKEN", ""))
+    incoming_token = _to_str(request.query_params.get("token"))
+    if expected_token and incoming_token != expected_token:
+        logger.warning("PayApp feedback token 검증 실패")
+        raise HTTPException(status_code=403, detail="Invalid PayApp feedback token")
+
+    logger.info(
+        "PayApp feedback 수신 mul_no=%s pay_state=%s keys=%s",
+        _to_str(payload.get("mul_no")),
+        _to_str(payload.get("pay_state")),
+        sorted(payload.keys()),
+    )
+
+    configured_linkval = _to_str(getattr(settings, "PAYAPP_LINKVAL", ""))
+    if configured_linkval:
+        incoming_linkval = _to_str(payload.get("linkval"))
+        if incoming_linkval and incoming_linkval != configured_linkval:
+            logger.warning("PayApp feedback linkval 불일치 mul_no=%s", _to_str(payload.get("mul_no")))
+            return PlainTextResponse("FAIL", status_code=200)
+
+    return PlainTextResponse("SUCCESS", status_code=200)
