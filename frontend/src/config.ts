@@ -122,6 +122,20 @@ const persistGalaxySessionFlag = (): void => {
   } catch (_) {}
 }
 
+/**
+ * SNS 인앱 브라우저(Instagram, Facebook, KakaoTalk 등) 여부 확인.
+ * 이 WebView들은 blob: URL 다운로드, window.open 등이 제한된다.
+ */
+export const isInAppBrowser = (): boolean => {
+  try {
+    if (typeof window === 'undefined') return false
+    const ua = window.navigator?.userAgent || ''
+    return /FBAN|FBAV|Instagram|Line\/|KAKAOTALK|NAVER\(|Twitter/i.test(ua)
+  } catch (_) {
+    return false
+  }
+}
+
 export const isGalaxyAppSession = (): boolean => {
   try {
     if (typeof window === 'undefined') return false

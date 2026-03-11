@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import SchoolRecordVisualReport, { type VisualReportData } from './SchoolRecordVisualReport'
-import { getApiBaseUrl } from '../config'
+import { getApiBaseUrl, isInAppBrowser } from '../config'
 import { captureBusinessEvent } from '../utils/tracking'
 import { TrackingEventNames } from '../utils/trackingSchema'
 
@@ -142,29 +142,37 @@ export default function ReportGeneratorModal({ open, onClose, token }: Props) {
         addLog('🖨️ PDF로 변환 중입니다...')
 
         const html2pdf = (await import('html2pdf.js')).default
+        const fileName = `${reportData.studentName}_생기부_분석_리포트.pdf`
 
         const pages = el.querySelectorAll('[data-page]')
-        if (pages.length === 0) {
-          const opt = {
-            margin: 0,
-            filename: `${reportData.studentName}_생기부_분석_리포트.pdf`,
-            image: { type: 'jpeg' as const, quality: 0.95 },
-            html2canvas: { scale: 2, useCORS: true, logging: false },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const },
-          }
+        const baseOpt = {
+          margin: 0,
+          filename: fileName,
+          image: { type: 'jpeg' as const, quality: 0.95 },
+          html2canvas: { scale: 2, useCORS: true, logging: false },
+          jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const },
+          ...(pages.length > 0 ? { pagebreak: { mode: ['css', 'legacy'] } } : {}),
+        }
 
-          await html2pdf().set(opt).from(el).save()
+        if (isInAppBrowser()) {
+          const blob: Blob = await html2pdf().set(baseOpt).from(el).outputPdf('blob')
+          const dataUrl: string = await new Promise((resolve) => {
+            const fr = new FileReader()
+            fr.onloadend = () => resolve(fr.result as string)
+            fr.readAsDataURL(blob)
+          })
+          const newTab = window.open(dataUrl, '_blank')
+          if (!newTab) {
+            const link = document.createElement('a')
+            link.href = dataUrl
+            link.download = fileName
+            link.style.display = 'none'
+            document.body.appendChild(link)
+            link.click()
+            setTimeout(() => document.body.removeChild(link), 100)
+          }
         } else {
-          const opt = {
-            margin: 0,
-            filename: `${reportData.studentName}_생기부_분석_리포트.pdf`,
-            image: { type: 'jpeg' as const, quality: 0.95 },
-            html2canvas: { scale: 2, useCORS: true, logging: false },
-            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' as const },
-            pagebreak: { mode: ['css', 'legacy'] },
-          }
-
-          await html2pdf().set(opt).from(el).save()
+          await html2pdf().set(baseOpt).from(el).save()
         }
 
         addLog('✅ PDF 다운로드 완료!')

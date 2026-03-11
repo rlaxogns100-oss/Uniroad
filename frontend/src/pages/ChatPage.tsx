@@ -3411,23 +3411,35 @@ export default function ChatPage() {
             logs: [...agentData.logs]  // 현재까지의 로그 복사
           }
 
-          // 스트리밍 봇 메시지를 최종 메시지로 업데이트 (sources, used_chunks, agentData 등 추가)
-          setMessages((prev) => prev.map(msg => 
-            msg.id === streamingBotMessageId
-              ? {
-                  ...msg,
-                  text: response.response || msg.text,  // 최종 응답으로 교체 (또는 스트리밍된 텍스트 유지)
-                  sources: response.sources,
-                  source_urls: response.source_urls,
-                  used_chunks: response.used_chunks,
-                  report: response.report as StructuredReport | undefined,
-                  isStreaming: false,  // 스트리밍 완료
-                  isMasked: shouldMask,  // 마스킹 여부
-                  agentData: currentAgentData,  // Agent 디버그 데이터 저장
-                }
-              : msg
-          ))
-          console.log('✅ 스트리밍 완료:', response.response?.substring(0, 50) || '(스트리밍 텍스트)', shouldMask ? '(마스킹됨)' : '')
+          // 빈 응답 방어: response.response와 기존 스트리밍 텍스트 모두 비어 있으면 에러 처리
+          const resolvedText = response.response || ''
+          setMessages((prev) => {
+            const existing = prev.find(msg => msg.id === streamingBotMessageId)
+            const finalText = resolvedText || existing?.text || ''
+            if (!finalText.trim() && !shouldMask) {
+              return prev.map(msg =>
+                msg.id === streamingBotMessageId
+                  ? { ...msg, text: '죄송합니다. 답변을 생성하지 못했습니다. 다시 시도해 주세요.', isStreaming: false }
+                  : msg
+              )
+            }
+            return prev.map(msg =>
+              msg.id === streamingBotMessageId
+                ? {
+                    ...msg,
+                    text: finalText,
+                    sources: response.sources,
+                    source_urls: response.source_urls,
+                    used_chunks: response.used_chunks,
+                    report: response.report as StructuredReport | undefined,
+                    isStreaming: false,
+                    isMasked: shouldMask,
+                    agentData: currentAgentData,
+                  }
+                : msg
+            )
+          })
+          console.log('✅ 스트리밍 완료:', resolvedText?.substring(0, 50) || '(스트리밍 텍스트)', shouldMask ? '(마스킹됨)' : '')
 
           // 타이밍: 렌더링 완료
           timingLogger.mark('render_complete')
@@ -3492,7 +3504,8 @@ export default function ChatPage() {
           if (abortController.signal.aborted) return
 
           // 인증 토큰 만료/검증 실패 - 로그인 모달 즉시 표시
-          if (error === '__AUTH_REQUIRED__') {
+          const isAuthError = error === '__AUTH_REQUIRED__' || /로그인이 필요|세션이 만료|auth.?required|유효하지 않습니다/i.test(error)
+          if (isAuthError) {
             setAuthTrigger(AuthTrigger.AuthExpired)
             void captureBusinessEvent(TrackingEventNames.chatBlockedAuthRequired, {
               category: 'activation',

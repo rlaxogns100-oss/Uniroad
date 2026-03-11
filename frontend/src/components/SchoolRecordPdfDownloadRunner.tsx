@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { toCanvas, getFontEmbedCSS } from 'html-to-image'
 import { jsPDF } from 'jspdf'
 import SchoolRecordVisualReport, { type VisualReportData } from './SchoolRecordVisualReport'
-import { getApiBaseUrl } from '../config'
+import { getApiBaseUrl, isInAppBrowser } from '../config'
 import { useVisualReportCache } from '../contexts/VisualReportCacheContext'
 import { captureBusinessEvent } from '../utils/tracking'
 import { TrackingEventNames } from '../utils/trackingSchema'
@@ -203,15 +203,45 @@ export default function SchoolRecordPdfDownloadRunner({
         }
 
         if (!cancelled) {
-          pdf.save(`${reportData.studentName}_생기부_분석_리포트.pdf`)
-          startedRequestIdRef.current = null
-          void captureBusinessEvent(TrackingEventNames.schoolRecordVisualReportDownloaded, {
-            category: 'engagement',
-            source: 'pdf_download_runner',
-            format: 'pdf',
-            page_count: pageElements.length,
-          })
-          onSuccessRef.current()
+          const fileName = `${reportData.studentName}_생기부_분석_리포트.pdf`
+
+          if (isInAppBrowser()) {
+            const blob = pdf.output('blob')
+            const reader = new FileReader()
+            reader.onloadend = () => {
+              const dataUrl = reader.result as string
+              const newTab = window.open(dataUrl, '_blank')
+              if (!newTab) {
+                const link = document.createElement('a')
+                link.href = dataUrl
+                link.download = fileName
+                link.style.display = 'none'
+                document.body.appendChild(link)
+                link.click()
+                setTimeout(() => document.body.removeChild(link), 100)
+              }
+              startedRequestIdRef.current = null
+              void captureBusinessEvent(TrackingEventNames.schoolRecordVisualReportDownloaded, {
+                category: 'engagement',
+                source: 'pdf_download_runner',
+                format: 'pdf',
+                page_count: pageElements.length,
+                in_app_browser: true,
+              })
+              onSuccessRef.current()
+            }
+            reader.readAsDataURL(blob)
+          } else {
+            pdf.save(fileName)
+            startedRequestIdRef.current = null
+            void captureBusinessEvent(TrackingEventNames.schoolRecordVisualReportDownloaded, {
+              category: 'engagement',
+              source: 'pdf_download_runner',
+              format: 'pdf',
+              page_count: pageElements.length,
+            })
+            onSuccessRef.current()
+          }
         }
       } catch (err) {
         if (!cancelled) {

@@ -27,6 +27,7 @@ import AdminChatReviewPage from './pages/AdminChatReviewPage'
 import { isAppBuild } from './config'
 import { useEffect } from 'react'
 import { initializeTracking, trackPageView } from './utils/tracking'
+import InAppBrowserBanner from './components/InAppBrowserBanner'
 
 // 보호된 라우트 (로그인 필요)
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -105,6 +106,7 @@ function App() {
         <LayoutModeProvider>
         <VisualReportCacheProvider>
         <PageTracker />
+        <InAppBrowserBanner />
         <div>
           <Routes>
             <Route path="/auth" element={<Navigate to="/chat" replace />} />

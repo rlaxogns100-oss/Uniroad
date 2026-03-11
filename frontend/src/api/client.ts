@@ -11,6 +11,12 @@ const getEffectiveApiBaseUrl = (): string => {
 
 const AUTH_REQUIRED_ERROR = '__AUTH_REQUIRED__'
 
+const AUTH_ERROR_PATTERNS = /로그인이 필요|세션이 만료|auth.?required|유효하지 않습니다/i
+
+const isAuthRelatedError = (msg: string): boolean => AUTH_ERROR_PATTERNS.test(msg)
+
+const EMPTY_RESPONSE_FALLBACK = '죄송합니다. 답변을 생성하지 못했습니다. 다시 시도해 주세요.'
+
 const refreshAccessToken = async (apiUrl: string): Promise<string | null> => {
   const refreshToken = localStorage.getItem('refresh_token')
   if (!refreshToken) return null
@@ -374,7 +380,12 @@ const sendMessageNonStream = async (
         } else if (event.type === 'done') {
           finalData = event
         } else if (event.type === 'error') {
-          onError?.(event.message || '알 수 없는 오류')
+          const msg = event.message || '알 수 없는 오류'
+          if (isAuthRelatedError(msg)) {
+            onError?.(AUTH_REQUIRED_ERROR)
+          } else {
+            onError?.(msg)
+          }
           return
         }
       } catch (e) {
@@ -382,10 +393,16 @@ const sendMessageNonStream = async (
       }
     }
 
+    const finalResponse = finalData?.response || fullResponse
+    if (!finalData && !finalResponse.trim()) {
+      onError?.(EMPTY_RESPONSE_FALLBACK)
+      return
+    }
+
     onLog('✨ 답변 완료!')
     const chatResponse: ChatResponse = {
-      response: finalData?.response || fullResponse,
-      raw_answer: finalData?.response || fullResponse,
+      response: finalResponse,
+      raw_answer: finalResponse,
       sources: finalData?.sources || sourceEvents || [],
       source_urls: finalData?.source_urls || [],
       used_chunks: finalData?.used_chunks || [],
@@ -587,11 +604,15 @@ export const sendMessageStream = async (
             onSchoolGradeSaved?.(event as SchoolGradeSavedEvent)
             return
           } else if (event.type === 'done') {
-            // 완료
             finalData = event
             onLog('✨ 답변 완료!')
           } else if (event.type === 'error') {
-            onError?.(event.message || '알 수 없는 오류')
+            const msg = event.message || '알 수 없는 오류'
+            if (isAuthRelatedError(msg)) {
+              onError?.(AUTH_REQUIRED_ERROR)
+            } else {
+              onError?.(msg)
+            }
             return
           }
         } catch (e) {
@@ -600,10 +621,15 @@ export const sendMessageStream = async (
       }
     }
 
-    // 최종 결과 전달 (출처 정보 포함)
+    const finalResponse = finalData?.response || fullResponse
+    if (!finalData && !finalResponse.trim()) {
+      onError?.(EMPTY_RESPONSE_FALLBACK)
+      return
+    }
+
     const chatResponse: ChatResponse = {
-      response: finalData?.response || fullResponse,
-      raw_answer: finalData?.response || fullResponse,
+      response: finalResponse,
+      raw_answer: finalResponse,
       sources: finalData?.sources || sourceEvents || [],
       source_urls: finalData?.source_urls || [],
       used_chunks: finalData?.used_chunks || [],
@@ -616,7 +642,7 @@ export const sendMessageStream = async (
         timing: finalData?.timing,
         pipeline_time: finalData?.pipeline_time
       },
-      require_login: finalData?.require_login || false,  // 비로그인 3회째 질문 시 마스킹
+      require_login: finalData?.require_login || false,
       score_id: finalData?.score_id
     }
     
@@ -715,7 +741,7 @@ export const sendContinueAfterNaesin = async (
             finalData = event
             onLog('✨ 답변 완료!')
           } else if (event.type === 'error') {
-            onError?.(event.message || '알 수 없는 오류')
+            { const _m = event.message || '알 수 없는 오류'; onError?.(isAuthRelatedError(_m) ? AUTH_REQUIRED_ERROR : _m) }
             return
           }
         } catch (e) {
@@ -784,7 +810,8 @@ export const sendContinueAfterNaesin = async (
             finalData = event
             onLog('✨ 답변 완료!')
           } else if (event.type === 'error') {
-            onError?.(event.message || '알 수 없는 오류')
+            const msg = event.message || '알 수 없는 오류'
+            if (isAuthRelatedError(msg)) { onError?.(AUTH_REQUIRED_ERROR) } else { onError?.(msg) }
             return
           }
         } catch (e) {
@@ -793,9 +820,15 @@ export const sendContinueAfterNaesin = async (
       }
     }
 
+    const finalResponse = finalData?.response || fullResponse
+    if (!finalData && !finalResponse.trim()) {
+      onError?.(EMPTY_RESPONSE_FALLBACK)
+      return
+    }
+
     const chatResponse: ChatResponse = {
-      response: finalData?.response || fullResponse,
-      raw_answer: finalData?.response || fullResponse,
+      response: finalResponse,
+      raw_answer: finalResponse,
       sources: finalData?.sources || sourceEvents || [],
       source_urls: finalData?.source_urls || [],
       used_chunks: finalData?.used_chunks || [],
@@ -887,7 +920,7 @@ export const sendContinueAfterScoreConfirm = async (
             finalData = event
             onLog('✨ 답변 완료!')
           } else if (event.type === 'error') {
-            onError?.(event.message || '알 수 없는 오류')
+            { const _m = event.message || '알 수 없는 오류'; onError?.(isAuthRelatedError(_m) ? AUTH_REQUIRED_ERROR : _m) }
             return
           }
         } catch (e) {
@@ -956,7 +989,7 @@ export const sendContinueAfterScoreConfirm = async (
             finalData = event
             onLog('✨ 답변 완료!')
           } else if (event.type === 'error') {
-            onError?.(event.message || '알 수 없는 오류')
+            { const _m = event.message || '알 수 없는 오류'; onError?.(isAuthRelatedError(_m) ? AUTH_REQUIRED_ERROR : _m) }
             return
           }
         } catch (e) {
@@ -1257,7 +1290,12 @@ export const sendMessageStreamWithImage = async (
             finalData = event
             onLog('✨ 이미지 분석 완료!')
           } else if (event.type === 'error') {
-            onError?.(event.message || '알 수 없는 오류')
+            const msg = event.message || '알 수 없는 오류'
+            if (isAuthRelatedError(msg)) {
+              onError?.(AUTH_REQUIRED_ERROR)
+            } else {
+              onError?.(msg)
+            }
             return
           }
         } catch (e) {
@@ -1266,10 +1304,15 @@ export const sendMessageStreamWithImage = async (
       }
     }
 
-    // 최종 결과 전달
+    const finalResponse = finalData?.response || fullResponse
+    if (!finalData && !finalResponse.trim()) {
+      onError?.(EMPTY_RESPONSE_FALLBACK)
+      return
+    }
+
     const chatResponse: ChatResponse = {
-      response: finalData?.response || fullResponse,
-      raw_answer: finalData?.response || fullResponse,
+      response: finalResponse,
+      raw_answer: finalResponse,
       sources: finalData?.sources || sourceEvents || [],
       source_urls: finalData?.source_urls || [],
       used_chunks: finalData?.used_chunks || [],
@@ -1282,7 +1325,7 @@ export const sendMessageStreamWithImage = async (
         image_analysis: finalData?.image_analysis,
         pipeline_time: finalData?.pipeline_time
       },
-      require_login: finalData?.require_login || false,  // 비로그인 3회째 질문 시 마스킹
+      require_login: finalData?.require_login || false,
       score_id: finalData?.score_id
     }
     
