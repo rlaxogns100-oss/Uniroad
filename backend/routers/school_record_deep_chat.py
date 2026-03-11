@@ -4271,6 +4271,85 @@ def _build_direct_answer_block(
     }
 
 
+_SUBJECT_GROUP_DEFS: dict[str, list[str]] = {
+    "국어": ["국어", "문학", "화법과작문", "화작", "언어와매체", "언매", "독서", "실용국어", "심화국어"],
+    "수학": [
+        "수학", "수학I", "수학1", "수학II", "수학2", "수학Ⅰ", "수학Ⅱ",
+        "미적분", "확률과통계", "확통", "기하", "실용수학", "경제수학", "인공지능수학",
+    ],
+    "영어": ["영어", "영어I", "영어1", "영어II", "영어2", "영어Ⅰ", "영어Ⅱ", "영어회화", "영어독해와작문", "실용영어"],
+    "과학": [
+        "과학", "통합과학", "물리학", "물리학I", "물리학1", "물리학II", "물리학2", "물리학Ⅰ", "물리학Ⅱ", "물리",
+        "화학", "화학I", "화학1", "화학II", "화학2", "화학Ⅰ", "화학Ⅱ",
+        "생명과학", "생명과학I", "생명과학1", "생명과학II", "생명과학2", "생명과학Ⅰ", "생명과학Ⅱ", "생명", "생1", "생2",
+        "지구과학", "지구과학I", "지구과학1", "지구과학II", "지구과학2", "지구과학Ⅰ", "지구과학Ⅱ", "지구", "지1", "지2",
+        "과학탐구실험",
+    ],
+    "사회": [
+        "사회", "통합사회", "한국사", "한국지리", "세계지리", "동아시아사", "세계사",
+        "경제", "정치와법", "사회문화", "사문", "생활과윤리", "생윤", "윤리와사상", "윤사",
+    ],
+    "체육": ["체육", "운동과건강", "스포츠생활"],
+    "음악": ["음악", "음악연주", "음악감상과비평"],
+    "미술": ["미술", "미술창작", "미술감상과비평"],
+    "기술가정": ["기술", "가정", "기술가정", "정보", "프로그래밍"],
+    "한문": ["한문"],
+    "제2외국어": ["일본어", "중국어", "프랑스어", "독일어", "스페인어", "러시아어", "아랍어", "베트남어", "제2외국어"],
+}
+
+_SUBJECT_TO_GROUP: dict[str, str] = {}
+for _grp, _subjects in _SUBJECT_GROUP_DEFS.items():
+    for _subj in _subjects:
+        _SUBJECT_TO_GROUP[_subj] = _grp
+        _norm = re.sub(r'[\s·ㆍ/()[\]]+', '', _subj)
+        if _norm != _subj:
+            _SUBJECT_TO_GROUP[_norm] = _grp
+
+
+def _get_subject_group(area: str, text: str = "") -> str:
+    """과목명(area) 또는 세특 본문(text)에서 과목 그룹 추론. 비 교과(창체 등)는 ''."""
+    a = (area or "").strip()
+    if a in _SUBJECT_TO_GROUP:
+        return _SUBJECT_TO_GROUP[a]
+    norm = re.sub(r'[\s·ㆍ/()[\]Ⅰ-Ⅴ]+', '', a)
+    roman_map = {"Ⅰ": "I", "Ⅱ": "II", "Ⅲ": "III"}
+    for old_r, new_r in roman_map.items():
+        norm = norm.replace(old_r, new_r)
+    if norm in _SUBJECT_TO_GROUP:
+        return _SUBJECT_TO_GROUP[norm]
+    for subj, grp in sorted(_SUBJECT_TO_GROUP.items(), key=lambda x: len(x[0]), reverse=True):
+        if norm.startswith(re.sub(r'\s', '', subj)):
+            return grp
+    if a in ("세특", "") and text:
+        return _infer_subject_group_from_text(text)
+    return ""
+
+
+def _infer_subject_group_from_text(text: str) -> str:
+    """세특 본문 앞부분에서 과목 그룹을 추론 (area가 '세특'으로 불분명할 때)."""
+    s = (text or "").strip()[:300]
+    m = re.match(r'^([가-힣A-Za-z0-9Ⅰ-Ⅴ\s]{2,16}?)\s*[:：]\s*', s)
+    if m:
+        label = m.group(1).strip()
+        grp = _get_subject_group(label)
+        if grp:
+            return grp
+    _TEXT_KEYWORD_GROUPS = {
+        "수학": ["수학적", "함수", "미적분", "방정식", "확률", "통계", "기하학", "벡터", "행렬", "미분", "적분"],
+        "과학": ["물리", "화학적", "반응식", "원소", "유전", "세포", "DNA", "지질", "천체", "전자기"],
+        "국어": [],
+        "영어": [],
+        "체육": ["체육", "스포츠", "건강체력", "운동 기능", "체력 측정"],
+        "음악": ["음악", "악기", "연주", "악보"],
+        "미술": ["미술", "작품", "드로잉", "소묘"],
+    }
+    first_80 = s[:80]
+    for grp, kws in _TEXT_KEYWORD_GROUPS.items():
+        if any(kw in first_80 for kw in kws):
+            return grp
+    return ""
+
+
 def _score_text_overlap(tokens: list[str], text: str) -> float:
     if not tokens:
         return 0.0
@@ -4535,10 +4614,14 @@ def _build_excerpt_pairs_for_case(
         ranked_case_snippets = case_snippets
 
     excerpt_pairs: list[Dict[str, Any]] = []
-    used_case_indexes: set[int] = set()
+    used_case_indexes: Dict[int, int] = {}
 
     for pair_idx, user_snippet in enumerate(user_selected_snippets[:target_count], start=1):
         user_tokens = _tokenize_query(str(user_snippet.get("text") or ""))
+        user_subject_group = _get_subject_group(
+            str(user_snippet.get("area") or ""),
+            str(user_snippet.get("text") or ""),
+        )
         best_idx = None
         best_score = float("-inf")
 
@@ -4558,8 +4641,21 @@ def _build_excerpt_pairs_for_case(
             if comparison_mode == "subject_excerpt_compare":
                 if str(case_snippet.get("record_type") or "") == "세특":
                     score += 0.7
-            if idx in used_case_indexes:
-                score -= 0.15
+
+            if user_subject_group and str(user_snippet.get("record_type") or "") == "세특":
+                case_subject_group = _get_subject_group(
+                    str(case_snippet.get("area") or ""),
+                    str(case_snippet.get("text") or ""),
+                )
+                if case_subject_group:
+                    if case_subject_group == user_subject_group:
+                        score += 3.0
+                    else:
+                        score -= 2.0
+
+            use_count = used_case_indexes.get(idx, 0)
+            if use_count > 0:
+                score -= 0.5 * use_count
 
             if score > best_score:
                 best_score = score
@@ -4568,7 +4664,7 @@ def _build_excerpt_pairs_for_case(
         if best_idx is None:
             continue
 
-        used_case_indexes.add(best_idx)
+        used_case_indexes[best_idx] = used_case_indexes.get(best_idx, 0) + 1
         accepted_snippet = ranked_case_snippets[best_idx]
         excerpt_pairs.append(
             {
@@ -4581,6 +4677,15 @@ def _build_excerpt_pairs_for_case(
                 "_match_score": round(best_score, 4),
             }
         )
+
+    seen_accepted_texts: set[str] = set()
+    deduped_pairs: list[Dict[str, Any]] = []
+    for pair in excerpt_pairs:
+        text = str(pair.get("accepted_excerpt") or "").strip()
+        if text and text not in seen_accepted_texts:
+            seen_accepted_texts.add(text)
+            deduped_pairs.append(pair)
+    excerpt_pairs = deduped_pairs
 
     if len(excerpt_pairs) < ACCEPTED_CASE_MIN_EXCERPT_PAIRS:
         for accepted_snippet in ranked_case_snippets:
