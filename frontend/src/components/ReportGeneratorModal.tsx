@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import SchoolRecordVisualReport, { type VisualReportData } from './SchoolRecordVisualReport'
 import { getApiBaseUrl } from '../config'
+import { captureBusinessEvent } from '../utils/tracking'
+import { TrackingEventNames } from '../utils/trackingSchema'
 
 type LogEntry = { ts: number; msg: string }
 
@@ -110,6 +112,12 @@ export default function ReportGeneratorModal({ open, onClose, token }: Props) {
       setPhase('error')
       setErrorMsg(err.message || '알 수 없는 오류가 발생했습니다.')
       addLog(`❌ 오류: ${err.message}`)
+      void captureBusinessEvent(TrackingEventNames.schoolRecordVisualReportFailed, {
+        category: 'engagement',
+        source: 'report_generator_modal',
+        phase: 'generating',
+        error_message: err?.message || 'report_generation_failed',
+      })
     }
   }, [token, addLog])
 
@@ -161,11 +169,22 @@ export default function ReportGeneratorModal({ open, onClose, token }: Props) {
 
         addLog('✅ PDF 다운로드 완료!')
         setPhase('done')
+        void captureBusinessEvent(TrackingEventNames.schoolRecordVisualReportDownloaded, {
+          category: 'engagement',
+          source: 'report_generator_modal',
+          format: 'pdf',
+        })
       } catch (err: any) {
         console.error('PDF generation error:', err)
         setPhase('error')
         setErrorMsg(err.message || 'PDF 변환 중 오류가 발생했습니다.')
         addLog(`❌ PDF 변환 오류: ${err.message}`)
+        void captureBusinessEvent(TrackingEventNames.schoolRecordVisualReportFailed, {
+          category: 'engagement',
+          source: 'report_generator_modal',
+          phase: 'rendering',
+          error_message: err?.message || 'pdf_conversion_failed',
+        })
       }
     }, 1000)
 

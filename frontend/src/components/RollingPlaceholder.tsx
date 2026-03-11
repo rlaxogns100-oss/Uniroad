@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Trophy, FileText, FileSearch, Building2, ArrowUpRight } from 'lucide-react'
-import { trackUserAction } from '../utils/tracking'
+import { captureBusinessEvent, trackUserAction } from '../utils/tracking'
+import { TrackingEventNames } from '../utils/trackingSchema'
 
 // 카드 아이템 타입 (이미지 형식: 아이콘 위, 라벨 아래, 연한 배경)
 interface SuggestionCard {
@@ -164,6 +165,12 @@ export default function RollingPlaceholder({
   const handleCardClick = (index: number) => {
     const card = suggestionList[index]
     trackUserAction('category_card_click', card.title)
+    void captureBusinessEvent(TrackingEventNames.featureCardClick, {
+      category: 'engagement',
+      feature_id: card.title,
+      representative: card.representative,
+      interaction_type: 'feature_card_click',
+    })
 
     // 카테고리 클릭 시 질문 목록 펼침 (채팅 전송 X)
     if (selectedCategory === card.title) {
@@ -213,6 +220,13 @@ export default function RollingPlaceholder({
       return
     }
     setSelectedQuestionIndex(qIndex)
+    void captureBusinessEvent(TrackingEventNames.exampleQuestionClick, {
+      category: 'engagement',
+      feature_id: selectedCard?.title || 'unknown',
+      question_index: qIndex,
+      interaction_type: 'example_question_click',
+      question_preview: question.slice(0, 80),
+    })
     if (onQuestionClick) {
       onQuestionClick(question)
     }

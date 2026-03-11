@@ -1,5 +1,15 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
-import { trackGA4SignUp, trackGA4Login, trackUserAction, trackMetaSignUp } from '../utils/tracking'
+import {
+  captureBusinessEvent,
+  consumeAuthTrigger,
+  identifyTrackingUser,
+  resetTrackingUser,
+  trackGA4SignUp,
+  trackGA4Login,
+  trackUserAction,
+  trackMetaSignUp,
+} from '../utils/tracking'
+import { TrackingEventNames } from '../utils/trackingSchema'
 import { api, migrateMessages } from '../api/client'
 import { isCapacitorApp } from '../config'
 import { supabase } from '../lib/supabase'
@@ -69,15 +79,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const isNewUser = createdAt
             ? (Date.now() - new Date(createdAt).getTime()) / 1000 < 90
             : false
+          const authTrigger = consumeAuthTrigger()
 
           if (isNewUser) {
             trackGA4SignUp(provider)
             trackMetaSignUp(provider)
+            void captureBusinessEvent(TrackingEventNames.signupCompleted, {
+              category: 'activation',
+              method: provider,
+              signup_source: signupSource,
+              ...authTrigger,
+            })
             trackUserAction('signup_success', provider, {
               customData: { signup_source: signupSource }
             })
           } else {
             trackGA4Login(provider)
+            void captureBusinessEvent(TrackingEventNames.loginCompleted, {
+              category: 'activation',
+              method: provider,
+              signup_source: signupSource,
+              ...authTrigger,
+            })
             trackUserAction('login_success', provider, {
               customData: { signup_source: signupSource }
             })
@@ -159,14 +182,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
           const provider = (sessionStorage.getItem('uniroad_oauth_provider') || 'google') as 'google' | 'kakao'
           const signupSource = sessionStorage.getItem('uniroad_oauth_signup_source') || 'unknown'
+          const authTrigger = consumeAuthTrigger()
           if (is_new_user) {
             trackGA4SignUp(provider)
             trackMetaSignUp(provider)
+            void captureBusinessEvent(TrackingEventNames.signupCompleted, {
+              category: 'activation',
+              method: provider,
+              signup_source: signupSource,
+              ...authTrigger,
+            })
             trackUserAction('signup_success', provider, {
               customData: { signup_source: signupSource }
             })
           } else {
             trackGA4Login(provider)
+            void captureBusinessEvent(TrackingEventNames.loginCompleted, {
+              category: 'activation',
+              method: provider,
+              signup_source: signupSource,
+              ...authTrigger,
+            })
             trackUserAction('login_success', provider, {
               customData: { signup_source: signupSource }
             })
@@ -220,6 +256,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     handleOAuthCallback()
   }, [])
 
+  useEffect(() => {
+    if (user?.id) {
+      identifyTrackingUser(user)
+    }
+  }, [user])
+
   const verifyToken = async (token: string) => {
     try {
       const response = await api.get('/auth/me', {
@@ -262,6 +304,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       localStorage.setItem('user', JSON.stringify(verifiedUser))
       
       trackGA4Login('email')
+      void captureBusinessEvent(TrackingEventNames.loginCompleted, {
+        category: 'activation',
+        method: 'email',
+        ...consumeAuthTrigger(),
+      })
       
       // skipRedirect가 true면 리다이렉트 하지 않음 (모달에서 로그인 시)
       // Capacitor 앱에서는 window.location.href 사용 시 전체 리로드로 하얀 화면이 나올 수 있으므로 리다이렉트 생략 → 호출부에서 navigate 사용
@@ -296,6 +343,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       
       trackGA4SignUp('email')
       trackMetaSignUp('email')
+      void captureBusinessEvent(TrackingEventNames.signupCompleted, {
+        category: 'activation',
+        method: 'email',
+        ...consumeAuthTrigger(),
+      })
       return userData
     } catch (error: any) {
       throw new Error(error.response?.data?.detail || '회원가입 실패')
@@ -408,6 +460,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // 로그아웃 시 이전 사용자의 채팅 데이터가 남아있지 않도록 삭제
     sessionStorage.removeItem('uniroad_chat_messages')
     sessionStorage.removeItem('uniroad_chat_session_id')
+    resetTrackingUser()
     
     // 로그아웃 후 /chat 페이지로 이동 (비로그인 상태로 채팅 가능)
     window.location.href = '/chat'

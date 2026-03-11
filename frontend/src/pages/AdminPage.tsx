@@ -458,59 +458,69 @@ export default function AdminPage() {
       </header>
 
       <div className="max-w-6xl mx-auto px-6 py-8">
-        {/* 관리 메뉴 - 모든 관리 기능 진입 */}
+        {/* 관리 메뉴 - 메인/보조 기능 분리 */}
         <div className="bg-white rounded-2xl shadow-xl p-6 mb-8 border border-gray-100">
-          <h2 className="text-lg font-bold text-gray-800 mb-4">⚙️ 관리 메뉴</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            <button
-              onClick={() => navigate('/upload')}
-              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-green-100 text-green-800 hover:bg-green-200 transition-colors font-medium border border-green-200"
-            >
-              <span className="text-2xl">📤</span>
-              <span className="text-sm text-center">학교별 업로드</span>
-            </button>
-            <button
-              onClick={() => navigate('/adminagent')}
-              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-violet-100 text-violet-800 hover:bg-violet-200 transition-colors font-medium border border-violet-200"
-            >
-              <span className="text-2xl">📋</span>
-              <span className="text-sm text-center">로그/평가</span>
-            </button>
-            <button
-              onClick={() => navigate('/auto-reply')}
-              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-rose-100 text-rose-800 hover:bg-rose-200 transition-colors font-medium border border-rose-200"
-            >
-              <span className="text-2xl">💬</span>
-              <span className="text-sm text-center">댓글 봇</span>
-            </button>
-            <button
-              onClick={() => navigate('/admin-analytics')}
-              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors font-medium border border-amber-200"
-            >
-              <span className="text-2xl">📊</span>
-              <span className="text-sm text-center">관리자 분석</span>
-            </button>
-            <button
-              onClick={() => setShowFeedback(!showFeedback)}
-              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors font-medium border border-teal-200"
-            >
-              <span className="text-2xl">💡</span>
-              <span className="text-sm text-center">의견 보기</span>
-            </button>
-            <button
-              onClick={() => setShowUsers(!showUsers)}
-              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors font-medium border border-blue-200"
-            >
-              <span className="text-2xl">👤</span>
-              <span className="text-sm text-center">유저</span>
-            </button>
-            <button
-              onClick={() => navigate('/chat/admin/review')}
-              className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-slate-100 text-slate-800 hover:bg-slate-200 transition-colors font-medium border border-slate-200"
-            >
-              <span className="text-2xl">📝</span>
-              <span className="text-sm text-center">로그리뷰</span>
-            </button>
+          <h2 className="text-lg font-bold text-gray-800 mb-5">⚙️ 관리 메뉴</h2>
+
+          <div className="mb-6">
+            <h3 className="text-sm font-semibold text-gray-500 mb-3">메인 기능</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <button
+                onClick={() => navigate('/admin-analytics')}
+                className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-amber-100 text-amber-800 hover:bg-amber-200 transition-colors font-medium border border-amber-200"
+              >
+                <span className="text-2xl">📊</span>
+                <span className="text-sm text-center">관리자 분석</span>
+              </button>
+              <button
+                onClick={() => navigate('/upload')}
+                className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-green-100 text-green-800 hover:bg-green-200 transition-colors font-medium border border-green-200"
+              >
+                <span className="text-2xl">📤</span>
+                <span className="text-sm text-center">학교별 업로드</span>
+              </button>
+              <button
+                onClick={() => setShowUsers(!showUsers)}
+                className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-blue-100 text-blue-800 hover:bg-blue-200 transition-colors font-medium border border-blue-200"
+              >
+                <span className="text-2xl">👤</span>
+                <span className="text-sm text-center">유저</span>
+              </button>
+              <button
+                onClick={() => navigate('/chat/admin/review')}
+                className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl bg-slate-100 text-slate-800 hover:bg-slate-200 transition-colors font-medium border border-slate-200"
+              >
+                <span className="text-2xl">📝</span>
+                <span className="text-sm text-center">로그리뷰</span>
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <h3 className="text-sm font-semibold text-gray-500 mb-3">보조 기능</h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 max-w-2xl">
+              <button
+                onClick={() => navigate('/adminagent')}
+                className="flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl bg-violet-100 text-violet-800 hover:bg-violet-200 transition-colors font-medium border border-violet-200"
+              >
+                <span className="text-xl">📋</span>
+                <span className="text-xs sm:text-sm text-center">로그/평가</span>
+              </button>
+              <button
+                onClick={() => navigate('/auto-reply')}
+                className="flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl bg-rose-100 text-rose-800 hover:bg-rose-200 transition-colors font-medium border border-rose-200"
+              >
+                <span className="text-xl">💬</span>
+                <span className="text-xs sm:text-sm text-center">댓글 봇</span>
+              </button>
+              <button
+                onClick={() => setShowFeedback(!showFeedback)}
+                className="flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl bg-teal-100 text-teal-800 hover:bg-teal-200 transition-colors font-medium border border-teal-200"
+              >
+                <span className="text-xl">💡</span>
+                <span className="text-xs sm:text-sm text-center">의견 보기</span>
+              </button>
+            </div>
           </div>
         </div>
 

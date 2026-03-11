@@ -11,7 +11,8 @@
     "cap:ios": "npm run build:ios && npx cap sync ios",
     "cap:ios:local": "npm run build:ios:local && npx cap sync ios",
     "cap:open:ios": "npx cap open ios",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "posthog:setup": "node scripts/setup-posthog-dashboard.mjs"
   },
   "dependencies": {
     "@capacitor/app": "^8.0.1",

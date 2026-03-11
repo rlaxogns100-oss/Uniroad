@@ -4,6 +4,8 @@ import { jsPDF } from 'jspdf'
 import SchoolRecordVisualReport, { type VisualReportData } from './SchoolRecordVisualReport'
 import { getApiBaseUrl } from '../config'
 import { useVisualReportCache } from '../contexts/VisualReportCacheContext'
+import { captureBusinessEvent } from '../utils/tracking'
+import { TrackingEventNames } from '../utils/trackingSchema'
 
 type RunnerPhase = 'idle' | 'generating' | 'rendering'
 
@@ -56,6 +58,10 @@ export default function SchoolRecordPdfDownloadRunner({
     const run = async () => {
       onPhaseChangeRef.current('generating')
       setReportData(null)
+      void captureBusinessEvent(TrackingEventNames.schoolRecordVisualReportStarted, {
+        category: 'engagement',
+        source: 'pdf_download_runner',
+      })
 
       const cached = cache.consumeCachedData()
       if (cached) {
@@ -129,6 +135,12 @@ export default function SchoolRecordPdfDownloadRunner({
       } catch (err) {
         if (controller.signal.aborted || cancelled) return
         startedRequestIdRef.current = null
+        void captureBusinessEvent(TrackingEventNames.schoolRecordVisualReportFailed, {
+          category: 'engagement',
+          source: 'pdf_download_runner',
+          phase: 'generating',
+          error_message: err instanceof Error ? err.message : 'visual_report_generation_failed',
+        })
         onErrorRef.current(err instanceof Error ? err.message : '보고서 생성에 실패했습니다.')
       }
     }
@@ -193,12 +205,24 @@ export default function SchoolRecordPdfDownloadRunner({
         if (!cancelled) {
           pdf.save(`${reportData.studentName}_생기부_분석_리포트.pdf`)
           startedRequestIdRef.current = null
+          void captureBusinessEvent(TrackingEventNames.schoolRecordVisualReportDownloaded, {
+            category: 'engagement',
+            source: 'pdf_download_runner',
+            format: 'pdf',
+            page_count: pageElements.length,
+          })
           onSuccessRef.current()
         }
       } catch (err) {
         if (!cancelled) {
           startedRequestIdRef.current = null
           renderedRequestIdRef.current = null
+          void captureBusinessEvent(TrackingEventNames.schoolRecordVisualReportFailed, {
+            category: 'engagement',
+            source: 'pdf_download_runner',
+            phase: 'rendering',
+            error_message: err instanceof Error ? err.message : 'pdf_rendering_failed',
+          })
           onErrorRef.current(err instanceof Error ? err.message : 'PDF 생성에 실패했습니다.')
         }
       }

@@ -183,10 +183,10 @@ async def track_user_action(
         event_type = request.action_type
         if request.action_name == "send_message":
             event_type = "question_sent"
+        elif request.action_type == "business":
+            event_type = request.action_name
         
-        # custom_data에서 signup_source 추출
         custom_data = request.customData or {}
-        signup_source = custom_data.get("signup_source")
         
         event_data = {
             "event_time": datetime.now().isoformat(),
@@ -201,9 +201,8 @@ async def track_user_action(
             "user_session": request.session_id,
         }
         
-        # signup_source가 있으면 custom_data에 저장
-        if signup_source:
-            event_data["custom_data"] = {"signup_source": signup_source}
+        if custom_data:
+            event_data["custom_data"] = custom_data
         
         # action_name 컬럼이 없을 수 있으므로 예외 처리
         try:

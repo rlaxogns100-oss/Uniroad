@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../contexts/AuthContext'
 import { getApiBaseUrl } from '../config'
+import { captureBusinessEvent } from '../utils/tracking'
+import { TrackingEventNames } from '../utils/trackingSchema'
 import SchoolRecordPdfDownloadRunner from '../components/SchoolRecordPdfDownloadRunner'
 import {
   ArrowLeft,
@@ -4230,9 +4232,24 @@ function SchoolRecordDeepChatPage() {
       }
 
       void hydrateEvidenceDisplayExcerpts(assistantMessageId, report)
+      void captureBusinessEvent(TrackingEventNames.schoolRecordReportGenerated, {
+        category: 'engagement',
+        source: 'deep_chat',
+        section_count: report.sections?.length || 0,
+      })
       downloadStructuredReport(report)
+      void captureBusinessEvent(TrackingEventNames.schoolRecordReportDownloaded, {
+        category: 'engagement',
+        source: 'deep_chat',
+        format: 'html',
+      })
     } catch (err: any) {
       setError(err.message || '리포트 생성에 실패했습니다.')
+      void captureBusinessEvent(TrackingEventNames.schoolRecordReportFailed, {
+        category: 'engagement',
+        source: 'deep_chat',
+        error_message: err?.message || 'report_generation_failed',
+      })
     } finally {
       setIsGeneratingReport(false)
     }

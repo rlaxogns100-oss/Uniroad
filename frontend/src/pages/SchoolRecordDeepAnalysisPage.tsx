@@ -3,6 +3,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { useVisualReportCache } from '../contexts/VisualReportCacheContext'
 import { getApiBaseUrl } from '../config'
 import { getStudentGuideMethods, type GuideMethodId } from '../data/schoolRecordGuide'
+import { captureBusinessEvent } from '../utils/tracking'
+import { TrackingEventNames } from '../utils/trackingSchema'
 
 type ParsedSchoolRecordPreview = Record<string, any>
 type DetailSheetKey = 'attendance' | 'volunteer' | 'academic' | 'behavior'
@@ -279,6 +281,11 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
       if (res.status === 401) throw new Error('로그인 세션이 만료되었습니다. 다시 로그인해 주세요.')
       if (!res.ok) throw new Error('저장 실패')
       setFormsSaveStatus('ok')
+      void captureBusinessEvent(TrackingEventNames.schoolRecordSaved, {
+        category: 'engagement',
+        source: 'school_record_forms',
+        tab_id: INNER_SCHOOL_RECORD_TABS[innerSchoolRecordTab]?.id || 'unknown',
+      })
       setTimeout(() => setFormsSaveStatus('idle'), 2000)
     } catch {
       setFormsSaveStatus('err')
@@ -319,6 +326,11 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
     formData.append('file', fileToUse, uploadFilename)
     const url = `${getApiPrefix()}/school-record/forms/upload-pdf`
     setUploadProgress(15)
+    void captureBusinessEvent(TrackingEventNames.schoolRecordPdfUploadStarted, {
+      category: 'engagement',
+      file_name: uploadFilename,
+      interaction_type: 'school_record_pdf_upload',
+    })
 
     try {
       const res = await fetchWithTokenRefresh(url, {
@@ -335,6 +347,11 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
       }
       const data: Record<string, any> = await res.json().catch(() => ({}))
       if (!res.ok) {
+        void captureBusinessEvent(TrackingEventNames.schoolRecordPdfUploadFailed, {
+          category: 'engagement',
+          file_name: uploadFilename,
+          error_message: data?.detail || data?.error || 'upload_failed',
+        })
         setPdfUploadError(normalizePdfUploadError(data?.detail || data?.error || 'PDF 업로드에 실패했습니다.'))
         setPdfUploading(false)
         setUploadProgress(0)
@@ -342,6 +359,11 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
         return false
       }
       if (!data?.ok) {
+        void captureBusinessEvent(TrackingEventNames.schoolRecordPdfUploadFailed, {
+          category: 'engagement',
+          file_name: uploadFilename,
+          error_message: data?.detail || data?.error || 'upload_failed',
+        })
         setPdfUploadError(normalizePdfUploadError(data?.detail || data?.error || 'PDF 업로드에 실패했습니다.'))
         setPdfUploading(false)
         setUploadProgress(0)
@@ -369,6 +391,12 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
             ? data.parsedSchoolRecord
             : null
       )
+      void captureBusinessEvent(TrackingEventNames.schoolRecordPdfUploadSucceeded, {
+        category: 'engagement',
+        file_name: uploadFilename,
+        page_count: pageCount || null,
+        note_count: noteCount || null,
+      })
       setPdfFile(null)
       setPdfUploading(false)
       setUploadProgress(0)
@@ -376,7 +404,12 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
       const tok = (localStorage.getItem('access_token') || accessToken || '').trim()
       if (tok) visualReportCache.pregenerate(tok)
       return true
-    } catch {
+    } catch (err) {
+      void captureBusinessEvent(TrackingEventNames.schoolRecordPdfUploadFailed, {
+        category: 'engagement',
+        file_name: uploadFilename,
+        error_message: err instanceof Error ? err.message : 'network_upload_failed',
+      })
       setPdfUploadError('네트워크 오류로 업로드에 실패했습니다.')
       setPdfUploading(false)
       setUploadProgress(0)
@@ -417,6 +450,11 @@ function SchoolRecordDeepAnalysisPage(props: SchoolRecordDeepAnalysisPageProps) 
       setStandaloneEditMode(false)
       if (options?.showChangedOnlyAfterSave) setShowChangedOnly(true)
       setSchoolRecordSaveMessage('저장 완료')
+      void captureBusinessEvent(TrackingEventNames.schoolRecordSaved, {
+        category: 'engagement',
+        source: 'school_record_parsed',
+        has_parsed_preview: Boolean(parsedPreview),
+      })
     } catch (err) {
       setSchoolRecordSaveError(err instanceof Error ? err.message : '저장 중 오류가 발생했습니다.')
     } finally {

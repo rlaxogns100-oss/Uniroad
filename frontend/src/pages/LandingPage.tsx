@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { captureBusinessEvent } from '../utils/tracking'
+import { TrackingEventNames } from '../utils/trackingSchema'
 
 const TEAM = [
   {
@@ -53,6 +55,24 @@ function LandingPage() {
   const navigate = useNavigate()
   const [showSecurityFaq, setShowSecurityFaq] = useState(false)
 
+  const handleLandingCtaClick = (ctaId: string) => {
+    void captureBusinessEvent(TrackingEventNames.landingCtaClick, {
+      category: 'acquisition',
+      cta_id: ctaId,
+      interaction_type: 'cta_click',
+    })
+    navigate('/chat')
+  }
+
+  const openSecurityFaq = () => {
+    void captureBusinessEvent(TrackingEventNames.firstInteraction, {
+      category: 'acquisition',
+      interaction_type: 'faq_open',
+      source: 'landing_security_faq',
+    })
+    setShowSecurityFaq(true)
+  }
+
   return (
     <div className="min-h-screen bg-white text-[#141414]">
       {/* ── 헤더 (퍼슬리 스타일 - 투명 / 비디오 위에 떠 있는 형태) ── */}
@@ -63,7 +83,7 @@ function LandingPage() {
           </button>
           <nav className="hidden items-center gap-8 text-[14px] font-medium text-white/90 md:flex">
             <a href="#features" className="transition hover:text-white">서비스 소개</a>
-            <button onClick={() => navigate('/chat')} className="transition hover:text-white">지금 시작하기</button>
+            <button onClick={() => handleLandingCtaClick('header_start')} className="transition hover:text-white">지금 시작하기</button>
             <a href="#trusted" className="transition hover:text-white">API/기업제휴 문의</a>
             <a href="#faq" className="transition hover:text-white">FAQ</a>
           </nav>
@@ -103,7 +123,7 @@ function LandingPage() {
                 </div>
               </div>
               <button
-                onClick={() => navigate('/chat')}
+                onClick={() => handleLandingCtaClick('hero_primary')}
                 className="mt-10 w-fit rounded-full bg-gradient-to-b from-[#3b82f6] to-[#1d4ed8] px-10 py-5 text-lg font-bold text-white shadow-[0_4px_14px_rgba(29,78,216,0.4),0_2px_4px_rgba(0,0,0,0.08)] transition hover:from-[#2563eb] hover:to-[#1e40af] hover:shadow-[0_6px_20px_rgba(29,78,216,0.45)] active:shadow-[0_2px_8px_rgba(29,78,216,0.35)]"
               >
                 지금 시작하기 →
@@ -190,7 +210,7 @@ function LandingPage() {
                 </div>
               </div>
               <button
-                onClick={() => navigate('/chat')}
+                onClick={() => handleLandingCtaClick('features_primary')}
                 className="mt-10 w-fit rounded-full bg-gradient-to-b from-[#3b82f6] to-[#1d4ed8] px-9 py-4 text-[15px] font-bold text-white shadow-[0_3px_12px_rgba(29,78,216,0.35),0_1px_3px_rgba(0,0,0,0.06)] transition hover:from-[#2563eb] hover:to-[#1e40af] hover:shadow-[0_5px_16px_rgba(29,78,216,0.4)] active:shadow-[0_2px_6px_rgba(29,78,216,0.3)]"
               >
                 지금 시작하기 →
@@ -223,7 +243,7 @@ function LandingPage() {
                 매번 처음부터 설명할 필요 없이 딱 맞춘 답변만 드려요!
               </p>
               <button
-                onClick={() => navigate('/chat')}
+                onClick={() => handleLandingCtaClick('memory_primary')}
                 className="mt-10 w-fit rounded-full border-2 border-[#2d63f6] bg-white px-9 py-4 text-[15px] font-bold text-[#2d63f6] shadow-[0_2px_8px_rgba(45,99,246,0.15)] transition hover:bg-[#2d63f6] hover:text-white hover:shadow-[0_4px_14px_rgba(45,99,246,0.25)]"
               >
                 지금 시작하기
@@ -306,7 +326,7 @@ function LandingPage() {
             </div>
 
             <button
-              onClick={() => navigate('/chat')}
+              onClick={() => handleLandingCtaClick('personalized_primary')}
               className="mt-12 w-fit rounded-full bg-gradient-to-b from-[#3b82f6] to-[#1d4ed8] px-9 py-4 text-[15px] font-bold text-white shadow-[0_3px_12px_rgba(29,78,216,0.35),0_1px_3px_rgba(0,0,0,0.06)] transition hover:from-[#2563eb] hover:to-[#1e40af] hover:shadow-[0_5px_16px_rgba(29,78,216,0.4)]"
             >
               지금 분석받기 →
@@ -387,12 +407,12 @@ function LandingPage() {
               <button
                 type="button"
                 className="rounded-full border-2 border-[#2d63f6] bg-white px-10 py-4 text-[16px] font-bold text-[#2d63f6] shadow-[0_2px_8px_rgba(45,99,246,0.15)] transition hover:bg-[#2d63f6] hover:text-white hover:shadow-[0_4px_14px_rgba(45,99,246,0.25)]"
-                onClick={() => setShowSecurityFaq(true)}
+                onClick={openSecurityFaq}
               >
                 보안 FAQ 더 보기
               </button>
               <button
-                onClick={() => navigate('/chat')}
+                onClick={() => handleLandingCtaClick('security_primary')}
                 className="rounded-full bg-gradient-to-b from-[#3b82f6] to-[#1d4ed8] px-10 py-4 text-[16px] font-bold text-white shadow-[0_3px_12px_rgba(29,78,216,0.35)] transition hover:from-[#2563eb] hover:to-[#1e40af] hover:shadow-[0_5px_16px_rgba(29,78,216,0.4)]"
               >
                 지금 시작하기 →
@@ -583,7 +603,7 @@ function LandingPage() {
             </p>
             <div className="mt-9 flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
               <button
-                onClick={() => navigate('/chat')}
+                onClick={() => handleLandingCtaClick('footer_primary')}
                 className="rounded-full bg-gradient-to-b from-[#3b82f6] to-[#1d4ed8] px-10 py-4 text-[16px] font-bold text-white shadow-[0_3px_12px_rgba(29,78,216,0.35)] transition hover:from-[#2563eb] hover:to-[#1e40af] hover:shadow-[0_5px_16px_rgba(29,78,216,0.4)]"
               >
                 지금 시작하기

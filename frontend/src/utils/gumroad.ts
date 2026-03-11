@@ -3,6 +3,9 @@
  * - 결제 버튼 클릭 시 Gumroad Checkout URL로 즉시 이동
  */
 
+import { captureBusinessEvent } from './tracking'
+import { PaymentMethod, TrackingEventNames } from './trackingSchema'
+
 const CHECKOUT_BASE = 'https://roadmaster34.gumroad.com/l/zuqsd/PUO216D?wanted=true'
 
 export function getGumroadCheckoutUrl(userId: string, email?: string): string {
@@ -23,6 +26,11 @@ export function redirectToGumroadCheckout(userId: string, email?: string): boole
     console.warn('[Gumroad] Checkout URL 생성에 실패했습니다.')
     return false
   }
+  void captureBusinessEvent(TrackingEventNames.paymentStarted, {
+    category: 'revenue',
+    payment_method: PaymentMethod.Gumroad,
+    source: 'gumroad_redirect',
+  })
   window.location.href = url
   return true
 }

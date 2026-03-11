@@ -1,7 +1,8 @@
 import React, { useState } from 'react'
 import { GraduationCap } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
-import { trackUserAction } from '../utils/tracking'
+import { captureBusinessEvent, readAuthTrigger } from '../utils/tracking'
+import { TrackingEventNames } from '../utils/trackingSchema'
 
 interface AuthModalProps {
   isOpen: boolean
@@ -34,8 +35,13 @@ export default function AuthModal({ isOpen, onClose, customMessage, onLoginSucce
       setKakaoLoading(false)
       setLoading(false)
       setError('')
+      void captureBusinessEvent(TrackingEventNames.authModalView, {
+        category: 'activation',
+        auth_trigger: readAuthTrigger() || 'unknown',
+        auth_view: view,
+      })
     }
-  }, [isOpen])
+  }, [isOpen, view])
 
   if (!isOpen) return null
 
@@ -45,11 +51,12 @@ export default function AuthModal({ isOpen, onClose, customMessage, onLoginSucce
     setLoading(true)
 
     try {
-      await signIn(email, password, true)  // skipRedirect: true - 모달에서 로그인 시 리다이렉트 안함
-      const signupSource = sessionStorage.getItem('uniroad_login_modal_source') || 'unknown'
-      trackUserAction('login_success', 'email', {
-        customData: { signup_source: signupSource }
+      void captureBusinessEvent(TrackingEventNames.loginClick, {
+        category: 'activation',
+        method: 'email',
+        auth_trigger: readAuthTrigger() || 'unknown',
       })
+      await signIn(email, password, true)  // skipRedirect: true - 모달에서 로그인 시 리다이렉트 안함
       onLoginSuccess?.()
       onClose()
       resetForm()
@@ -66,11 +73,12 @@ export default function AuthModal({ isOpen, onClose, customMessage, onLoginSucce
     setLoading(true)
 
     try {
-      await signUp(email, password, name)
-      const signupSource = sessionStorage.getItem('uniroad_login_modal_source') || 'unknown'
-      trackUserAction('signup_success', 'email', {
-        customData: { signup_source: signupSource }
+      void captureBusinessEvent(TrackingEventNames.signupClick, {
+        category: 'activation',
+        method: 'email',
+        auth_trigger: readAuthTrigger() || 'unknown',
       })
+      await signUp(email, password, name)
       onLoginSuccess?.()
       onClose()
       resetForm()
@@ -91,6 +99,11 @@ export default function AuthModal({ isOpen, onClose, customMessage, onLoginSucce
       // OAuth 리다이렉트 전에 signup_source 저장 (OAuth 콜백에서 사용)
       const signupSource = sessionStorage.getItem('uniroad_login_modal_source') || 'unknown'
       sessionStorage.setItem('uniroad_oauth_signup_source', signupSource)
+      void captureBusinessEvent(TrackingEventNames.oauthClick, {
+        category: 'activation',
+        method: 'google',
+        auth_trigger: readAuthTrigger() || 'unknown',
+      })
       await signInWithGoogle()
     } catch (err: any) {
       setError(err.message)
@@ -108,6 +121,11 @@ export default function AuthModal({ isOpen, onClose, customMessage, onLoginSucce
       // OAuth 리다이렉트 전에 signup_source 저장 (OAuth 콜백에서 사용)
       const signupSource = sessionStorage.getItem('uniroad_login_modal_source') || 'unknown'
       sessionStorage.setItem('uniroad_oauth_signup_source', signupSource)
+      void captureBusinessEvent(TrackingEventNames.oauthClick, {
+        category: 'activation',
+        method: 'kakao',
+        auth_trigger: readAuthTrigger() || 'unknown',
+      })
       await signInWithKakao()
     } catch (err: any) {
       setError(err.message)

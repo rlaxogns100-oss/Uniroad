@@ -1,5 +1,7 @@
 import { useAuth } from '../contexts/AuthContext'
+import { captureBusinessEvent } from '../utils/tracking'
 import { redirectToGumroadCheckout } from '../utils/gumroad'
+import { PaymentMethod, TrackingEventNames } from '../utils/trackingSchema'
 
 interface SubscribeButtonProps {
   className?: string
@@ -16,6 +18,11 @@ export function SubscribeButton({ className = '', children }: SubscribeButtonPro
     if (!isAuthenticated || !user?.id) {
       return
     }
+    void captureBusinessEvent(TrackingEventNames.paymentCtaClick, {
+      category: 'revenue',
+      payment_method: PaymentMethod.Gumroad,
+      source: 'subscribe_button',
+    })
     const ok = redirectToGumroadCheckout(user.id, user.email)
     if (!ok) {
       alert('구독 페이지 URL이 설정되지 않았습니다. 잠시 후 다시 시도해 주세요.')

@@ -4,6 +4,8 @@ import { useAuth } from '../contexts/AuthContext'
 import { getApiBaseUrl } from '../config'
 import { BestPracticeCard } from '../components/BestPracticeCard'
 import { getMajorCategoryFromHopeMajor } from '../data/bestPractices'
+import { captureBusinessEvent } from '../utils/tracking'
+import { TrackingEventNames } from '../utils/trackingSchema'
 
 interface EvalResult {
   success: boolean
@@ -1192,6 +1194,10 @@ export default function SchoolRecordEvalPage() {
       })
       if (!res.ok) throw new Error('저장 실패')
       setFormsSaveStatus('ok')
+      void captureBusinessEvent(TrackingEventNames.schoolRecordSaved, {
+        category: 'engagement',
+        source: 'school_record_eval_forms',
+      })
       setTimeout(() => setFormsSaveStatus('idle'), 2000)
     } catch {
       setFormsSaveStatus('err')
@@ -1212,6 +1218,11 @@ export default function SchoolRecordEvalPage() {
     setError('')
     setResult(null)
     setLoading(true)
+    void captureBusinessEvent(TrackingEventNames.schoolRecordAnalysisRequested, {
+      category: 'engagement',
+      source: 'school_record_eval',
+      has_hope_major: Boolean(hopeMajor.trim()),
+    })
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (accessToken) headers['Authorization'] = `Bearer ${accessToken}`

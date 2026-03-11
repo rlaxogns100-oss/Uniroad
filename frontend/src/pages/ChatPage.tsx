@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react'
 import { useNavigate, useSearchParams, useLocation } from 'react-router-dom'
+import { useFeatureFlagVariantKey } from 'posthog-js/react'
 import {
   sendMessageStream,
   sendMessageStreamWithImage,
@@ -44,7 +45,8 @@ import {
 import { useAuth } from '../contexts/AuthContext'
 import { useLayoutMode } from '../contexts/LayoutModeContext'
 import { useChat } from '../hooks/useChat'
-import { getSessionId, trackUserAction } from '../utils/tracking'
+import { captureBusinessEvent, getSessionId, setAuthTrigger, trackUserAction } from '../utils/tracking'
+import { AuthTrigger, PaymentMethod, PaywallReason, TrackingEventNames } from '../utils/trackingSchema'
 import { FrontendTimingLogger } from '../utils/timingLogger'
 import { API_BASE, getApiBaseUrl, isAppBuild, isGalaxyAppSession } from '../config'
 import { addLog } from '../utils/adminLogger'
@@ -740,6 +742,10 @@ export default function ChatPage() {
   const [bankTransferName, setBankTransferName] = useState('')
   const [bankTransferPhone, setBankTransferPhone] = useState('')
   const [bankTransferSubmitting, setBankTransferSubmitting] = useState(false)
+  const pricingVariant = useFeatureFlagVariantKey('pricing-test')
+  const proPrice = pricingVariant === 'control' ? '2,900' : pricingVariant === 'test' ? '5,900' : '5,900'
+  const proPriceNum = pricingVariant === 'control' ? 2900 : pricingVariant === 'test' ? 5900 : 5900
+  const priceVariantProps = { price_variant: pricingVariant || 'unknown', price_amount: proPriceNum }
   const [dailyQuestionCount, setDailyQuestionCount] = useState<number>(() => {
     // localStorage에서 오늘 질문 횟수 불러오기
     const today = new Date().toDateString()
@@ -943,6 +949,7 @@ export default function ChatPage() {
   const [visualReportDownloadPhase, setVisualReportDownloadPhase] = useState<'idle' | 'generating' | 'rendering'>('idle')
   const [pendingReportMessageId, setPendingReportMessageId] = useState<string | null>(null)
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null)
+  const isSchoolRecordConsultSelected = schoolRecordToolEnabled || selectedCategory === '생활기록부'
   const [skipSchoolRecordToolConfirm, setSkipSchoolRecordToolConfirm] = useState<boolean>(() => {
     try {
       return localStorage.getItem(SCHOOL_RECORD_TOOL_SKIP_KEY) === 'true'
@@ -1052,13 +1059,23 @@ export default function ChatPage() {
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
     setThinkingModeModalAnchor({ top: rect.top, left: rect.left, width: rect.width })
     setIsThinkingModeModalOpen(true)
+    void captureBusinessEvent(TrackingEventNames.thinkingModeToggle, { category: 'engagement', source: 'chat_input' })
   }
   const closeThinkingModeModal = () => {
     setIsThinkingModeModalOpen(false)
     setThinkingModeModalAnchor(null)
   }
-  const openProModal = () => {
+  const openProModal = (
+    reason: string = PaywallReason.ManualUpgrade,
+    metadata?: Record<string, any>
+  ) => {
     if (isGalaxySession) return
+    void captureBusinessEvent(TrackingEventNames.paywallView, {
+      category: 'revenue',
+      reason,
+      ...priceVariantProps,
+      ...metadata,
+    })
     setIsProModalOpen(true)
   }
   const handleThinkingModeSelect = () => {
@@ -1071,6 +1088,11 @@ export default function ChatPage() {
     closeThinkingModeModal()
 
     if (!isAuthenticated) {
+      setAuthTrigger(AuthTrigger.ThinkingMode)
+      void captureBusinessEvent(TrackingEventNames.chatBlockedAuthRequired, {
+        category: 'activation',
+        trigger: AuthTrigger.ThinkingMode,
+      })
       trackUserAction('login_modal_open', 'thinking_mode')
       sessionStorage.setItem('uniroad_login_modal_source', 'thinking_mode')
       setAuthModalMessage({
@@ -1081,7 +1103,7 @@ export default function ChatPage() {
       return
     }
 
-    openProModal()
+    openProModal(PaywallReason.Thinking)
   }
   useEffect(() => {
     try {
@@ -1108,9 +1130,16 @@ export default function ChatPage() {
   const applyReferralCode = () => {
     if (!isAuthenticated || !user?.id) {
       setIsProModalOpen(false)
+      setAuthTrigger(AuthTrigger.HeaderLogin)
       setIsAuthModalOpen(true)
       return
     }
+    void captureBusinessEvent(TrackingEventNames.paymentCtaClick, {
+      category: 'revenue',
+      payment_method: PaymentMethod.ReferralCode,
+      source: 'pro_modal',
+      ...priceVariantProps,
+    })
     const input = window.prompt('추천인 코드를 입력해 주세요.')
     if (input === null) return
     const code = input.trim().toLowerCase()
@@ -1127,6 +1156,11 @@ export default function ChatPage() {
     }))
     setReferralPromoExpiresAt(expiresAt)
     setIsProModalOpen(false)
+    void captureBusinessEvent(TrackingEventNames.referralCodeApplied, {
+      category: 'revenue',
+      payment_method: PaymentMethod.ReferralCode,
+      referral_code: code,
+    })
     alert('추천인 코드가 적용되었습니다. 1달 무료(Pro) 혜택이 활성화되었어요.')
   }
 
@@ -1809,7 +1843,9 @@ export default function ChatPage() {
       return
     }
     if (!hasProAccess) {
-      openProModal()
+      openProModal(PaywallReason.DeepAnalysis, {
+        source: 'school_record_start_confirm',
+      })
       return
     }
     // 모달에서 "새 채팅"이 보인 경우 이미 연동된 상태이므로, 재조회 없이 반드시 생기부 새 채팅으로 이동
@@ -1822,7 +1858,10 @@ export default function ChatPage() {
     setIsSchoolRecordToolModalOpen(false)
     if (!hasProAccess) {
       setIsSchoolRecordStartPrepared(false)
-      openProModal()
+      openProModal(PaywallReason.DeepAnalysis, {
+        source: 'school_record_start_action',
+        action_id: actionId,
+      })
       return
     }
     await activateSchoolRecordTool(
@@ -1833,7 +1872,17 @@ export default function ChatPage() {
   }
 
   const handleSchoolRecordShortcut = async () => {
+    void captureBusinessEvent(TrackingEventNames.schoolRecordEntryClick, {
+      category: 'engagement',
+      source: 'chat_shortcut',
+      interaction_type: 'school_record_entry_click',
+    })
     if (!isAuthenticated) {
+      setAuthTrigger(AuthTrigger.SchoolRecordAnalysis)
+      void captureBusinessEvent(TrackingEventNames.chatBlockedAuthRequired, {
+        category: 'activation',
+        trigger: AuthTrigger.SchoolRecordAnalysis,
+      })
       trackUserAction('login_modal_open', 'school_record_analysis')
       sessionStorage.setItem('uniroad_login_modal_source', 'school_record_analysis')
       setIsAuthModalOpen(true)
@@ -1849,22 +1898,39 @@ export default function ChatPage() {
       return
     }
 
-    if (!hasProAccess) {
-      openProModal()
-      if (!isDesktopLayout) setIsSideNavOpen(false)
-      return
+    if (hasProAccess) {
+      // Pro 사용자는 바로 생기부 분석 전용 새 채팅을 준비한다.
+      await activateSchoolRecordTool(true)
+      setIsSchoolRecordStartPrepared(true)
+    } else {
+      // Basic 사용자는 시작 모달까지만 열고, 다음 액션에서 결제창으로 연결한다.
+      setIsSchoolRecordStartPrepared(false)
     }
-
-    // 생기부 분석 진입: 연동 여부 확인 후 분석 전용 채팅으로 이동
-    await activateSchoolRecordTool(true)
-    setIsSchoolRecordStartPrepared(true)
     setIsSchoolRecordToolModalOpen(true)
     if (!isDesktopLayout) setIsSideNavOpen(false)
   }
 
+  const resetSchoolRecordConsultState = useCallback(() => {
+    setSchoolRecordToolEnabled(false)
+    schoolRecordModeRef.current = false
+    setSelectedCategory('합격 예측')
+    if (isSchoolRecordModeUrl) {
+      navigate('/chat', { replace: true })
+    }
+  }, [isSchoolRecordModeUrl, navigate])
+
   const handleToggleSchoolRecordInputMode = async () => {
     if (schoolRecordToolEnabled) {
       setSchoolRecordToolEnabled(false)
+      if (selectedCategory === '생활기록부') setSelectedCategory(null)
+      schoolRecordModeRef.current = false
+      if (isSchoolRecordModeUrl) navigate('/chat', { replace: true })
+      return
+    }
+    if (isAuthenticated && !hasProAccess) {
+      setSelectedCategory('생활기록부')
+      setScorePredictionMode(false)
+      setSchoolRecordToolEnabled(true)
       schoolRecordModeRef.current = false
       if (isSchoolRecordModeUrl) navigate('/chat', { replace: true })
       return
@@ -1873,13 +1939,21 @@ export default function ChatPage() {
   }
 
   const handleChatTextareaFocus = () => {
-    if (selectedCategory === '생활기록부' && !hasProAccess) {
-      setSelectedCategory(null)
-    }
+    // 선택한 상담 모드를 유지해 현재 상태를 명확히 보여준다.
   }
 
   const handleScorePredictionShortcut = async () => {
+    void captureBusinessEvent(TrackingEventNames.scoreLinkEntryClick, {
+      category: 'engagement',
+      source: 'chat_shortcut',
+      interaction_type: 'score_link_start',
+    })
     if (!isAuthenticated) {
+      setAuthTrigger(AuthTrigger.SchoolGradeInput)
+      void captureBusinessEvent(TrackingEventNames.chatBlockedAuthRequired, {
+        category: 'activation',
+        trigger: AuthTrigger.SchoolGradeInput,
+      })
       trackUserAction('login_modal_open', 'school_grade_input')
       sessionStorage.setItem('uniroad_login_modal_source', 'school_grade_input')
       setIsAuthModalOpen(true)
@@ -1913,19 +1987,58 @@ export default function ChatPage() {
     window.location.href = widgetUrl
   }
   const openApprovalWidgetChoice = () => {
+    void captureBusinessEvent(TrackingEventNames.paymentCtaClick, {
+      category: 'revenue',
+      payment_method: 'approval_widget',
+      source: 'pro_modal',
+      ...priceVariantProps,
+    })
     setIsApprovalWidgetChoiceOpen(true)
   }
   const openApprovalSimplePayWidget = () => {
     const oneTimeWidgetUrl = import.meta.env.VITE_TOSS_WIDGET_APPROVAL_ONETIME_URL || '/payments/checkout.html'
+    void captureBusinessEvent(TrackingEventNames.paymentMethodSelected, {
+      category: 'revenue',
+      payment_method: PaymentMethod.TossSimplePay,
+      ...priceVariantProps,
+    })
+    void captureBusinessEvent(TrackingEventNames.paymentStarted, {
+      category: 'revenue',
+      payment_method: PaymentMethod.TossSimplePay,
+      source: 'approval_widget',
+      ...priceVariantProps,
+    })
     openApprovalPaymentWidget(oneTimeWidgetUrl)
     setIsApprovalWidgetChoiceOpen(false)
   }
   const openApprovalBillingWidget = () => {
     const billingWidgetUrl = import.meta.env.VITE_TOSS_WIDGET_APPROVAL_BILLING_URL || '/payments/billing.html'
+    void captureBusinessEvent(TrackingEventNames.paymentMethodSelected, {
+      category: 'revenue',
+      payment_method: PaymentMethod.TossBilling,
+      ...priceVariantProps,
+    })
+    void captureBusinessEvent(TrackingEventNames.paymentStarted, {
+      category: 'revenue',
+      payment_method: PaymentMethod.TossBilling,
+      source: 'approval_widget',
+      ...priceVariantProps,
+    })
     openApprovalPaymentWidget(billingWidgetUrl)
     setIsApprovalWidgetChoiceOpen(false)
   }
   const subscribeByBankTransfer = () => {
+    void captureBusinessEvent(TrackingEventNames.paymentCtaClick, {
+      category: 'revenue',
+      payment_method: PaymentMethod.BankTransfer,
+      source: 'pro_modal',
+      ...priceVariantProps,
+    })
+    void captureBusinessEvent(TrackingEventNames.paymentMethodSelected, {
+      category: 'revenue',
+      payment_method: PaymentMethod.BankTransfer,
+      ...priceVariantProps,
+    })
     setBankTransferName(user?.name || '')
     setBankTransferPhone('')
     setIsBankTransferModalOpen(true)
@@ -1948,6 +2061,12 @@ export default function ChatPage() {
 
     setBankTransferSubmitting(true)
     try {
+      void captureBusinessEvent(TrackingEventNames.paymentStarted, {
+        category: 'revenue',
+        payment_method: PaymentMethod.BankTransfer,
+        source: 'bank_transfer_modal',
+        ...priceVariantProps,
+      })
       const response = await fetch(
         `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/payments/bank-transfer/submit`,
         {
@@ -1968,9 +2087,22 @@ export default function ChatPage() {
       }
       setIsBankTransferModalOpen(false)
       setIsProModalOpen(false)
+      void captureBusinessEvent(TrackingEventNames.paymentCompleted, {
+        category: 'revenue',
+        payment_method: PaymentMethod.BankTransfer,
+        source: 'bank_transfer_modal',
+        ...priceVariantProps,
+      })
       alert('신청이 접수되어 Pro가 즉시 적용되었습니다. 관리자가 입금 여부를 확인합니다.')
       window.location.reload()
     } catch (e: any) {
+      void captureBusinessEvent(TrackingEventNames.paymentFailed, {
+        category: 'revenue',
+        payment_method: PaymentMethod.BankTransfer,
+        source: 'bank_transfer_modal',
+        error_message: e?.message || 'bank_transfer_failed',
+        ...priceVariantProps,
+      })
       alert(e?.message || '무통장입금 신청 중 오류가 발생했습니다.')
     } finally {
       setBankTransferSubmitting(false)
@@ -2322,8 +2454,8 @@ export default function ChatPage() {
     }
   }, [isSearchOpen])
 
-  // 새 채팅 시작 핸들러
   const handleNewChat = async (keepSchoolRecordMode = false) => {
+    void captureBusinessEvent(TrackingEventNames.newChatClick, { category: 'engagement', source: 'sidebar' })
     // 진행 중인 요청 취소
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
@@ -2487,6 +2619,9 @@ export default function ChatPage() {
         ? undefined
         : item.id
     )
+    if (item.id === 'builtin-school-record') {
+      setSelectedCategory('생활기록부')
+    }
 
     requestAnimationFrame(() => {
       if (!textarea) return
@@ -2790,14 +2925,24 @@ export default function ChatPage() {
     const requestsSchoolRecord = SCHOOL_RECORD_MENTION_REGEX.test(rawTrimmedMessage)
     const requestsLinkedNaesin = LINKED_NAESIN_TEST_REGEX.test(rawTrimmedMessage)
     const requestsMockExam = MOCK_EXAM_TEST_REGEX.test(rawTrimmedMessage)
+    const shouldTreatAsSchoolRecordConsult = isSchoolRecordConsultSelected || requestsSchoolRecord
 
-    if (requestsSchoolRecord || requestsLinkedNaesin || requestsMockExam || MY_SCORE_ALIAS_TEST_REGEX.test(rawTrimmedMessage)) {
+    if (shouldTreatAsSchoolRecordConsult || requestsLinkedNaesin || requestsMockExam || MY_SCORE_ALIAS_TEST_REGEX.test(rawTrimmedMessage)) {
       try {
         const linkedState = await refreshLinkedDataState()
 
-        if (requestsSchoolRecord && !linkedState.schoolRecordLinked) {
+        if (shouldTreatAsSchoolRecordConsult && !linkedState.schoolRecordLinked) {
           setSchoolRecordLinked(false)
           setIsSchoolRecordToolModalOpen(true)
+          return
+        }
+
+        if (shouldTreatAsSchoolRecordConsult && isAuthenticated && !hasProAccess) {
+          setSelectedCategory('생활기록부')
+          setSchoolRecordToolEnabled(true)
+          openProModal(PaywallReason.SchoolRecordConsult, {
+            source: requestsSchoolRecord ? 'school_record_tag_send' : 'school_record_consult_send',
+          })
           return
         }
 
@@ -2817,7 +2962,7 @@ export default function ChatPage() {
           }
         }
       } catch {
-        if (requestsSchoolRecord) {
+        if (shouldTreatAsSchoolRecordConsult) {
           setSchoolRecordLinked(false)
           setIsSchoolRecordToolModalOpen(true)
         } else {
@@ -2837,6 +2982,11 @@ export default function ChatPage() {
     // 일일 질문 횟수 체크 (로그인한 유저만)
     const dailyLimit = hasProAccess ? DAILY_QUESTION_LIMIT_PRO : DAILY_QUESTION_LIMIT_BASIC
     if (isAuthenticated && dailyQuestionCount >= dailyLimit) {
+      void captureBusinessEvent(TrackingEventNames.paywallView, {
+        category: 'revenue',
+        reason: PaywallReason.DailyLimit,
+        source: 'daily_limit_guard',
+      })
       setIsQuotaExceeded(true)
       return
     }
@@ -2903,6 +3053,22 @@ export default function ChatPage() {
     console.log('📤 메시지 전송 시작:', messageToSend)
     sendingRef.current = true
     isStreamingRef.current = true // 스트리밍 시작
+    const isFirstUserMessageInView = messages.filter((msg) => msg.isUser).length === 0
+    if (isFirstUserMessageInView) {
+      void captureBusinessEvent(TrackingEventNames.chatFirstMessage, {
+        category: 'engagement',
+        interaction_type: 'chat_first_message',
+        message_length: trimmedMessage.length,
+      })
+    }
+    void captureBusinessEvent(TrackingEventNames.chatMessageSent, {
+      category: 'engagement',
+      interaction_type: 'chat_message_sent',
+      message_length: trimmedMessage.length,
+      has_image: Boolean(selectedImage),
+      uses_school_record: requestsSchoolRecord,
+      uses_linked_score: requestsLinkedNaesin || requestsMockExam,
+    })
     
     // 타이밍 측정 시작
     const timingLogger = new FrontendTimingLogger(currentSessionId || 'new', messageToSend)
@@ -2994,7 +3160,7 @@ export default function ChatPage() {
       // 연동 내신 사용 자체는 항상 전달하되,
       // 점수예측 모드에서는 카드 없이 바로 답변하도록 review만 생략한다.
       const useLinkedNaesinForRequest = hasLinkedNaesinMention
-      const useSchoolRecordForRequest = schoolRecordToolEnabled || hasSchoolRecordMention
+      const useSchoolRecordForRequest = isSchoolRecordConsultSelected || hasSchoolRecordMention
       const skipReviewForLinkedNaesin = hasLinkedNaesinMention && scorePredictionMode
       const hasCompactNaesinDigits = /(?:^|[^0-9])(?:[1-9](?:[\s,./|-]*[1-9]){4,5})(?:[^0-9]|$)/.test(normalizedUserInput)
       const forceShowNaesinCard = (hasLinkedNaesinMention && !skipReviewForLinkedNaesin) || hasCompactNaesinDigits
@@ -3036,6 +3202,12 @@ export default function ChatPage() {
           // 비로그인 체험 응답은 마스킹 처리 + 현재 세션 입력 잠금
           const shouldMask = response.require_login === true
           if (shouldMask) {
+            setAuthTrigger(AuthTrigger.GuestLimit)
+            void captureBusinessEvent(TrackingEventNames.chatBlockedAuthRequired, {
+              category: 'activation',
+              trigger: AuthTrigger.GuestLimit,
+              source: 'masked_response',
+            })
             setLockReason('guest_masked')
             setSessionLockedByMasking(true)
           } else if (!isAuthenticated) {
@@ -3134,6 +3306,11 @@ export default function ChatPage() {
 
           // 인증 토큰 만료/검증 실패 - 로그인 모달 즉시 표시
           if (error === '__AUTH_REQUIRED__') {
+            setAuthTrigger(AuthTrigger.AuthExpired)
+            void captureBusinessEvent(TrackingEventNames.chatBlockedAuthRequired, {
+              category: 'activation',
+              trigger: AuthTrigger.AuthExpired,
+            })
             setMessages((prev) => prev.filter(msg => msg.id !== userMessage.id && msg.id !== streamingBotMessageId))
             setPendingSchoolRecordResearchQuery(null)
             setLockReason('auth_expired')
@@ -3150,6 +3327,11 @@ export default function ChatPage() {
           
           // 비로그인 사용자 Rate Limit 초과 - 로그인 유도
           if (error === '__RATE_LIMIT_GUEST__') {
+            setAuthTrigger(AuthTrigger.GuestLimit)
+            void captureBusinessEvent(TrackingEventNames.chatBlockedAuthRequired, {
+              category: 'activation',
+              trigger: AuthTrigger.GuestLimit,
+            })
             setMessages((prev) => prev.filter(msg => msg.id !== streamingBotMessageId))
             setPendingSchoolRecordResearchQuery(null)
             setLockReason('guest_masked')
@@ -4040,7 +4222,9 @@ export default function ChatPage() {
             </button>
             <button
               onClick={() => {
+                void captureBusinessEvent(TrackingEventNames.myRecordLinkClick, { category: 'engagement', source: 'sidebar' })
                 if (!isAuthenticated) {
+                  setAuthTrigger(AuthTrigger.SchoolRecordLink)
                   trackUserAction('login_modal_open', 'school_record_link')
                   sessionStorage.setItem('uniroad_login_modal_source', 'school_record_link')
                   setIsAuthModalOpen(true)
@@ -4217,6 +4401,7 @@ export default function ChatPage() {
                 href="https://uni2road.com/delete.html"
                 onClick={(e) => {
                   e.preventDefault()
+                  void captureBusinessEvent(TrackingEventNames.accountDeleteClick, { category: 'engagement', source: 'sidebar' })
                   void openExternalPage('https://uni2road.com/delete.html')
                 }}
                 className="hover:text-gray-700 transition-colors shrink-0"
@@ -4227,6 +4412,7 @@ export default function ChatPage() {
             {!isAuthenticated && (
               <button
                 onClick={() => {
+                  setAuthTrigger(AuthTrigger.SidebarLogin)
                   trackUserAction('login_modal_open', 'sidebar_login_button')
                   sessionStorage.setItem('uniroad_login_modal_source', 'sidebar_login_button')
                   setIsAuthModalOpen(true)
@@ -4261,7 +4447,7 @@ export default function ChatPage() {
             <div className="flex items-center gap-2 ml-2">
             {!isSideNavOpen && (
             <button
-                onClick={() => setIsSideNavOpen(true)}
+                onClick={() => { void captureBusinessEvent(TrackingEventNames.sidebarOpen, { category: 'engagement', source: 'mobile_header' }); setIsSideNavOpen(true) }}
                 className="p-2 mr-4 hover:bg-gray-100 rounded-lg transition-colors"
             >
               <svg className="w-5 h-5 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -4315,7 +4501,9 @@ export default function ChatPage() {
                         type="button"
                         onClick={() => {
                           setIsUserMenuOpen(false)
-                          openProModal()
+                          openProModal(PaywallReason.SubscriptionManage, {
+                            source: 'user_menu',
+                          })
                         }}
                         className="w-full px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
                       >
@@ -4356,6 +4544,7 @@ export default function ChatPage() {
               ) : (
                 <button
                   onClick={() => {
+                    setAuthTrigger(AuthTrigger.HeaderLogin)
                     trackUserAction('login_modal_open', 'header_login_button')
                     sessionStorage.setItem('uniroad_login_modal_source', 'header_login_button')
                     setIsAuthModalOpen(true)
@@ -4374,7 +4563,7 @@ export default function ChatPage() {
               {/* 사이드바 토글 버튼 - 사이드바 닫혔을 때만 표시 */}
               {!isSideNavOpen && (
                 <button
-                  onClick={() => setIsSideNavOpen(true)}
+                  onClick={() => { void captureBusinessEvent(TrackingEventNames.sidebarOpen, { category: 'engagement', source: 'desktop_header' }); setIsSideNavOpen(true) }}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   title="사이드바 열기"
                 >
@@ -4511,7 +4700,9 @@ export default function ChatPage() {
                         type="button"
                         onClick={() => {
                           setIsUserMenuOpen(false)
-                          openProModal()
+                          openProModal(PaywallReason.SubscriptionManage, {
+                            source: 'user_menu',
+                          })
                         }}
                         className="w-full px-4 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
                       >
@@ -4552,6 +4743,7 @@ export default function ChatPage() {
               ) : (
                 <button
                   onClick={() => {
+                    setAuthTrigger(AuthTrigger.HeaderLogin)
                     trackUserAction('login_modal_open', 'header_login_button')
                     sessionStorage.setItem('uniroad_login_modal_source', 'header_login_button')
                     setIsAuthModalOpen(true)
@@ -4679,7 +4871,7 @@ export default function ChatPage() {
                             onClick={() => { void handleToggleSchoolRecordInputMode() }}
                             disabled={isLoading || isInputLocked}
                             className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-semibold transition-all duration-200 disabled:opacity-50 ${
-                              schoolRecordToolEnabled
+                              isSchoolRecordConsultSelected
                                 ? 'border-transparent bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-[0_8px_24px_rgba(139,92,246,0.18)] hover:brightness-105 hover:shadow-[0_12px_28px_rgba(139,92,246,0.32)]'
                                 : 'border-gray-200 bg-white text-gray-600 shadow-sm hover:bg-gray-50 hover:text-gray-800'
                             }`}
@@ -4719,12 +4911,14 @@ export default function ChatPage() {
                       </div>
                     </div>
                   </div>
-                  {/* 입력창 바로 아래 4개 카드: 생기부/점수예측 전용 채팅일 때 숨김 */}
-                  {!schoolRecordToolEnabled && !scorePredictionMode && (
+                  {/* 입력창 바로 아래 4개 카드: 점수예측 모드일 때만 숨김 */}
+                  {!scorePredictionMode && (
                   <div className="w-full flex justify-center mb-2 sm:mb-3">
                     <RollingPlaceholder
                       onQuestionClick={(question) => {
-                        setSelectedCategory(null) // 질문 클릭 시 카테고리 초기화
+                        if (selectedCategory !== '생활기록부') {
+                          setSelectedCategory(null)
+                        }
                         handleSend(question)
                       }}
                       selectedCategory={selectedCategory}
@@ -4769,36 +4963,6 @@ export default function ChatPage() {
                   </div>
                   )}
                 </div>
-
-                  {schoolRecordToolEnabled && (
-                    <div className="w-full mb-6 sm:mb-10 max-w-3xl mx-auto px-2 sm:px-4">
-                      {/* 상단 4개 기능 카드 */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
-                        {schoolRecordQuickActions.map((action) => (
-                          <button
-                            key={action.id}
-                            type="button"
-                            onClick={() => {
-                              setInput(action.question)
-                              requestAnimationFrame(() => inputTextareaRef.current?.focus())
-                            }}
-                            className="flex items-start gap-3 p-4 rounded-xl border border-gray-200 bg-white hover:border-blue-300 hover:bg-blue-50/30 transition-all text-left group"
-                          >
-                            <span className="inline-flex items-center justify-center w-5 h-5 mt-0.5 text-gray-400 group-hover:text-blue-500 transition-colors">
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 17L17 7M17 7H7M17 7V17" />
-                              </svg>
-                            </span>
-                            <div className="flex-1 min-w-0">
-                              <h4 className="text-sm font-semibold text-gray-900 mb-1">{action.title}</h4>
-                              <p className="text-xs text-gray-500 line-clamp-2">{action.description}</p>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-
-                    </div>
-                  )}
 
                   {/* 데스크톱: 이미지 미리보기 */}
                   {imagePreviewUrl && (
@@ -4933,6 +5097,7 @@ export default function ChatPage() {
                   imageUrl={msg.imageUrl}
                   onRegenerate={!msg.isUser && userQuery && index === messages.length - 1 ? () => handleRegenerate(msg.id, userQuery) : undefined}
                   onLoginClick={() => {
+                    setAuthTrigger(AuthTrigger.RateLimitPrompt)
                     trackUserAction('login_modal_open', 'rate_limit_prompt')
                     sessionStorage.setItem('uniroad_login_modal_source', 'rate_limit_prompt')
                     setIsAuthModalOpen(true)
@@ -5356,7 +5521,7 @@ export default function ChatPage() {
                         onClick={() => { void handleToggleSchoolRecordInputMode() }}
                         disabled={isLoading || isInputLocked}
                         className={`inline-flex min-h-[36px] items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-semibold transition-all duration-200 disabled:opacity-50 ${
-                          schoolRecordToolEnabled
+                          isSchoolRecordConsultSelected
                             ? 'border-transparent bg-gradient-to-r from-violet-600 to-fuchsia-600 text-white shadow-[0_8px_24px_rgba(139,92,246,0.18)] hover:brightness-105 hover:shadow-[0_12px_28px_rgba(139,92,246,0.32)]'
                             : 'border-gray-200 bg-white text-gray-600 shadow-sm hover:bg-gray-50 hover:text-gray-800'
                         }`}
@@ -5421,7 +5586,7 @@ export default function ChatPage() {
                     {!isSideNavOpen ? (
                       <button
                         type="button"
-                        onClick={() => setIsSideNavOpen(true)}
+                        onClick={() => { void captureBusinessEvent(TrackingEventNames.sidebarOpen, { category: 'engagement', source: 'chat_input_area' }); setIsSideNavOpen(true) }}
                         className="-ml-1 shrink-0 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg p-2 text-gray-700 transition-colors hover:bg-gray-100 active:bg-gray-200 touch-manipulation"
                         aria-label="메뉴 열기"
                       >
@@ -6459,7 +6624,9 @@ export default function ChatPage() {
                   <button
                     onClick={() => {
                       setIsQuotaExceeded(false)
-                      openProModal()
+                      openProModal(PaywallReason.DailyLimit, {
+                        source: 'quota_modal',
+                      })
                     }}
                     className="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all"
                   >
@@ -6485,7 +6652,13 @@ export default function ChatPage() {
             {/* 헤더 */}
             <div className="p-6 sm:p-7 border-b border-gray-100 relative">
               <button
-                onClick={() => setIsProModalOpen(false)}
+                onClick={() => {
+                  void captureBusinessEvent(TrackingEventNames.paywallDismissed, { category: 'revenue', source: 'pro_modal_close', ...priceVariantProps })
+                  setIsProModalOpen(false)
+                  if (isSchoolRecordConsultSelected) {
+                    resetSchoolRecordConsultState()
+                  }
+                }}
                 className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -6521,7 +6694,7 @@ export default function ChatPage() {
                   </div>
                   <div className="flex items-end gap-1.5 shrink-0 whitespace-nowrap">
                     <span className="text-sm text-gray-400 line-through">25,900원</span>
-                    <span className="text-lg font-bold text-gray-900 whitespace-nowrap">7,900원/월</span>
+                    <span className="text-lg font-bold text-gray-900 whitespace-nowrap">{proPrice}원/월</span>
                   </div>
                 </div>
                 <ul className="space-y-2 text-sm text-gray-700">
@@ -6622,7 +6795,7 @@ export default function ChatPage() {
               <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
                 <p className="text-gray-600">가격</p>
                 <p className="text-sm text-gray-400 line-through">25,900원</p>
-                <p className="text-lg font-bold text-gray-900">7,900원</p>
+                <p className="text-lg font-bold text-gray-900">{proPrice}원</p>
                 <p className="text-gray-600 mt-3">입금계좌</p>
                 <p className="font-semibold text-gray-900">3333354523620</p>
                 <p className="text-gray-700">카카오뱅크 (김태훈)</p>
@@ -6965,7 +7138,13 @@ export default function ChatPage() {
         linked={schoolRecordLinked}
         loading={schoolRecordStatusLoading}
         dontAskAgain={skipSchoolRecordToolConfirm}
-        confirmLabel={isSchoolRecordStartPrepared ? '시작하기' : schoolRecordLinked === true ? '새 채팅' : '생기부 연동하기'}
+        confirmLabel={
+          isSchoolRecordStartPrepared
+            ? '시작하기'
+            : schoolRecordLinked === true
+              ? hasProAccess ? '새 채팅' : '시작하기'
+              : '생기부 연동하기'
+        }
         quickActions={schoolRecordStartActions}
         onSelectQuickAction={(actionId) => { void handleSelectSchoolRecordStartAction(actionId) }}
         onToggleDontAskAgain={setSkipSchoolRecordConfirm}
@@ -7562,7 +7741,9 @@ export default function ChatPage() {
             onClick={(e) => {
               const target = e.target as HTMLElement
               if (target.closest('button')) return
-              openProModal()
+              openProModal(PaywallReason.ManualUpgrade, {
+                source: 'pro_popup',
+              })
             }}
           >
             {/* 배경 별 효과 */}

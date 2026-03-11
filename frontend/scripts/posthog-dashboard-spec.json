@@ -1,0 +1,80 @@
+{
+  "dashboard": {
+    "name": "Uniroad Golden Path",
+    "description": "유입, 활성화, 결제, 리텐션 핵심 대시보드"
+  },
+  "cohorts": [
+    {
+      "name": "Paid Users",
+      "description": "결제 완료 이벤트가 1회 이상 있는 사용자",
+      "event": "payment_completed"
+    }
+  ],
+  "insights": [
+    {
+      "name": "Daily Visitors",
+      "type": "trends",
+      "event": "page_view",
+      "breakdown": null
+    },
+    {
+      "name": "Traffic Source Mix",
+      "type": "trends",
+      "event": "page_view",
+      "breakdown": "utm_source"
+    },
+    {
+      "name": "Device Mix",
+      "type": "trends",
+      "event": "page_view",
+      "breakdown": "device_type"
+    },
+    {
+      "name": "Activation Funnel",
+      "type": "funnel",
+      "steps": [
+        "page_view",
+        "chat_message_sent",
+        "login_click",
+        "login_completed"
+      ]
+    },
+    {
+      "name": "Signup Funnel",
+      "type": "funnel",
+      "steps": [
+        "page_view",
+        "auth_modal_view",
+        "signup_click",
+        "signup_completed"
+      ]
+    },
+    {
+      "name": "Revenue Funnel",
+      "type": "funnel",
+      "steps": [
+        "paywall_view",
+        "payment_cta_click",
+        "payment_completed"
+      ],
+      "breakdown": "reason"
+    },
+    {
+      "name": "Feature Usage (Paid Users)",
+      "type": "trends",
+      "events": [
+        "feature_card_click",
+        "school_record_analysis_requested",
+        "score_saved",
+        "payment_completed"
+      ],
+      "cohort": "Paid Users"
+    },
+    {
+      "name": "Paid User Retention",
+      "type": "retention",
+      "event": "page_view",
+      "cohort": "Paid Users"
+    }
+  ]
+}

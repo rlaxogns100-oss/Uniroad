@@ -8,6 +8,8 @@ import {
 } from '../data/adigaSchoolGradeCatalog'
 import { useAuth } from '../contexts/AuthContext'
 import { getApiBaseUrl } from '../config'
+import { captureBusinessEvent } from '../utils/tracking'
+import { TrackingEventNames } from '../utils/trackingSchema'
 
 interface SchoolGradeInputModalProps {
   isOpen: boolean
@@ -1402,6 +1404,11 @@ export default function SchoolGradeInputModal({
       }
 
       if (showLoading) setIsAutofillLoading(true)
+      void captureBusinessEvent(TrackingEventNames.scoreAutofillStarted, {
+        category: 'engagement',
+        source: 'school_grade_input_modal',
+        persist_after_fill: persistAfterFill,
+      })
       try {
         const moveToSchoolRecordLinkPage = () => {
           if (!silentWhenUnavailable) {
@@ -1847,6 +1854,11 @@ export default function SchoolGradeInputModal({
   }
 
   const handleSaveAll = useCallback(() => {
+    void captureBusinessEvent(TrackingEventNames.scoreSaved, {
+      category: 'engagement',
+      source: 'school_grade_input_modal',
+      has_report_card_data: data.hasReportCardData,
+    })
     void saveData(
       data,
       `전체 입력 데이터가 저장되었습니다. 채팅창에서 "${NAESIN_CHAT_MENTION_EXAMPLE}"로 바로 활용할 수 있어요.`
@@ -1990,6 +2002,14 @@ export default function SchoolGradeInputModal({
       return
     }
 
+    void captureBusinessEvent(TrackingEventNames.scoreInputModeSelected, {
+      category: 'engagement',
+      mode: 'overall',
+    })
+    void captureBusinessEvent(TrackingEventNames.scoreSaved, {
+      category: 'engagement',
+      source: 'overall_estimate',
+    })
     void saveData(data, '입력하신 평균으로 학기별 성적을 추산했어요')
     setIsOverallInputLeaving(true)
     if (overallTransitionTimerRef.current !== null) {
@@ -2011,6 +2031,14 @@ export default function SchoolGradeInputModal({
       return
     }
 
+    void captureBusinessEvent(TrackingEventNames.scoreInputModeSelected, {
+      category: 'engagement',
+      mode: 'semester',
+    })
+    void captureBusinessEvent(TrackingEventNames.scoreSaved, {
+      category: 'engagement',
+      source: 'semester_estimate',
+    })
     void saveData(data, '입력하신 성적으로 과목별 상세 입력까지 이어서 도와드릴게요')
     setHasCalculatedResult(true)
     setIsInlineDetailVisible(true)
@@ -2129,7 +2157,14 @@ export default function SchoolGradeInputModal({
                 <p className="text-sm font-semibold text-[#4b5563]">생기부로 3초안에 연동하기</p>
                 <button
                   type="button"
-                  onClick={() => void autofillFromLinkedSchoolRecord({ redirectIfNotLinked: true, persistAfterFill: true })}
+                  onClick={() => {
+                    void captureBusinessEvent(TrackingEventNames.scoreLinkEntryClick, {
+                      category: 'engagement',
+                      source: 'school_grade_input_modal',
+                      interaction_type: 'score_link_start',
+                    })
+                    void autofillFromLinkedSchoolRecord({ redirectIfNotLinked: true, persistAfterFill: true })
+                  }}
                   disabled={isAutofillLoading}
                   className="mt-3 inline-flex h-16 w-full items-center justify-center rounded-2xl bg-[#1f3b61] px-6 text-lg font-extrabold text-white shadow-sm transition-all hover:scale-[1.01] hover:bg-[#162b49] hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-70"
                 >
@@ -2146,6 +2181,11 @@ export default function SchoolGradeInputModal({
               <button
                 type="button"
                 onClick={() => {
+                    void captureBusinessEvent(TrackingEventNames.scoreInputModeSelected, {
+                      category: 'engagement',
+                      mode: 'overall',
+                      source: 'school_grade_input_modal',
+                    })
                     setSelectedInputChoice('overall')
                     setIsOverallEstimateSubmitted(false)
                     setIsOverallInputLeaving(false)
@@ -2173,6 +2213,11 @@ export default function SchoolGradeInputModal({
               <button
                 type="button"
                 onClick={() => {
+                    void captureBusinessEvent(TrackingEventNames.scoreInputModeSelected, {
+                      category: 'engagement',
+                      mode: 'semester',
+                      source: 'school_grade_input_modal',
+                    })
                     setSelectedInputChoice('semester')
                     setIsOverallEstimateSubmitted(false)
                     setIsOverallInputLeaving(false)
@@ -2543,6 +2588,10 @@ export default function SchoolGradeInputModal({
                 type="button"
                 onClick={() => {
                   setIsEstimateToastVisible(false)
+                  void captureBusinessEvent(TrackingEventNames.scoreRecommendationRequested, {
+                    category: 'engagement',
+                    source: 'naesin_toast',
+                  })
                   onUseNaesinSuggestion?.(NAESIN_SCHOOL_RECOMMEND_MENTION)
                 }}
                 className="mt-2 inline-flex h-9 items-center justify-center rounded-xl bg-[#1f3b61] px-3 text-xs font-bold text-white transition-colors hover:bg-[#162b49]"

@@ -1,119 +1,145 @@
-# PostHog 작업 기록
+# PostHog 운영 가이드
 
 ## 목적
-- `uniroad_code_main/frontend`에 PostHog를 연동한다.
-- 로컬에서 이벤트 수집을 검증한다.
-- 광고 차단 우회를 위해 `/ingest` 프록시를 적용한다.
-- PostHog 기본 대시보드를 API로 자동 생성할 수 있게 한다.
+- 프론트의 유입, 활성화, 결제, 리텐션을 PostHog에서 일관되게 본다.
+- `Autocapture`는 탐색용으로 두고, 핵심 KPI는 수동 비즈니스 이벤트로 집계한다.
+- 기존 자체 추적(`/api/tracking/...`)과 PostHog를 병행해 기존 관리자 지표와 비교 가능하게 유지한다.
 
-## 현재 상태 요약
-- 프런트엔드에 `posthog-js`, `@posthog/react` 설치 완료
-- `main.tsx`에서 `PostHogProvider` 연결 완료
-- `tracking.ts`에서 기존 추적 로직과 함께 PostHog 이벤트도 전송하도록 반영 완료
-- `vite.config.ts`에 `/ingest` 프록시 설정 완료
-- PostHog 대시보드 자동 생성 스크립트 작성 및 실행 완료
-- 로컬에서 PostHog 수집 자체는 가능함을 확인
-
-## 이번에 수정한 파일
-- `frontend/package.json`
-  - PostHog 패키지 추가
-- `frontend/.env.local`
-  - PostHog 프로젝트 키/호스트 추가
-  - 민감 정보라 Git에는 올라가지 않음
+## 현재 구성
 - `frontend/src/main.tsx`
-  - `PostHogProvider` 적용
-  - `api_host`를 `/ingest`로 변경
-  - `ui_host`를 `https://us.posthog.com`으로 설정
-- `frontend/src/utils/tracking.ts`
-  - 기존 페이지뷰/행동 추적 시 PostHog `capture`도 함께 호출하도록 추가
-- `frontend/vite.config.ts`
-  - `/ingest/static/` -> `https://us-assets.i.posthog.com/static/`
-  - `/ingest/` -> `https://us.i.posthog.com/`
-- `../setup_dashboard.js`
-  - Personal API Key로 기본 대시보드를 자동 생성하는 스크립트
-
-## 적용한 주요 설정
-### 1. 프런트엔드 PostHog 연결
-- React + Vite 프로젝트 기준으로 연결
-- 앱 루트에서 `PostHogProvider`로 감쌈
-- 초기 설정:
+  - `PostHogProvider` 연결
   - `api_host: '/ingest'`
-  - `ui_host: 'https://us.posthog.com'`
-  - `defaults: '2026-01-30'`
+  - `capture_pageview: false`
+- `frontend/src/utils/tracking.ts`
+  - 공통 컨텍스트 빌드
+  - `trackPageView()`
+  - `trackUserAction()`
+  - `captureBusinessEvent()`
+  - `identifyTrackingUser()`, `resetTrackingUser()`
+- `frontend/src/utils/trackingSchema.ts`
+  - 이벤트 이름, 인증 트리거, 페이월 사유, 결제 수단 상수
+- `backend/routers/tracking.py`
+  - business 이벤트를 `event_type=action_name`으로 저장
+  - `custom_data` 전체를 저장
+- `frontend/scripts/posthog-dashboard-spec.json`
+  - Golden Path 대시보드 스펙
+- `frontend/scripts/setup-posthog-dashboard.mjs`
+  - PostHog 대시보드/인사이트 생성 스크립트
+- `deploy/nginx/posthog-ingest.conf.example`
+  - 운영 `/ingest` 프록시 예시
 
-### 2. 이벤트 전송 연결
-- `initializeTracking()`에서 앱 초기화 이벤트 전송
-- `trackPageView()`에서 `$pageview` 전송
-- `trackUserAction()`에서 액션명을 이벤트 이름으로 전송
+## 핵심 이벤트 스키마
+### Acquisition
+- `page_view`
+- `landing_cta_click`
+- `first_interaction`
+- `feature_card_click`
+- `example_question_click`
 
-### 3. 광고 차단 우회
-- Next.js가 아니라 Vite 프로젝트이므로 `next.config.*` 대신 `vite.config.ts`에 프록시 설정
-- 로컬 개발 환경에서는 `/ingest` 경로로 PostHog 요청이 우회됨
-- 운영 환경에서는 별도 웹서버/nginx 프록시 설정이 추가로 필요함
+### Activation
+- `auth_modal_view`
+- `login_click`
+- `signup_click`
+- `oauth_click`
+- `login_completed`
+- `signup_completed`
+- `chat_blocked_auth_required`
 
-## 확인한 내용
-### 환경변수
-- `frontend/.env.local`에 PostHog 키/호스트 반영됨
-- 번들 결과물에도 값이 포함되는 것 확인
+### Revenue
+- `paywall_view`
+- `payment_cta_click`
+- `payment_method_selected`
+- `payment_started`
+- `payment_completed`
+- `payment_failed`
+- `referral_code_applied`
 
-### 로컬 이벤트 수집
-- 로컬에서 PostHog 이벤트 전송 자체는 가능
-- PostHog 수집 API에 직접 테스트 이벤트 전송 시 `HTTP 200`, `{"status":"Ok"}` 응답 확인
+### Feature Usage
+- `chat_first_message`
+- `chat_message_sent`
+- `school_record_entry_click`
+- `school_record_pdf_upload_started`
+- `school_record_pdf_upload_succeeded`
+- `school_record_pdf_upload_failed`
+- `school_record_saved`
+- `school_record_analysis_requested`
+- `score_link_entry_click`
+- `score_input_mode_selected`
+- `score_autofill_started`
+- `score_saved`
+- `score_recommendation_requested`
 
-### 참고
-- 브라우저 콘솔에서 `window.posthog?.capture(...)` 결과가 `undefined`로 보이는 것은 실패 의미가 아님
-- 함수 반환값이 없어서 그렇게 보일 수 있음
+## 공통 속성
+- `session_id`
+- `entry_url`
+- `utm_source`, `utm_medium`, `utm_campaign`, `utm_content`, `utm_term`
+- `page_path`, `page_type`
+- `is_logged_in`
+- `user_id`
+- `user_type`
+- `is_internal`
+- `auth_trigger`
+- `first_interaction_type`
 
-## 대시보드 자동화
-### 스크립트
-- 파일: `../setup_dashboard.js`
-- 실행 방식:
+## 운영 프록시
+운영 서버에서는 `/ingest`를 PostHog US 엔드포인트로 프록시해야 한다.
+
+참고 파일:
+- `deploy/nginx/posthog-ingest.conf.example`
+
+적용 순서:
+1. `/etc/nginx/sites-available/uniroad`의 TLS 서버 블록에 `/ingest/static/`, `/ingest/` location 추가
+2. `sudo nginx -t`
+3. `sudo systemctl reload nginx`
+4. 브라우저 Network 탭에서 `/ingest/*` 요청이 `200` 또는 `304`로 끝나는지 확인
+
+## 대시보드 자동 생성
+실행 위치:
 
 ```bash
-cd "/Users/rlaxogns100/Desktop/Projects/uniroad_renewer"
-POSTHOG_PERSONAL_API_KEY="개인_API_키" node setup_dashboard.js
+cd frontend
+POSTHOG_PROJECT_ID="프로젝트_ID" \
+POSTHOG_PERSONAL_API_KEY="개인_API_키" \
+npm run posthog:setup
 ```
 
-### 생성/확인된 대시보드
-- 대시보드 이름: `기본 대시보드 (자동 생성)`
-- 대시보드 URL: `https://us.posthog.com/project/335960/dashboard/1342741`
+스펙 파일:
+- `frontend/scripts/posthog-dashboard-spec.json`
 
-### 생성된 그래프
-- `기기별 접속 현황 (OS)`
-- `유입 경로`
-- `유저 이동 경로 (Top paths)`
+현재 대시보드 섹션:
+- Daily Visitors
+- Traffic Source Mix
+- Device Mix
+- Activation Funnel
+- Signup Funnel
+- Revenue Funnel
+- Feature Usage (Paid Users)
+- Paid User Retention
 
-### 보안 메모
-- Personal API Key는 파일에 하드코딩하지 않음
-- 실행 시 환경변수로만 주입
-- 문서에도 실제 키 값은 기록하지 않음
+## 데이터 품질 체크리스트
+- `page_view`가 첫 진입에서 1회만 찍히는지 확인
+- 로그인 후 anonymous -> identified user stitching이 되는지 확인
+- 관리자 계정이 `is_internal=true`로 들어오는지 확인
+- `paywall_view.reason`이 `daily_limit`, `deep_analysis`, `thinking`, `subscription_manage`로 잘 분기되는지 확인
+- `payment_method_selected`, `payment_started`, `payment_completed`가 같은 세션에서 이어지는지 확인
+- `school_record_*`, `score_*` 이벤트가 실제 액션과 1:1 대응하는지 확인
+- Supabase `events` 수치와 PostHog 비즈니스 이벤트 수치가 큰 차이 없이 맞는지 확인
 
-## 현재 이슈 / 주의사항
-- 로컬 Vite 서버에서는 `/ingest` 프록시가 동작함
-- 운영 서버에서는 `/ingest` 경로를 PostHog로 넘기는 서버 프록시 설정이 아직 필요함
-- 기존 자체 추적 API(`/api/tracking/...`)는 로컬 백엔드가 없으면 `127.0.0.1:8000` 에러가 날 수 있음
-- 이 에러는 PostHog 수집 자체와는 별개임
-
-## 다음 작업 후보
-- 운영 서버 nginx 또는 프록시 설정에 `/ingest` 라우팅 추가
-- PostHog 대시보드에서 실제 이벤트 유입 재검증
-- 회원가입/로그인/결제 같은 핵심 비즈니스 이벤트를 별도 이름으로 정리
-- `tracking.ts`의 이벤트 명명 규칙 표준화
-- 필요 시 `debug: true`로 임시 디버깅 후 제거
-- UTM / 캠페인 / 랜딩 페이지 중심 인사이트 추가
+## 주의사항
+- Autocapture와 수동 이벤트를 모두 켜두므로 KPI는 수동 이벤트 기준으로 본다.
+- 버튼 텍스트 기반 분석은 금지하고 `cta_id`, `reason`, `payment_method` 같은 안정 속성으로 본다.
+- 운영 지표에서는 항상 `is_internal != true` 조건을 적용한다.
+- 브라우저 개발 모드에서는 React Strict Mode 영향으로 로컬에서 effect가 중복 실행될 수 있으므로 실제 집계는 운영 환경 기준으로 검증한다.
 
 ## 작업 로그
 ### 2026-03-09
 - PostHog React SDK 설치
 - `main.tsx`에 Provider 연결
-- `.env.local`에 PostHog 설정 추가
-- `tracking.ts`에 PostHog capture 연결
-- 로컬 dev 서버에서 이벤트 검증 시도
-- PostHog 직접 capture API 테스트 성공
-- `setup_dashboard.js` 작성 및 기본 대시보드 생성
-- `/ingest` 프록시 방식으로 광고 차단 우회 설정 반영
+- `/ingest` Vite 프록시 설정
 
-## 이후 기록 규칙
-- 새 작업을 하면 날짜별로 `작업 로그` 섹션에 추가
-- 민감한 키/토큰/비밀번호는 절대 문서에 직접 기록하지 않음
-- 변경 파일, 목적, 검증 결과, 남은 이슈를 같이 기록
+### 2026-03-10
+- `tracking.ts`에 비즈니스 이벤트 래퍼 추가
+- 페이지뷰 중복 제거 및 `identify/reset` 도입
+- 랜딩/채팅/인증/생기부/점수연동/결제 핵심 이벤트 계측
+- 대시보드 스펙 및 생성 스크립트를 저장소 안으로 이동
+- 운영 Nginx용 `/ingest` 프록시 예시 파일 추가
