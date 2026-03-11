@@ -4598,6 +4598,30 @@ def _infer_accepted_record_type(area: str, source_kind: str) -> str:
     return "기타"
 
 
+_EXCERPT_PAIR_SYSTEM_PROMPT = """\
+당신은 학교생활기록부(생기부) 비교 분석 전문가입니다.
+사용자의 생기부 항목(세특/창체/행특)과 합격자의 생기부 항목을 받아,
+가장 적절한 비교 쌍을 만들어야 합니다.
+
+## 매칭 원칙 (우선순위 순)
+1. **과목/영역 일치**: 같은 교과 계열끼리 매칭 (예: 사용자 수학I ↔ 합격자 고급수학I, 사용자 영어 ↔ 합격자 심화영어I)
+2. **기록 유형 일치**: 세특은 세특끼리, 창체(자율/동아리/진로)는 창체끼리
+3. **학년 일치**: 같은 학년끼리 매칭하면 더 좋음
+4. **내용 관련성**: 탐구 주제나 활동 내용이 유사하면 가산
+
+## 금지 사항
+- 과목이 완전히 다른 세특끼리 매칭하지 마라 (예: 수학 ↔ 체육, 영어 ↔ 음악)
+- 같은 합격자 항목을 중복 사용하지 마라
+- 매칭할 적절한 항목이 없으면 억지로 만들지 마라
+
+## 출력 형식
+반드시 JSON으로 출력하라:
+{"pairs": [{"user_idx": 0, "accepted_idx": 2}, {"user_idx": 1, "accepted_idx": 5}]}
+- user_idx: 사용자 항목 번호 (0부터 시작)
+- accepted_idx: 합격자 항목 번호 (0부터 시작)
+"""
+
+
 def _build_excerpt_pairs_for_case(
     *,
     case_snippets: list[Dict[str, Any]],
@@ -4621,6 +4645,109 @@ def _build_excerpt_pairs_for_case(
     if not ranked_case_snippets:
         ranked_case_snippets = case_snippets
 
+    llm_pairs = _llm_match_excerpt_pairs(
+        user_snippets=user_selected_snippets[:target_count],
+        case_snippets=ranked_case_snippets,
+        target_count=target_count,
+    )
+    if llm_pairs:
+        return llm_pairs
+
+    return _rule_based_excerpt_pairs(
+        ranked_case_snippets=ranked_case_snippets,
+        user_selected_snippets=user_selected_snippets,
+        query_tokens=query_tokens,
+        grade_scope=grade_scope,
+        record_scope=record_scope,
+        comparison_mode=comparison_mode,
+        target_count=target_count,
+    )
+
+
+def _llm_match_excerpt_pairs(
+    *,
+    user_snippets: list[Dict[str, Any]],
+    case_snippets: list[Dict[str, Any]],
+    target_count: int,
+) -> list[Dict[str, Any]]:
+    """LLM에게 사용자/합격자 스니펫 목록을 주고 최적 페어링을 받는다."""
+    user_summaries = []
+    for i, s in enumerate(user_snippets):
+        label = str(s.get("label") or "").strip()
+        text_preview = str(s.get("text") or "").strip()[:120]
+        user_summaries.append(f"[U{i}] {label}: {text_preview}...")
+
+    case_summaries = []
+    for i, s in enumerate(case_snippets[:30]):
+        label = str(s.get("label") or "").strip()
+        text_preview = str(s.get("text") or "").strip()[:120]
+        case_summaries.append(f"[A{i}] {label}: {text_preview}...")
+
+    user_prompt = (
+        f"## 사용자 생기부 항목 ({len(user_summaries)}개)\n"
+        + "\n".join(user_summaries)
+        + f"\n\n## 합격자 생기부 항목 ({len(case_summaries)}개)\n"
+        + "\n".join(case_summaries)
+        + f"\n\n위 항목들에서 최대 {target_count}개의 비교 쌍을 만들어 주세요."
+    )
+
+    result = _generate_json_with_gemini(
+        system_prompt=_EXCERPT_PAIR_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        model_name=DEEP_CHAT_MODEL,
+        max_output_tokens=1024,
+    )
+
+    if not result or "pairs" not in result:
+        return []
+
+    raw_pairs = result.get("pairs") or []
+    if not isinstance(raw_pairs, list):
+        return []
+
+    excerpt_pairs: list[Dict[str, Any]] = []
+    used_accepted: set[int] = set()
+    for pair_idx, pair_data in enumerate(raw_pairs[:target_count], start=1):
+        if not isinstance(pair_data, dict):
+            continue
+        u_idx = pair_data.get("user_idx")
+        a_idx = pair_data.get("accepted_idx")
+        if not isinstance(u_idx, int) or not isinstance(a_idx, int):
+            continue
+        if u_idx < 0 or u_idx >= len(user_snippets):
+            continue
+        if a_idx < 0 or a_idx >= len(case_snippets):
+            continue
+        if a_idx in used_accepted:
+            continue
+        used_accepted.add(a_idx)
+
+        user_s = user_snippets[u_idx]
+        case_s = case_snippets[a_idx]
+        excerpt_pairs.append({
+            "pair_id": f"pair-{pair_idx}",
+            "user_excerpt_label": str(user_s.get("label") or "사용자 발췌").strip(),
+            "user_excerpt": str(user_s.get("text") or "").strip(),
+            "accepted_excerpt_label": str(case_s.get("label") or "합격자 발췌").strip(),
+            "accepted_excerpt": str(case_s.get("text") or "").strip(),
+            "pair_comment": "",
+            "_match_score": 1.0,
+        })
+
+    return excerpt_pairs if excerpt_pairs else []
+
+
+def _rule_based_excerpt_pairs(
+    *,
+    ranked_case_snippets: list[Dict[str, Any]],
+    user_selected_snippets: list[Dict[str, Any]],
+    query_tokens: list[str],
+    grade_scope: list[str],
+    record_scope: list[str],
+    comparison_mode: str,
+    target_count: int,
+) -> list[Dict[str, Any]]:
+    """LLM 페어링 실패 시 규칙 기반 폴백."""
     excerpt_pairs: list[Dict[str, Any]] = []
     used_case_indexes: Dict[int, int] = {}
 
