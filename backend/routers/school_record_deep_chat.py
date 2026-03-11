@@ -5071,9 +5071,10 @@ def _build_accepted_case_candidates(
     selected_cases = ranked_cases[: max(ACCEPTED_CASE_MAX_CANDIDATES * 2, 6)]
     candidates: list[Dict[str, Any]] = []
 
-    for _, case_id, case_data, case_snippets in selected_cases:
+    def _process_one_case(entry):
+        _, case_id, case_data, case_snippets_local = entry
         excerpt_pairs = _build_excerpt_pairs_for_case(
-            case_snippets=case_snippets,
+            case_snippets=case_snippets_local,
             user_selected_snippets=user_selected_snippets,
             query_tokens=query_tokens,
             grade_scope=grade_scope,
@@ -5082,43 +5083,51 @@ def _build_accepted_case_candidates(
             target_count=target_count,
         )
         if not excerpt_pairs:
-            continue
+            return None
 
         personal_info = case_data.get("personal_info") or {}
         case_label = str(personal_info.get("대상") or case_id).strip() or case_id
         pair_score = sum(float(pair.get("_match_score", 0.0) or 0.0) for pair in excerpt_pairs) / max(len(excerpt_pairs), 1)
-        candidates.append(
-            {
-                "case_id": case_id,
-                "label": case_label,
-                "comparison_mode": comparison_mode,
-                "comparison_axis": _build_comparison_axis_label(comparison_mode, grade_scope, record_scope),
-                "_candidate_score": pair_score + _score_text_overlap(query_tokens, case_label),
-                "meta": {
-                    "주요_특징": str(personal_info.get("주요_특징") or "").strip(),
-                    "총평": str(personal_info.get("총평") or "").strip(),
-                },
-                "excerpt_pairs": [
-                    {
-                        key: value
-                        for key, value in pair.items()
-                        if key != "_match_score"
-                    }
-                    for pair in excerpt_pairs
-                ],
-                "accepted_comment_excerpt": _truncate_text(
-                    next(
-                        (
-                            snippet.get("text", "")
-                            for snippet in case_snippets
-                            if str(snippet.get("label", "")).startswith("코멘트 / ")
-                        ),
-                        str(personal_info.get("총평") or ""),
+        return {
+            "case_id": case_id,
+            "label": case_label,
+            "comparison_mode": comparison_mode,
+            "comparison_axis": _build_comparison_axis_label(comparison_mode, grade_scope, record_scope),
+            "_candidate_score": pair_score + _score_text_overlap(query_tokens, case_label),
+            "meta": {
+                "주요_특징": str(personal_info.get("주요_특징") or "").strip(),
+                "총평": str(personal_info.get("총평") or "").strip(),
+            },
+            "excerpt_pairs": [
+                {
+                    key: value
+                    for key, value in pair.items()
+                    if key != "_match_score"
+                }
+                for pair in excerpt_pairs
+            ],
+            "accepted_comment_excerpt": _truncate_text(
+                next(
+                    (
+                        snippet.get("text", "")
+                        for snippet in case_snippets_local
+                        if str(snippet.get("label", "")).startswith("코멘트 / ")
                     ),
-                    500,
+                    str(personal_info.get("총평") or ""),
                 ),
-            }
-        )
+                500,
+            ),
+        }
+
+    with ThreadPoolExecutor(max_workers=min(len(selected_cases), 4)) as executor:
+        futures = {executor.submit(_process_one_case, entry): entry for entry in selected_cases}
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+                if result is not None:
+                    candidates.append(result)
+            except Exception:
+                pass
 
     candidates.sort(key=lambda item: float(item.get("_candidate_score", 0.0) or 0.0), reverse=True)
     return candidates[:ACCEPTED_CASE_MAX_CANDIDATES]
