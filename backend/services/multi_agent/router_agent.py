@@ -1,7 +1,7 @@
 """
 Router Agent
 - 사용자 질문 → 적절한 함수 호출 결정
-- Model: gemini-2.5-flash-lite
+- Model: gemini-3.1-flash-lite-preview
 """
 
 import google.generativeai as genai
@@ -22,7 +22,7 @@ if GEMINI_API_KEY:
 # ============================================================
 
 ROUTER_CONFIG = {
-    "model": "gemini-2.5-flash-lite",
+    "model": "gemini-3.1-flash-lite-preview",
     "temperature": 0.0,  # 0.0 ~ 2.0 (낮을수록 일관적, 높을수록 창의적)
     "max_output_tokens": 2048
 }
