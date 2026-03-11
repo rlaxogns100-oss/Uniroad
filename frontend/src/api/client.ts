@@ -1599,9 +1599,16 @@ export const migrateMessages = async (
   messages: MigrateMessageItem[],
   browserSessionId: string
 ): Promise<MigrateMessagesResponse> => {
+  const filtered = messages.filter(m => {
+    if (m.role === 'assistant' && /^__[A-Z_]+__$/.test(m.content?.trim() || '')) return false
+    return true
+  })
+  if (filtered.length === 0) {
+    return { session_id: '', message_count: 0, message: 'no valid messages' }
+  }
   const response = await api.post<MigrateMessagesResponse>(
     '/sessions/migrate',
-    { messages, browser_session_id: browserSessionId },
+    { messages: filtered, browser_session_id: browserSessionId },
     { headers: { Authorization: `Bearer ${token}` } }
   )
   return response.data

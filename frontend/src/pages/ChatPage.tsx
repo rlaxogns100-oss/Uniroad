@@ -3546,10 +3546,13 @@ export default function ChatPage() {
             return
           }
           
-          // 스트리밍 봇 메시지를 에러 메시지로 교체
+          // 스트리밍 봇 메시지를 에러 메시지로 교체 (내부 에러 토큰은 사용자 친화 메시지로 변환)
+          const displayError = /^__[A-Z_]+__$/.test(error)
+            ? '죄송합니다. 일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'
+            : error
           setMessages((prev) => prev.map(msg => 
             msg.id === streamingBotMessageId
-              ? { ...msg, text: error }
+              ? { ...msg, text: displayError }
               : msg
           ))
           if (useSchoolRecordForRequest) {
