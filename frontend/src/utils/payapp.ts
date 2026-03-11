@@ -27,6 +27,7 @@ interface OpenPayAppCheckoutOptions {
   buyerId?: string
   var1?: string
   directWebPay?: boolean
+  feedbackUrl?: string
 }
 
 const PAYAPP_PAY_URL = 'https://lite.payapp.kr/pay'
@@ -70,6 +71,8 @@ function buildPayAppParams(options: OpenPayAppCheckoutOptions): PayAppParams {
     smsuse: options.directWebPay ? 'n' : undefined,
     memo: options.memo?.trim(),
     returnurl: options.returnUrl?.trim(),
+    feedbackurl: options.feedbackUrl?.trim(),
+    checkretry: options.feedbackUrl ? 'y' : undefined,
     buyerid: options.buyerId?.trim(),
     var1: options.var1?.trim(),
   })

@@ -31,6 +31,7 @@ def _to_str(value: Any) -> str:
 class BankTransferSubmitRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=40)
     phone: str = Field(..., min_length=8, max_length=20)
+    amount: int = Field(7900, ge=1000)
 
 
 class CardCheckoutAttemptRequest(BaseModel):
@@ -272,7 +273,7 @@ async def submit_bank_transfer(
     item = {
         "name": _to_str(body.name),
         "phone": phone,
-        "amount": 7900,
+        "amount": int(body.amount or 7900),
         "bank_account": "3333354523620",
         "bank_name": "카카오뱅크",
         "account_holder": "김태훈",
@@ -563,29 +564,69 @@ async def gumroad_webhook(request: Request):
 @router.post("/payapp/feedback")
 async def payapp_feedback(request: Request):
     """
-    PayApp 운영 검증용 feedbackurl 골격.
-    - 로컬 단계에서는 사용하지 않음
-    - 운영 공개 URL에서 SUCCESS 응답을 돌려 재시도를 막는다
+    PayApp feedbackurl 엔드포인트.
+    결제 완료(pay_state=4) 시 자동으로 Pro 활성화.
     """
     payload = await _parse_payload(request)
+
     expected_token = _to_str(getattr(settings, "PAYAPP_FEEDBACK_TOKEN", ""))
     incoming_token = _to_str(request.query_params.get("token"))
     if expected_token and incoming_token != expected_token:
         logger.warning("PayApp feedback token 검증 실패")
         raise HTTPException(status_code=403, detail="Invalid PayApp feedback token")
 
+    mul_no = _to_str(payload.get("mul_no"))
+    pay_state = _to_str(payload.get("pay_state"))
+
     logger.info(
-        "PayApp feedback 수신 mul_no=%s pay_state=%s keys=%s",
-        _to_str(payload.get("mul_no")),
-        _to_str(payload.get("pay_state")),
-        sorted(payload.keys()),
+        "PayApp feedback 수신 mul_no=%s pay_state=%s price=%s pay_type=%s var1=%s",
+        mul_no, pay_state,
+        _to_str(payload.get("price")),
+        _to_str(payload.get("pay_type")),
+        _to_str(payload.get("var1")),
     )
+
+    configured_userid = _to_str(getattr(settings, "PAYAPP_USERID", ""))
+    if configured_userid:
+        incoming_userid = _to_str(payload.get("userid"))
+        if incoming_userid and incoming_userid != configured_userid:
+            logger.warning("PayApp feedback userid 불일치: expected=%s got=%s", configured_userid, incoming_userid)
+            return PlainTextResponse("FAIL", status_code=200)
+
+    configured_linkkey = _to_str(getattr(settings, "PAYAPP_LINKKEY", ""))
+    if configured_linkkey:
+        incoming_linkkey = _to_str(payload.get("linkkey"))
+        if incoming_linkkey and incoming_linkkey != configured_linkkey:
+            logger.warning("PayApp feedback linkkey 불일치 mul_no=%s", mul_no)
+            return PlainTextResponse("FAIL", status_code=200)
 
     configured_linkval = _to_str(getattr(settings, "PAYAPP_LINKVAL", ""))
     if configured_linkval:
         incoming_linkval = _to_str(payload.get("linkval"))
         if incoming_linkval and incoming_linkval != configured_linkval:
-            logger.warning("PayApp feedback linkval 불일치 mul_no=%s", _to_str(payload.get("mul_no")))
+            logger.warning("PayApp feedback linkval 불일치 mul_no=%s", mul_no)
             return PlainTextResponse("FAIL", status_code=200)
+
+    if pay_state != "4":
+        logger.info("PayApp feedback 결제완료 아님 pay_state=%s mul_no=%s", pay_state, mul_no)
+        return PlainTextResponse("SUCCESS", status_code=200)
+
+    user_id = _to_str(payload.get("var1"))
+    if not user_id:
+        logger.warning("PayApp feedback var1(user_id) 누락 mul_no=%s", mul_no)
+        return PlainTextResponse("SUCCESS", status_code=200)
+
+    ok = await set_user_premium(user_id, is_premium=True)
+    logger.info("PayApp Pro 활성화 user_id=%s ok=%s mul_no=%s", user_id, ok, mul_no)
+
+    _append_payment_metadata(user_id, "payapp_payments", {
+        "mul_no": mul_no,
+        "price": _to_str(payload.get("price")),
+        "pay_type": _to_str(payload.get("pay_type")),
+        "pay_date": _to_str(payload.get("pay_date")),
+        "pay_state": pay_state,
+        "source": "payapp_feedback",
+        "created_at": datetime.utcnow().isoformat(),
+    })
 
     return PlainTextResponse("SUCCESS", status_code=200)

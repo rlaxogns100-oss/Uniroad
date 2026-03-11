@@ -740,15 +740,24 @@ export default function ChatPage() {
   const [isProModalOpen, setIsProModalOpen] = useState(false)
   const [isApprovalWidgetChoiceOpen, setIsApprovalWidgetChoiceOpen] = useState(false)
   const [isPayAppMethodChoiceOpen, setIsPayAppMethodChoiceOpen] = useState(false)
+  const [isBankTransferExpanded, setIsBankTransferExpanded] = useState(false)
+  const [currentPaywallReason, setCurrentPaywallReason] = useState<string>(PaywallReason.ManualUpgrade)
+  const [currentPaywallSource, setCurrentPaywallSource] = useState<string>('manual')
   const [payAppPhone, setPayAppPhone] = useState('')
-  const [isBankTransferModalOpen, setIsBankTransferModalOpen] = useState(false)
   const [bankTransferName, setBankTransferName] = useState('')
-  const [bankTransferPhone, setBankTransferPhone] = useState('')
   const [bankTransferSubmitting, setBankTransferSubmitting] = useState(false)
+  const [bankAccountCopied, setBankAccountCopied] = useState(false)
   const pricingVariant = useFeatureFlagVariantKey('pricing-test')
   const proPrice = pricingVariant === 'control' ? '2,900' : pricingVariant === 'test' ? '5,900' : '5,900'
   const proPriceNum = pricingVariant === 'control' ? 2900 : pricingVariant === 'test' ? 5900 : 5900
   const priceVariantProps = { price_variant: pricingVariant || 'unknown', price_amount: proPriceNum }
+  const buildRevenueTrackingProps = (overrides: Record<string, any> = {}) => ({
+    category: 'revenue',
+    ...priceVariantProps,
+    paywall_reason: currentPaywallReason,
+    paywall_source: currentPaywallSource,
+    ...overrides,
+  })
   const [dailyQuestionCount, setDailyQuestionCount] = useState<number>(() => {
     // localStorage에서 오늘 질문 횟수 불러오기
     const today = new Date().toDateString()
@@ -759,7 +768,6 @@ export default function ChatPage() {
     }
     return 0
   })
-  const [isQuotaExceeded, setIsQuotaExceeded] = useState(false)
   const DAILY_QUESTION_LIMIT_BASIC = 3
   const DAILY_QUESTION_LIMIT_PRO = 100
   const [isProPopupVisible, setIsProPopupVisible] = useState(true)
@@ -1074,14 +1082,39 @@ export default function ChatPage() {
     metadata?: Record<string, any>
   ) => {
     if (isGalaxySession) return
+    setCurrentPaywallReason(reason)
+    setCurrentPaywallSource(String(metadata?.source || 'manual'))
     void captureBusinessEvent(TrackingEventNames.paywallView, {
-      category: 'revenue',
-      reason,
-      ...priceVariantProps,
+      ...buildRevenueTrackingProps({
+        reason,
+        paywall_reason: reason,
+        paywall_source: String(metadata?.source || 'manual'),
+      }),
       ...metadata,
     })
     setIsProModalOpen(true)
   }
+  const paywallEntryCopy = useMemo(() => {
+    if (currentPaywallReason === PaywallReason.DailyLimit) {
+      return {
+        title: '더 많이 물어보세요!',
+        description: '일상 속 어디서든, 궁금한 모든 걸 물어보세요. 유니로드가 함께할게요.',
+      }
+    }
+    if (
+      currentPaywallReason === PaywallReason.DeepAnalysis ||
+      currentPaywallReason === PaywallReason.SchoolRecordConsult
+    ) {
+      return {
+        title: '내 생활기록부에 대해 물어보세요!',
+        description: '합격자 생기부와 직접 비교하는 전문적인 상담을 커피 한 잔 가격에 이용하세요.',
+      }
+    }
+    return {
+      title: '최고의 AI 컨설턴트와 함께하세요',
+      description: '무제한 질문, 생기부 상담, 국내 최고의 컨설팅을 커피 한 잔 가격에 이용하세요.',
+    }
+  }, [currentPaywallReason])
   const handleThinkingModeSelect = () => {
     if (hasProAccess) {
       setThinkingMode(true)
@@ -1923,6 +1956,17 @@ export default function ChatPage() {
     }
   }, [isSchoolRecordModeUrl, navigate])
 
+  const handleRollingCategorySelect = useCallback((category: string | null) => {
+    if (category !== '생활기록부') {
+      setSchoolRecordToolEnabled(false)
+      schoolRecordModeRef.current = false
+      if (isSchoolRecordModeUrl) {
+        navigate('/chat', { replace: true })
+      }
+    }
+    setSelectedCategory(category)
+  }, [isSchoolRecordModeUrl, navigate])
+
   const handleToggleSchoolRecordInputMode = async () => {
     if (schoolRecordToolEnabled) {
       setSchoolRecordToolEnabled(false)
@@ -1992,35 +2036,67 @@ export default function ChatPage() {
   }
   const openApprovalWidgetChoice = () => {
     void captureBusinessEvent(TrackingEventNames.paymentCtaClick, {
-      category: 'revenue',
-      payment_method: 'approval_widget',
-      source: 'pro_modal',
-      ...priceVariantProps,
+      ...buildRevenueTrackingProps({
+        payment_method: PaymentMethod.ApprovalWidget,
+        source: 'pro_modal_secondary_cta',
+      }),
+    })
+    void captureBusinessEvent(TrackingEventNames.paymentMethodModalView, {
+      ...buildRevenueTrackingProps({
+        payment_method: PaymentMethod.ApprovalWidget,
+        source: 'approval_widget_choice',
+        modal_type: 'approval_widget_choice',
+      }),
     })
     setIsApprovalWidgetChoiceOpen(true)
   }
   const openPayAppMethodChoice = () => {
     void captureBusinessEvent(TrackingEventNames.paymentCtaClick, {
-      category: 'revenue',
-      payment_method: PaymentMethod.PayApp,
-      source: 'pro_modal',
-      ...priceVariantProps,
+      ...buildRevenueTrackingProps({
+        payment_method: PaymentMethod.PayApp,
+        source: 'pro_modal_primary_cta',
+      }),
     })
-    setPayAppPhone((prev) => prev || bankTransferPhone || '')
+    void captureBusinessEvent(TrackingEventNames.paymentMethodModalView, {
+      ...buildRevenueTrackingProps({
+        payment_method: PaymentMethod.PayApp,
+        source: 'payapp_method_choice',
+        modal_type: 'payapp_method_choice',
+      }),
+    })
+    setIsBankTransferExpanded(false)
+    setBankAccountCopied(false)
     setIsPayAppMethodChoiceOpen(true)
+  }
+  const openBankTransferFromSubscriptionChoice = () => {
+    setBankTransferName('')
+    setBankAccountCopied(false)
+    setIsBankTransferExpanded((prev) => {
+      const next = !prev
+      if (next) {
+        void captureBusinessEvent(TrackingEventNames.paymentMethodSelected, {
+          ...buildRevenueTrackingProps({
+            payment_method: PaymentMethod.BankTransfer,
+            source: 'payapp_method_choice',
+            modal_type: 'bank_transfer_dropdown',
+          }),
+        })
+      }
+      return next
+    })
   }
   const openApprovalSimplePayWidget = () => {
     const oneTimeWidgetUrl = import.meta.env.VITE_TOSS_WIDGET_APPROVAL_ONETIME_URL || '/payments/checkout.html'
     void captureBusinessEvent(TrackingEventNames.paymentMethodSelected, {
-      category: 'revenue',
-      payment_method: PaymentMethod.TossSimplePay,
-      ...priceVariantProps,
+      ...buildRevenueTrackingProps({
+        payment_method: PaymentMethod.TossSimplePay,
+      }),
     })
     void captureBusinessEvent(TrackingEventNames.paymentStarted, {
-      category: 'revenue',
-      payment_method: PaymentMethod.TossSimplePay,
-      source: 'approval_widget',
-      ...priceVariantProps,
+      ...buildRevenueTrackingProps({
+        payment_method: PaymentMethod.TossSimplePay,
+        source: 'approval_widget',
+      }),
     })
     openApprovalPaymentWidget(oneTimeWidgetUrl)
     setIsApprovalWidgetChoiceOpen(false)
@@ -2028,15 +2104,15 @@ export default function ChatPage() {
   const openApprovalBillingWidget = () => {
     const billingWidgetUrl = import.meta.env.VITE_TOSS_WIDGET_APPROVAL_BILLING_URL || '/payments/billing.html'
     void captureBusinessEvent(TrackingEventNames.paymentMethodSelected, {
-      category: 'revenue',
-      payment_method: PaymentMethod.TossBilling,
-      ...priceVariantProps,
+      ...buildRevenueTrackingProps({
+        payment_method: PaymentMethod.TossBilling,
+      }),
     })
     void captureBusinessEvent(TrackingEventNames.paymentStarted, {
-      category: 'revenue',
-      payment_method: PaymentMethod.TossBilling,
-      source: 'approval_widget',
-      ...priceVariantProps,
+      ...buildRevenueTrackingProps({
+        payment_method: PaymentMethod.TossBilling,
+        source: 'approval_widget',
+      }),
     })
     openApprovalPaymentWidget(billingWidgetUrl)
     setIsApprovalWidgetChoiceOpen(false)
@@ -2045,85 +2121,131 @@ export default function ChatPage() {
     const selectedMethod = PAYAPP_METHODS[method]
     const normalizedPhone = payAppPhone.replace(/\D/g, '')
     if (normalizedPhone.length < 8) {
+      void captureBusinessEvent(TrackingEventNames.paymentValidationFailed, {
+        ...buildRevenueTrackingProps({
+          payment_method: PaymentMethod.PayApp,
+          source: 'payapp_method_choice',
+          modal_type: 'payapp_method_choice',
+          payapp_method: selectedMethod.openpaytype,
+          validation_field: 'phone',
+          error_message: 'missing_or_invalid_phone',
+        }),
+      })
       alert('웹에서 바로 결제하려면 전화번호를 입력해 주세요.')
       return
     }
     void captureBusinessEvent(TrackingEventNames.paymentMethodSelected, {
-      category: 'revenue',
-      payment_method: PaymentMethod.PayApp,
-      payapp_method: selectedMethod.openpaytype,
-      ...priceVariantProps,
+      ...buildRevenueTrackingProps({
+        payment_method: PaymentMethod.PayApp,
+        payapp_method: selectedMethod.openpaytype,
+      }),
     })
     void captureBusinessEvent(TrackingEventNames.paymentStarted, {
-      category: 'revenue',
-      payment_method: PaymentMethod.PayApp,
-      source: 'payapp_local_test',
-      payapp_method: selectedMethod.openpaytype,
-      ...priceVariantProps,
+      ...buildRevenueTrackingProps({
+        payment_method: PaymentMethod.PayApp,
+        source: 'payapp_method_choice',
+        payapp_method: selectedMethod.openpaytype,
+      }),
     })
     setIsPayAppMethodChoiceOpen(false)
 
     try {
       openPayAppCheckout({
-        goodname: '유니로드 Pro 구독 테스트',
-        price: Number(proPrice) || 7900,
+        goodname: '유니로드 Pro 구독',
+        price: proPriceNum,
         method,
         recvphone: normalizedPhone,
         directWebPay: true,
         returnUrl: typeof window !== 'undefined' ? window.location.href : undefined,
+        feedbackUrl: 'https://uni2road.com/api/v1/payments/payapp/feedback?token=uniroad-payapp-fb-2026',
+        var1: user?.id || '',
       })
     } catch (error) {
       console.error('PayApp 결제창 열기 실패:', error)
       void captureBusinessEvent(TrackingEventNames.paymentFailed, {
-        category: 'revenue',
-        payment_method: PaymentMethod.PayApp,
-        source: 'payapp_local_test',
-        payapp_method: selectedMethod.openpaytype,
-        error_message: error instanceof Error ? error.message : 'payapp_open_failed',
-        ...priceVariantProps,
+        ...buildRevenueTrackingProps({
+          payment_method: PaymentMethod.PayApp,
+          source: 'payapp_method_choice',
+          payapp_method: selectedMethod.openpaytype,
+          error_message: error instanceof Error ? error.message : 'payapp_open_failed',
+        }),
       })
       alert('PayApp 결제창을 열지 못했습니다. 인터넷 연결 또는 판매자 설정을 확인해 주세요.')
     }
   }
-  const subscribeByBankTransfer = () => {
-    void captureBusinessEvent(TrackingEventNames.paymentCtaClick, {
-      category: 'revenue',
-      payment_method: PaymentMethod.BankTransfer,
-      source: 'pro_modal',
-      ...priceVariantProps,
-    })
-    void captureBusinessEvent(TrackingEventNames.paymentMethodSelected, {
-      category: 'revenue',
-      payment_method: PaymentMethod.BankTransfer,
-      ...priceVariantProps,
-    })
-    setBankTransferName(user?.name || '')
-    setBankTransferPhone('')
-    setIsBankTransferModalOpen(true)
+  const copyBankAccountNumber = async () => {
+    try {
+      await navigator.clipboard.writeText('3333354523620')
+      void captureBusinessEvent(TrackingEventNames.paymentInfoCopied, {
+        ...buildRevenueTrackingProps({
+          payment_method: PaymentMethod.BankTransfer,
+          source: 'payapp_method_choice',
+          modal_type: 'bank_transfer_dropdown',
+          copied_field: 'bank_account',
+        }),
+      })
+      setBankAccountCopied(true)
+      window.setTimeout(() => {
+        setBankAccountCopied(false)
+      }, 2000)
+    } catch (error) {
+      console.error('계좌번호 복사 실패:', error)
+      alert('계좌번호 복사에 실패했습니다. 다시 시도해 주세요.')
+    }
   }
 
   const submitBankTransfer = async () => {
+    const normalizedPhone = payAppPhone.replace(/\D/g, '')
     if (!isAuthenticated || !accessToken) {
-      setIsBankTransferModalOpen(false)
+      void captureBusinessEvent(TrackingEventNames.paymentValidationFailed, {
+        ...buildRevenueTrackingProps({
+          payment_method: PaymentMethod.BankTransfer,
+          source: 'payapp_method_choice',
+          modal_type: 'bank_transfer_dropdown',
+          error_message: 'auth_required',
+        }),
+      })
+      setIsPayAppMethodChoiceOpen(false)
       setIsAuthModalOpen(true)
       return
     }
-    if (!bankTransferName.trim()) {
-      alert('이름을 입력해 주세요.')
-      return
-    }
-    if (!bankTransferPhone.trim()) {
+    if (normalizedPhone.length < 8) {
+      void captureBusinessEvent(TrackingEventNames.paymentValidationFailed, {
+        ...buildRevenueTrackingProps({
+          payment_method: PaymentMethod.BankTransfer,
+          source: 'payapp_method_choice',
+          modal_type: 'bank_transfer_dropdown',
+          validation_field: 'phone',
+          error_message: 'missing_phone',
+        }),
+      })
       alert('전화번호를 입력해 주세요.')
       return
     }
+    const promptedName = window.prompt('입금자명을 입력해 주세요.', user?.name || '')
+    if (!promptedName?.trim()) {
+      void captureBusinessEvent(TrackingEventNames.paymentValidationFailed, {
+        ...buildRevenueTrackingProps({
+          payment_method: PaymentMethod.BankTransfer,
+          source: 'payapp_method_choice',
+          modal_type: 'bank_transfer_dropdown',
+          validation_field: 'name',
+          error_message: 'missing_name',
+        }),
+      })
+      return
+    }
+    const submitterName = promptedName.trim()
+    setBankTransferName(submitterName)
 
     setBankTransferSubmitting(true)
     try {
       void captureBusinessEvent(TrackingEventNames.paymentStarted, {
-        category: 'revenue',
-        payment_method: PaymentMethod.BankTransfer,
-        source: 'bank_transfer_modal',
-        ...priceVariantProps,
+        ...buildRevenueTrackingProps({
+          payment_method: PaymentMethod.BankTransfer,
+          source: 'payapp_method_choice',
+          modal_type: 'bank_transfer_dropdown',
+        }),
       })
       const response = await fetch(
         `${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/api/v1/payments/bank-transfer/submit`,
@@ -2134,8 +2256,9 @@ export default function ChatPage() {
             Authorization: `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
-            name: bankTransferName.trim(),
-            phone: bankTransferPhone.trim(),
+            name: submitterName,
+            phone: normalizedPhone,
+            amount: proPriceNum,
           }),
         }
       )
@@ -2143,23 +2266,25 @@ export default function ChatPage() {
         const err = await response.json().catch(() => ({}))
         throw new Error(err?.detail || '무통장입금 신청에 실패했습니다.')
       }
-      setIsBankTransferModalOpen(false)
+      setIsPayAppMethodChoiceOpen(false)
       setIsProModalOpen(false)
       void captureBusinessEvent(TrackingEventNames.paymentCompleted, {
-        category: 'revenue',
-        payment_method: PaymentMethod.BankTransfer,
-        source: 'bank_transfer_modal',
-        ...priceVariantProps,
+        ...buildRevenueTrackingProps({
+          payment_method: PaymentMethod.BankTransfer,
+          source: 'payapp_method_choice',
+          modal_type: 'bank_transfer_dropdown',
+        }),
       })
       alert('신청이 접수되어 Pro가 즉시 적용되었습니다. 관리자가 입금 여부를 확인합니다.')
       window.location.reload()
     } catch (e: any) {
       void captureBusinessEvent(TrackingEventNames.paymentFailed, {
-        category: 'revenue',
-        payment_method: PaymentMethod.BankTransfer,
-        source: 'bank_transfer_modal',
-        error_message: e?.message || 'bank_transfer_failed',
-        ...priceVariantProps,
+        ...buildRevenueTrackingProps({
+          payment_method: PaymentMethod.BankTransfer,
+          source: 'payapp_method_choice',
+          modal_type: 'bank_transfer_dropdown',
+          error_message: e?.message || 'bank_transfer_failed',
+        }),
       })
       alert(e?.message || '무통장입금 신청 중 오류가 발생했습니다.')
     } finally {
@@ -2984,8 +3109,12 @@ export default function ChatPage() {
     const requestsLinkedNaesin = LINKED_NAESIN_TEST_REGEX.test(rawTrimmedMessage)
     const requestsMockExam = MOCK_EXAM_TEST_REGEX.test(rawTrimmedMessage)
     const shouldTreatAsSchoolRecordConsult = isSchoolRecordConsultSelected || requestsSchoolRecord
+    const shouldHandleLinkedNaesin = !shouldTreatAsSchoolRecordConsult && requestsLinkedNaesin
+    const shouldHandleMockExam = !shouldTreatAsSchoolRecordConsult && requestsMockExam
+    const shouldHandleMyScoreAlias =
+      !shouldTreatAsSchoolRecordConsult && MY_SCORE_ALIAS_TEST_REGEX.test(rawTrimmedMessage)
 
-    if (shouldTreatAsSchoolRecordConsult || requestsLinkedNaesin || requestsMockExam || MY_SCORE_ALIAS_TEST_REGEX.test(rawTrimmedMessage)) {
+    if (shouldTreatAsSchoolRecordConsult || shouldHandleLinkedNaesin || shouldHandleMockExam || shouldHandleMyScoreAlias) {
       try {
         const linkedState = await refreshLinkedDataState()
 
@@ -3004,12 +3133,12 @@ export default function ChatPage() {
           return
         }
 
-        if (requestsLinkedNaesin && !linkedState.naesinLinked) {
+        if (shouldHandleLinkedNaesin && !linkedState.naesinLinked) {
           setIsSchoolGradeInputModalOpen(true)
           return
         }
 
-        if (requestsMockExam) {
+        if (shouldHandleMockExam) {
           if (linkedState.scoreSets.length === 0) {
             setIsSchoolGradeInputModalOpen(true)
             return
@@ -3035,17 +3164,17 @@ export default function ChatPage() {
       .replace(MY_SCORE_ALIAS_REPLACE_REGEX, '@내신 성적')
       .replace(MOCK_EXAM_REPLACE_REGEX, '@모의고사')
     const trimmedMessage = messageToSend.trim()
-    const quickExampleResponse = !selectedImage ? getQuickExampleResponse(trimmedMessage) : undefined
+    const quickExampleResponse =
+      !selectedImage && !shouldTreatAsSchoolRecordConsult
+        ? getQuickExampleResponse(trimmedMessage)
+        : undefined
     
     // 일일 질문 횟수 체크 (로그인한 유저만)
     const dailyLimit = hasProAccess ? DAILY_QUESTION_LIMIT_PRO : DAILY_QUESTION_LIMIT_BASIC
     if (isAuthenticated && dailyQuestionCount >= dailyLimit) {
-      void captureBusinessEvent(TrackingEventNames.paywallView, {
-        category: 'revenue',
-        reason: PaywallReason.DailyLimit,
+      openProModal(PaywallReason.DailyLimit, {
         source: 'daily_limit_guard',
       })
-      setIsQuotaExceeded(true)
       return
     }
     
@@ -3124,8 +3253,8 @@ export default function ChatPage() {
       interaction_type: 'chat_message_sent',
       message_length: trimmedMessage.length,
       has_image: Boolean(selectedImage),
-      uses_school_record: requestsSchoolRecord,
-      uses_linked_score: requestsLinkedNaesin || requestsMockExam,
+      uses_school_record: shouldTreatAsSchoolRecordConsult,
+      uses_linked_score: shouldHandleLinkedNaesin || shouldHandleMockExam,
     })
     
     // 타이밍 측정 시작
@@ -3217,11 +3346,11 @@ export default function ChatPage() {
       const hasSchoolRecordMention = SCHOOL_RECORD_MENTION_REGEX.test(normalizedUserInput)
       // 연동 내신 사용 자체는 항상 전달하되,
       // 점수예측 모드에서는 카드 없이 바로 답변하도록 review만 생략한다.
-      const useLinkedNaesinForRequest = hasLinkedNaesinMention
-      const useSchoolRecordForRequest = isSchoolRecordConsultSelected || hasSchoolRecordMention
-      const skipReviewForLinkedNaesin = hasLinkedNaesinMention && scorePredictionMode
+      const useSchoolRecordForRequest = shouldTreatAsSchoolRecordConsult || hasSchoolRecordMention
+      const useLinkedNaesinForRequest = !useSchoolRecordForRequest && hasLinkedNaesinMention
+      const skipReviewForLinkedNaesin = useLinkedNaesinForRequest && scorePredictionMode
       const hasCompactNaesinDigits = /(?:^|[^0-9])(?:[1-9](?:[\s,./|-]*[1-9]){4,5})(?:[^0-9]|$)/.test(normalizedUserInput)
-      const forceShowNaesinCard = (hasLinkedNaesinMention && !skipReviewForLinkedNaesin) || hasCompactNaesinDigits
+      const forceShowNaesinCard = (useLinkedNaesinForRequest && !skipReviewForLinkedNaesin) || hasCompactNaesinDigits
       setPendingSchoolRecordResearchQuery(useSchoolRecordForRequest ? userInput : null)
       
       // 공통 콜백 함수들 정의
@@ -4980,7 +5109,7 @@ export default function ChatPage() {
                         handleSend(question)
                       }}
                       selectedCategory={selectedCategory}
-                      onCategorySelect={setSelectedCategory}
+                      onCategorySelect={handleRollingCategorySelect}
                       onCategoryExpand={(firstQuestion) => setInput(firstQuestion)}
                       schoolRecordLinked={schoolRecordLinked}
                       naesinLinked={scorePredictionNaesinLinked}
@@ -6663,55 +6792,19 @@ export default function ChatPage() {
         userName={user?.name}
       />
 
-      {/* 일일 질문 초과 모달 */}
-      {isQuotaExceeded && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden animate-scaleIn">
-            <div className="p-6 text-center">
-              <div className="w-16 h-16 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                <svg className="w-8 h-8 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-              </div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">오늘의 질문량 끝!</h3>
-              <p className="text-gray-600 mb-1">일일 질문 {hasProAccess ? DAILY_QUESTION_LIMIT_PRO : DAILY_QUESTION_LIMIT_BASIC}회를 모두 사용했어요.</p>
-              <p className="text-sm text-gray-500 mb-6">내일 자정에 초기화됩니다.</p>
-              
-              <div className="space-y-3">
-                {!isAppBuild() && (
-                  <button
-                    onClick={() => {
-                      setIsQuotaExceeded(false)
-                      openProModal(PaywallReason.DailyLimit, {
-                        source: 'quota_modal',
-                      })
-                    }}
-                    className="w-full py-3 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-xl font-semibold hover:from-blue-700 hover:to-purple-700 transition-all"
-                  >
-                    PRO 구독해서 더 많이 쓰기
-                  </button>
-                )}
-                <button
-                  onClick={() => setIsQuotaExceeded(false)}
-                  className="w-full py-2 text-gray-500 hover:text-gray-700 transition-colors text-sm"
-                >
-                  닫기
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* PRO 구독 모달 (Fake Door Test) */}
       {!isAppBuild() && isProModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-fadeIn">
           <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full overflow-hidden animate-scaleIn border border-gray-200">
             {/* 헤더 */}
-            <div className="p-6 sm:p-7 border-b border-gray-100 relative">
+            <div className="p-5 sm:p-6 border-b border-gray-100 relative">
               <button
                 onClick={() => {
-                  void captureBusinessEvent(TrackingEventNames.paywallDismissed, { category: 'revenue', source: 'pro_modal_close', ...priceVariantProps })
+                  void captureBusinessEvent(TrackingEventNames.paywallDismissed, {
+                    ...buildRevenueTrackingProps({
+                      source: 'pro_modal_close',
+                    }),
+                  })
                   setIsProModalOpen(false)
                   if (isSchoolRecordConsultSelected) {
                     resetSchoolRecordConsultState()
@@ -6723,84 +6816,67 @@ export default function ChatPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
               </button>
-              <h2 className="text-2xl font-bold text-gray-900 mb-1">플랜 업그레이드</h2>
-              <p className="text-sm text-gray-600">유니로드 Pro, 최고의 AI 컨설턴트와 함께하세요.</p>
+              <span className="inline-flex items-center rounded-full bg-indigo-50 px-3 py-1 text-sm font-semibold text-indigo-700 mb-3">
+                유니로드 Pro
+              </span>
+              <h2 className="text-[2rem] font-bold text-gray-900 mb-1">{paywallEntryCopy.title}</h2>
+              <p className="text-[1.05rem] text-gray-600 leading-relaxed">
+                {paywallEntryCopy.description.includes('커피 한 잔') ? (
+                  <>
+                    {paywallEntryCopy.description.split('커피 한 잔')[0]}
+                    <strong className="font-bold text-gray-800">커피 한 잔</strong>
+                    {paywallEntryCopy.description.split('커피 한 잔')[1]}
+                  </>
+                ) : (
+                  paywallEntryCopy.description
+                )}
+              </p>
             </div>
 
-            {/* 요금제 비교 카드 */}
-            <div className="p-6 sm:p-7 grid grid-cols-1 md:grid-cols-2 gap-4 border-b border-gray-100">
-              <div className="rounded-2xl border border-gray-200 bg-white p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-xl font-semibold text-gray-900">Basic</h3>
-                  <span className="text-lg font-bold text-emerald-600">무료</span>
-                </div>
-                <ul className="space-y-2 text-sm text-gray-700">
-                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />일일 {DAILY_QUESTION_LIMIT_BASIC}회 AI 상담</li>
-                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />최신 모집 요강</li>
-                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-gray-400" />성적 분석 및 대학 추천</li>
-                </ul>
-              </div>
-
-              <div className="rounded-2xl border-2 border-indigo-200 bg-indigo-50/60 p-5">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <h3 className="text-xl font-semibold text-gray-900">Pro</h3>
-                    <span className="inline-flex flex-col items-center justify-center bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full shrink-0 leading-[1.05]">
-                      <span className="text-[10px] sm:text-[11px] font-semibold whitespace-nowrap">새학기</span>
-                      <span className="text-[10px] sm:text-[11px] font-semibold whitespace-nowrap">특가할인!</span>
-                    </span>
-                  </div>
-                  <div className="flex items-end gap-1.5 shrink-0 whitespace-nowrap">
-                    <span className="text-sm text-gray-400 line-through">25,900원</span>
-                    <span className="text-lg font-bold text-gray-900 whitespace-nowrap">{proPrice}원/월</span>
-                  </div>
-                </div>
-                <ul className="space-y-2 text-sm text-gray-700">
-                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />일일 {DAILY_QUESTION_LIMIT_PRO}회 AI 상담</li>
-                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />심층 분석을 위한 Thinking 모드</li>
-                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />학교생활기록부 완벽 분석</li>
-                  <li className="flex items-center gap-2"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />최신 기능 우선 적용</li>
-                </ul>
+            {/* Pro 핵심 혜택 */}
+            <div className="px-5 sm:px-6 py-4 sm:py-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2">
+                <p className="flex items-start gap-3 text-[1.08rem] sm:text-[1.18rem] font-extrabold tracking-[-0.01em] text-indigo-900">
+                  <span className="mt-[0.45rem] h-2.5 w-2.5 rounded-full bg-indigo-700 shrink-0" />
+                  <span>일일 질문 횟수 3회 -&gt; {DAILY_QUESTION_LIMIT_PRO}회</span>
+                </p>
+                <p className="flex items-start gap-3 text-[1.08rem] sm:text-[1.18rem] font-extrabold tracking-[-0.01em] text-indigo-900">
+                  <span className="mt-[0.45rem] h-2.5 w-2.5 rounded-full bg-indigo-700 shrink-0" />
+                  <span>내 생기부 기반 상담</span>
+                </p>
               </div>
             </div>
 
             {/* 결제 버튼 */}
             <div className="px-6 sm:px-7 pb-6">
               <button
-                onClick={subscribeByBankTransfer}
-                className="w-full min-h-[72px] px-4 py-4 border border-indigo-300 text-indigo-700 rounded-xl font-semibold hover:bg-indigo-50 transition-colors"
+                onClick={openPayAppMethodChoice}
+                className="w-full min-h-[66px] px-5 py-3 bg-gradient-to-r from-indigo-600 via-blue-600 to-cyan-500 text-white rounded-2xl font-semibold hover:from-indigo-700 hover:via-blue-700 hover:to-cyan-600 transition-all shadow-lg shadow-indigo-500/20"
               >
-                무통장입금으로 구독하기
+                <span className="flex items-center justify-between gap-4">
+                  <span className="flex flex-col items-start text-left">
+                    <span className="text-lg sm:text-xl font-bold leading-tight">새학기 특가로 시작하기</span>
+                  </span>
+                  <span className="flex flex-col items-end text-right shrink-0">
+                    <span className="text-xs sm:text-sm text-white/70 line-through">25,900원</span>
+                    <span className="text-base sm:text-lg font-bold text-white">{proPrice}원/월</span>
+                  </span>
+                </span>
               </button>
-              <div className="mt-3 grid grid-cols-2 gap-3">
+              <div className="mt-3 text-xs text-gray-500 text-center flex items-center justify-center gap-3 flex-wrap">
                 <button
                   onClick={applyReferralCode}
-                  className="w-full min-h-[40px] px-4 py-2.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
+                  className="text-xs font-semibold text-indigo-700 hover:text-indigo-900 underline underline-offset-2 transition-colors"
                 >
                   추천인코드
                 </button>
                 <button
                   onClick={openApprovalWidgetChoice}
-                  className="w-full min-h-[40px] px-4 py-2.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
+                  className="text-xs font-semibold text-gray-600 hover:text-gray-900 underline underline-offset-2 transition-colors"
                 >
-                  <span className="inline-flex flex-col items-center leading-tight">
-                    <span>결제위젯</span>
-                    <span className="text-[10px] sm:text-xs whitespace-nowrap">(심사중, 결제되지 않음)</span>
-                  </span>
+                  결제위젯 (심사중, 결제되지 않음)
                 </button>
               </div>
-              <button
-                onClick={openPayAppMethodChoice}
-                className="mt-3 w-full min-h-[40px] px-4 py-2.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
-              >
-                <span className="inline-flex flex-col items-center leading-tight">
-                  <span>PayApp 결제 테스트</span>
-                  <span className="text-[10px] sm:text-xs whitespace-nowrap">(로컬 확인용)</span>
-                </span>
-              </button>
-              <p className="mt-3 text-xs text-gray-500 text-center">
-                로컬에서는 결제 완료 반영 없이 결제창 동작과 카드/간편결제 노출만 확인합니다.
-              </p>
             </div>
           </div>
         </div>
@@ -6812,11 +6888,19 @@ export default function ChatPage() {
           <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-gray-200">
             <div className="p-5 border-b border-gray-100 flex items-start justify-between gap-4">
               <div>
-                <h3 className="text-xl font-bold text-gray-900">PayApp 수단별 테스트</h3>
-                <p className="text-sm text-gray-600 mt-1">먼저 카드만 확인한 뒤 간편결제를 하나씩 테스트하세요.</p>
+                <h3 className="text-xl font-bold text-gray-900">결제 방식 선택</h3>
               </div>
               <button
-                onClick={() => setIsPayAppMethodChoiceOpen(false)}
+                onClick={() => {
+                  void captureBusinessEvent(TrackingEventNames.paymentMethodModalDismissed, {
+                    ...buildRevenueTrackingProps({
+                      payment_method: PaymentMethod.PayApp,
+                      source: 'payapp_method_choice_close',
+                      modal_type: 'payapp_method_choice',
+                    }),
+                  })
+                  setIsPayAppMethodChoiceOpen(false)
+                }}
                 className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -6834,7 +6918,7 @@ export default function ChatPage() {
                   placeholder="01012345678"
                 />
                 <p className="mt-2 text-xs text-gray-500">
-                  웹 즉시 결제를 위해 `recvphone`과 `redirectpay=1`을 함께 전송합니다.
+                  결제 확인에 사용할 전화번호를 입력해 주세요.
                 </p>
               </div>
               <button
@@ -6844,27 +6928,62 @@ export default function ChatPage() {
                 카드로 바로 결제
               </button>
               <button
-                onClick={() => openPayAppTestCheckout('kakaopay')}
-                className="w-full py-3.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
-              >
-                카카오페이로 바로 결제
-              </button>
-              <button
                 onClick={() => openPayAppTestCheckout('naverpay')}
                 className="w-full py-3.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
               >
                 네이버페이로 바로 결제
               </button>
-              <button
-                onClick={() => openPayAppTestCheckout('tosspay')}
-                className="w-full py-3.5 border border-gray-200 text-gray-800 rounded-xl font-semibold hover:bg-gray-50 transition-colors"
-              >
-                토스페이로 바로 결제
-              </button>
-              <p className="text-xs text-gray-500 leading-relaxed">
-                브라우저 Network 탭에서 `https://lite.payapp.kr/pay` 요청의 Form Data에 `userid`, `shopname`,
-                `goodname`, `price`, `openpaytype`, `recvphone`, `redirectpay=1`가 들어가는지 먼저 확인해 주세요.
-              </p>
+              <div className="rounded-xl border border-gray-200 overflow-hidden">
+                <button
+                  onClick={openBankTransferFromSubscriptionChoice}
+                  className="relative w-full px-4 py-3.5 flex items-center justify-center text-gray-800 font-semibold hover:bg-gray-50 transition-colors"
+                >
+                  <span className="text-center">무통장입금으로 진행</span>
+                  <svg
+                    className={`absolute right-4 w-5 h-5 text-gray-500 transition-transform ${isBankTransferExpanded ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+                {isBankTransferExpanded && (
+                  <div className="border-t border-gray-200 bg-white px-4 py-3 space-y-2.5">
+                    <p className="text-sm text-gray-700">
+                      아래 계좌로 <strong className="font-bold text-gray-900">{proPrice}원</strong> 입금 후 결제했습니다 버튼을 눌러주세요.
+                    </p>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[15px] font-semibold tracking-tight text-gray-900">
+                        카카오뱅크 3333354523620 (김태훈)
+                      </p>
+                      <button
+                        onClick={() => void copyBankAccountNumber()}
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors shrink-0"
+                        aria-label="계좌번호 복사"
+                        title={bankAccountCopied ? '복사됨' : '계좌번호 복사'}
+                      >
+                        {bankAccountCopied ? (
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                        ) : (
+                          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2h-1M8 7H7a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2v-1M8 7h8" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                    <button
+                      onClick={submitBankTransfer}
+                      disabled={bankTransferSubmitting}
+                      className="w-full py-2.5 bg-gray-900 text-white rounded-xl font-semibold hover:bg-black transition-colors disabled:opacity-60"
+                    >
+                      {bankTransferSubmitting ? '처리 중...' : '결제했습니다'}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -6880,7 +6999,16 @@ export default function ChatPage() {
                 <p className="text-sm text-gray-600 mt-1">승인용 결제 위젯입니다. 실제 결제는 동작하지 않습니다.</p>
               </div>
               <button
-                onClick={() => setIsApprovalWidgetChoiceOpen(false)}
+                onClick={() => {
+                  void captureBusinessEvent(TrackingEventNames.paymentMethodModalDismissed, {
+                    ...buildRevenueTrackingProps({
+                      payment_method: PaymentMethod.ApprovalWidget,
+                      source: 'approval_widget_choice_close',
+                      modal_type: 'approval_widget_choice',
+                    }),
+                  })
+                  setIsApprovalWidgetChoiceOpen(false)
+                }}
                 className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -6900,67 +7028,6 @@ export default function ChatPage() {
                 className="w-full py-3.5 border border-indigo-300 text-indigo-700 rounded-xl font-semibold hover:bg-indigo-50 transition-colors"
               >
                 정기결제
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 무통장입금 신청 모달 */}
-      {!isAppBuild() && isBankTransferModalOpen && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-gray-200">
-            <div className="p-5 border-b border-gray-100 flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-xl font-bold text-gray-900">무통장입금 신청</h3>
-                <p className="text-sm text-gray-600 mt-1">입금 후 결제했습니다 버튼을 눌러주세요.</p>
-              </div>
-              <button
-                onClick={() => setIsBankTransferModalOpen(false)}
-                className="w-8 h-8 flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded-full transition-colors"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 text-sm">
-                <p className="text-gray-600">가격</p>
-                <p className="text-sm text-gray-400 line-through">25,900원</p>
-                <p className="text-lg font-bold text-gray-900">{proPrice}원</p>
-                <p className="text-gray-600 mt-3">입금계좌</p>
-                <p className="font-semibold text-gray-900">3333354523620</p>
-                <p className="text-gray-700">카카오뱅크 (김태훈)</p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">이름</label>
-                <input
-                  value={bankTransferName}
-                  onChange={(e) => setBankTransferName(e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="입금자명"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">전화번호</label>
-                <input
-                  value={bankTransferPhone}
-                  onChange={(e) => setBankTransferPhone(e.target.value)}
-                  className="w-full px-3 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="01012345678"
-                />
-              </div>
-
-              <button
-                onClick={submitBankTransfer}
-                disabled={bankTransferSubmitting}
-                className="w-full py-3 bg-gray-900 text-white rounded-xl font-semibold hover:bg-black transition-colors disabled:opacity-60"
-              >
-                {bankTransferSubmitting ? '처리 중...' : '결제했습니다'}
               </button>
             </div>
           </div>

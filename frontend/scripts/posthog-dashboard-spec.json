@@ -15,19 +15,24 @@
       "name": "Daily Visitors",
       "type": "trends",
       "event": "page_view",
-      "breakdown": null
+      "breakdown": null,
+      "date_from": "-30d"
     },
     {
       "name": "Traffic Source Mix",
       "type": "trends",
       "event": "page_view",
-      "breakdown": "utm_source"
+      "breakdown": "utm_source",
+      "display": "ActionsPie",
+      "date_from": "-30d"
     },
     {
       "name": "Device Mix",
       "type": "trends",
       "event": "page_view",
-      "breakdown": "device_type"
+      "breakdown": "device_type",
+      "display": "ActionsPie",
+      "date_from": "-30d"
     },
     {
       "name": "Activation Funnel",
@@ -37,7 +42,8 @@
         "chat_message_sent",
         "login_click",
         "login_completed"
-      ]
+      ],
+      "date_from": "-30d"
     },
     {
       "name": "Signup Funnel",
@@ -47,7 +53,8 @@
         "auth_modal_view",
         "signup_click",
         "signup_completed"
-      ]
+      ],
+      "date_from": "-30d"
     },
     {
       "name": "Revenue Funnel",
@@ -55,9 +62,74 @@
       "steps": [
         "paywall_view",
         "payment_cta_click",
+        "payment_method_modal_view",
+        "payment_method_selected",
+        "payment_started",
         "payment_completed"
       ],
-      "breakdown": "reason"
+      "breakdown": "paywall_reason",
+      "date_from": "-30d"
+    },
+    {
+      "name": "Paywall Reason Mix",
+      "type": "trends",
+      "event": "paywall_view",
+      "breakdown": "paywall_reason",
+      "display": "ActionsPie",
+      "date_from": "-30d"
+    },
+    {
+      "name": "Payment Method Mix",
+      "type": "trends",
+      "event": "payment_method_selected",
+      "breakdown": "payment_method",
+      "display": "ActionsPie",
+      "date_from": "-30d"
+    },
+    {
+      "name": "Payment Starts by Method",
+      "type": "trends",
+      "event": "payment_started",
+      "breakdown": "payment_method",
+      "display": "ActionsBarValue",
+      "date_from": "-30d"
+    },
+    {
+      "name": "Payment Validation Failures",
+      "type": "trends",
+      "event": "payment_validation_failed",
+      "breakdown": "error_message",
+      "display": "ActionsBarValue",
+      "date_from": "-30d"
+    },
+    {
+      "name": "Payment Modal Dismissals",
+      "type": "trends",
+      "event": "payment_method_modal_dismissed",
+      "breakdown": "modal_type",
+      "display": "ActionsBarValue",
+      "date_from": "-30d"
+    },
+    {
+      "name": "Bank Transfer Journey",
+      "type": "funnel",
+      "steps": [
+        "payment_method_selected",
+        "payment_info_copied",
+        "payment_started",
+        "payment_completed"
+      ],
+      "date_from": "-30d",
+      "properties": [
+        {
+          "key": "payment_method",
+          "value": [
+            "bank_transfer"
+          ],
+          "operator": "exact",
+          "type": "event"
+        }
+      ]
     },
     {
       "name": "Feature Usage (Paid Users)",
@@ -68,13 +140,15 @@
         "score_saved",
         "payment_completed"
       ],
-      "cohort": "Paid Users"
+      "cohort": "Paid Users",
+      "date_from": "-30d"
     },
     {
       "name": "Paid User Retention",
       "type": "retention",
       "event": "page_view",
-      "cohort": "Paid Users"
+      "cohort": "Paid Users",
+      "date_from": "-30d"
     }
   ]
 }

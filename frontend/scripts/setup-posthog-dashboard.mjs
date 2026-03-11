@@ -37,6 +37,17 @@ async function request(method, apiPath, body) {
   return response.json()
 }
 
+const INTERNAL_FILTER = {
+  key: 'is_internal',
+  value: ['false'],
+  operator: 'exact',
+  type: 'event',
+}
+
+function mergeProperties(properties = []) {
+  return [INTERNAL_FILTER, ...properties]
+}
+
 function buildTrendFilters(insight) {
   const events = insight.events
     ? insight.events.map((eventName, index) => ({
@@ -56,17 +67,12 @@ function buildTrendFilters(insight) {
 
   return {
     insight: 'TRENDS',
-    display: insight.breakdown ? 'ActionsBarValue' : 'ActionsLineGraph',
+    display: insight.display || (insight.breakdown ? 'ActionsBarValue' : 'ActionsLineGraph'),
     events,
     breakdown: insight.breakdown || undefined,
-    properties: [
-      {
-        key: 'is_internal',
-        value: ['false'],
-        operator: 'exact',
-        type: 'event',
-      },
-    ],
+    breakdown_type: insight.breakdown ? (insight.breakdown_type || 'event') : undefined,
+    date_from: insight.date_from || '-30d',
+    properties: mergeProperties(insight.properties),
   }
 }
 
@@ -81,14 +87,9 @@ function buildFunnelFilters(insight) {
       type: 'events',
     })),
     breakdown: insight.breakdown || undefined,
-    properties: [
-      {
-        key: 'is_internal',
-        value: ['false'],
-        operator: 'exact',
-        type: 'event',
-      },
-    ],
+    breakdown_type: insight.breakdown ? (insight.breakdown_type || 'event') : undefined,
+    date_from: insight.date_from || '-30d',
+    properties: mergeProperties(insight.properties),
   }
 }
 
@@ -105,14 +106,20 @@ function buildRetentionFilters(insight) {
       name: insight.event,
       type: 'events',
     },
-    properties: [
-      {
-        key: 'is_internal',
-        value: ['false'],
-        operator: 'exact',
-        type: 'event',
-      },
-    ],
+    date_from: insight.date_from || '-30d',
+    properties: mergeProperties(insight.properties),
+  }
+}
+
+function buildPathsFilters(insight) {
+  return {
+    insight: 'PATHS',
+    path_type: insight.path_type || 'custom_event',
+    start_point: insight.start_point || undefined,
+    end_point: insight.end_point || undefined,
+    step_limit: insight.step_limit || 5,
+    date_from: insight.date_from || '-30d',
+    properties: mergeProperties(insight.properties),
   }
 }
 
@@ -122,6 +129,8 @@ function buildInsightPayload(insight) {
     filters = buildFunnelFilters(insight)
   } else if (insight.type === 'retention') {
     filters = buildRetentionFilters(insight)
+  } else if (insight.type === 'paths') {
+    filters = buildPathsFilters(insight)
   } else {
     filters = buildTrendFilters(insight)
   }
@@ -156,6 +165,21 @@ async function createInsight(insight) {
   return request('POST', `/api/projects/${POSTHOG_PROJECT_ID}/insights/`, payload)
 }
 
+async function updateInsight(insightId, insight) {
+  const payload = buildInsightPayload(insight)
+  return request('PATCH', `/api/projects/${POSTHOG_PROJECT_ID}/insights/${insightId}/`, payload)
+}
+
+async function findInsightByName(name) {
+  const existing = await request(
+    'GET',
+    `/api/projects/${POSTHOG_PROJECT_ID}/insights/?search=${encodeURIComponent(name)}&limit=20`
+  )
+  return Array.isArray(existing?.results)
+    ? existing.results.find((item) => item.name === name && !item.deleted)
+    : null
+}
+
 async function attachInsightToDashboard(insightId, dashboardId) {
   return request('PATCH', `/api/projects/${POSTHOG_PROJECT_ID}/insights/${insightId}/`, {
     dashboards: [dashboardId],
@@ -166,11 +190,15 @@ async function main() {
   const dashboard = await ensureDashboard()
   console.log(`Dashboard: ${dashboard.name} (#${dashboard.id})`)
 
-  for (const [index, insight] of spec.insights.entries()) {
-    const created = await createInsight(insight)
-    console.log(`Insight created: ${created.name} (#${created.id})`)
-    await attachInsightToDashboard(created.id, dashboard.id)
-    console.log(`Insight attached: ${created.name} -> dashboard #${dashboard.id}`)
+  for (const insight of spec.insights) {
+    const existing = await findInsightByName(insight.name)
+    const saved = existing
+      ? await updateInsight(existing.id, insight)
+      : await createInsight(insight)
+
+    console.log(`Insight ${existing ? 'updated' : 'created'}: ${saved.name} (#${saved.id})`)
+    await attachInsightToDashboard(saved.id, dashboard.id)
+    console.log(`Insight attached: ${saved.name} -> dashboard #${dashboard.id}`)
   }
 
   console.log('PostHog dashboard setup finished.')

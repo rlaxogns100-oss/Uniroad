@@ -18,6 +18,8 @@ backend/client_secrets.json/
 # Python (Backend)
 # ============================================
 backend/venv/
+backend/.venv/
+backend/.venv311/
 backend/__pycache__/
 backend/**/__pycache__/
 backend/**/*.pyc

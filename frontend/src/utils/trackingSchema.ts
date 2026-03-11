@@ -26,10 +26,14 @@ export const TrackingEventNames = {
   scoreRecommendationRequested: 'score_recommendation_requested',
   paywallView: 'paywall_view',
   paymentCtaClick: 'payment_cta_click',
+  paymentMethodModalView: 'payment_method_modal_view',
+  paymentMethodModalDismissed: 'payment_method_modal_dismissed',
   paymentMethodSelected: 'payment_method_selected',
   paymentStarted: 'payment_started',
   paymentCompleted: 'payment_completed',
   paymentFailed: 'payment_failed',
+  paymentValidationFailed: 'payment_validation_failed',
+  paymentInfoCopied: 'payment_info_copied',
   referralCodeApplied: 'referral_code_applied',
   sidebarOpen: 'sidebar_open',
   newChatClick: 'new_chat_click',
@@ -70,6 +74,7 @@ export const PaywallReason = {
 } as const
 
 export const PaymentMethod = {
+  ApprovalWidget: 'approval_widget',
   BankTransfer: 'bank_transfer',
   TossSimplePay: 'toss_simple_pay',
   TossBilling: 'toss_billing',
