@@ -2,7 +2,7 @@
 Admin Agent 2 - 테스트 평가 전용
 - Router 출력 평가 (5점 만점)
 - Main 답변 평가 (5점 만점)
-- Model: gemini-2.5-flash-lite (빠른 평가용)
+- Model: gemini-3.1-flash-lite-preview (빠른 평가용)
 """
 
 import google.generativeai as genai
@@ -23,7 +23,7 @@ if GEMINI_API_KEY:
 # ============================================================
 
 ADMIN2_CONFIG = {
-    "model": "gemini-2.5-flash-lite",
+    "model": "gemini-3.1-flash-lite-preview",
     "temperature": 0.0,
     "max_output_tokens": 1024
 }

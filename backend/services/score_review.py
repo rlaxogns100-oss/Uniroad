@@ -329,7 +329,7 @@ def _parse_naesin_with_llm(message: str) -> Optional[Dict[str, tuple]]:
 
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel(
-            model_name=os.getenv("GEMINI_NAESIN_MODEL", "gemini-2.0-flash"),
+            model_name=os.getenv("GEMINI_NAESIN_MODEL", "gemini-3.1-flash-lite-preview"),
             system_instruction=NAESIN_LLM_SYSTEM_PROMPT,
         )
         response = model.generate_content(

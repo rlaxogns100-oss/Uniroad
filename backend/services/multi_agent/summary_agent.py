@@ -19,8 +19,8 @@ if GEMINI_API_KEY:
 # Gemini 모델 초기화
 model = None
 try:
-    model = genai.GenerativeModel('gemini-2.5-flash-lite')
-    print("[Summary Agent] Gemini 모델 초기화 완료 (gemini-2.5-flash-lite)")
+    model = genai.GenerativeModel('gemini-3.1-flash-lite-preview')
+    print("[Summary Agent] Gemini 모델 초기화 완료 (gemini-3.1-flash-lite-preview)")
 except Exception as e:
     print(f"[Summary Agent] Gemini 모델 초기화 실패: {e}")
     model = None
