@@ -4306,12 +4306,15 @@ for _grp, _subjects in _SUBJECT_GROUP_DEFS.items():
             _SUBJECT_TO_GROUP[_norm] = _grp
 
 
+_SUBJECT_PREFIX_STRIP = re.compile(r'^(심화|고급|기본|실용|일반)\s*')
+
+
 def _get_subject_group(area: str, text: str = "") -> str:
     """과목명(area) 또는 세특 본문(text)에서 과목 그룹 추론. 비 교과(창체 등)는 ''."""
     a = (area or "").strip()
     if a in _SUBJECT_TO_GROUP:
         return _SUBJECT_TO_GROUP[a]
-    norm = re.sub(r'[\s·ㆍ/()[\]Ⅰ-Ⅴ]+', '', a)
+    norm = re.sub(r'[\s·ㆍ/()[\]]+', '', a)
     roman_map = {"Ⅰ": "I", "Ⅱ": "II", "Ⅲ": "III"}
     for old_r, new_r in roman_map.items():
         norm = norm.replace(old_r, new_r)
@@ -4320,6 +4323,11 @@ def _get_subject_group(area: str, text: str = "") -> str:
     for subj, grp in sorted(_SUBJECT_TO_GROUP.items(), key=lambda x: len(x[0]), reverse=True):
         if norm.startswith(re.sub(r'\s', '', subj)):
             return grp
+    stripped = _SUBJECT_PREFIX_STRIP.sub('', a).strip()
+    if stripped and stripped != a:
+        result = _get_subject_group(stripped)
+        if result:
+            return result
     if a in ("세특", "") and text:
         return _infer_subject_group_from_text(text)
     return ""
