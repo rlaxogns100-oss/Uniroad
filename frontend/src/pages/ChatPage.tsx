@@ -3663,10 +3663,17 @@ export default function ChatPage() {
                   resolve()
                 },
                 (error) => {
+                  const isSessionLost = error?.includes('대기 중인 내신 확인이 없습니다')
                   setMessages((prev) =>
                     prev.map((m) =>
                       m.id === streamingBotMessageId
-                        ? { ...m, text: error || '답변 생성에 실패했습니다.', isStreaming: false }
+                        ? {
+                            ...m,
+                            text: isSessionLost
+                              ? '세션이 갱신되었습니다. 질문을 다시 입력해 주세요.'
+                              : (error || '답변 생성에 실패했습니다.'),
+                            isStreaming: false,
+                          }
                         : m
                     )
                   )
@@ -5261,10 +5268,17 @@ export default function ChatPage() {
                         scrollToBottom()
                       },
                       (error) => {
+                        const isSessionLost = error?.includes('대기 중인 내신 확인이 없습니다')
                         setMessages((prev) =>
                           prev.map((m) =>
                             m.id === messageId
-                              ? { ...m, text: error || '답변 생성에 실패했습니다.', isStreaming: false }
+                              ? {
+                                  ...m,
+                                  text: isSessionLost
+                                    ? '세션이 갱신되었습니다. 질문을 다시 입력해 주세요.'
+                                    : (error || '답변 생성에 실패했습니다.'),
+                                  isStreaming: false,
+                                }
                               : m
                           )
                         )

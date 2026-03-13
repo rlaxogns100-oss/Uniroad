@@ -1680,9 +1680,13 @@ async def chat_stream_continue_after_naesin(
     session_id = request.session_id
     cache_key = get_cache_key(user_id, session_id)
     if cache_key not in conversation_sessions or not conversation_sessions[cache_key]:
-        raise HTTPException(status_code=400, detail="대기 중인 내신 확인이 없습니다.")
+        db_history = await load_history_from_db(session_id, user_id)
+        if db_history:
+            conversation_sessions[cache_key] = db_history
+        else:
+            conversation_sessions[cache_key] = []
     history = conversation_sessions[cache_key]
-    if history[-1]["role"] != "user":
+    if not history or history[-1]["role"] != "user":
         raise HTTPException(status_code=400, detail="대기 중인 내신 확인이 없습니다.")
 
     message = history[-1]["content"]
